@@ -4,6 +4,9 @@ use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 
 mod lexer;
+mod tokens;
+
+use tokens::TokenKind;
 
 fn main() {
 	let mut args = env::args();
@@ -108,48 +111,10 @@ enum TypeDef {
 	Bool,
 }
 
-#[derive(Debug, PartialEq)]
-enum TokenKind {
-	Identifier(IdentId),
-	Integer(i64),
-	Decimal(f64),
+enum NodeKind {}
 
-	// TODO - srenshaw - Add Fixed-Point identifiers
 
-	// FixedF(u8),
-	// FixedD(u8),
 
-	Record,
-	Table,
-	Proc,
-	Return,
-	Bool,
-	True,
-	False,
-	U8, S8,
-	U16, S16,
-	U32, S32,
-	In,
-	If,
-	Else,
-	For,
-	Arrow,
-	At,
-	Semicolon,
-	Comma,
-	Colon, ColonColon, ColonEqual,
-	OParen, CParen,
-	OBrace, CBrace,
-	OBracket, CBracket,
-	Plus,    PlusEqual,
-	Dash,    DashEqual,
-	Star,    StarEqual,
-	Slash,   SlashEqual,
-	Less,    LessEqual,
-	Greater, GreaterEqual,
-	Equal,   EqualEqual,
-	BangEqual,
-	Eof,
 }
 
 enum NodeKind {}
