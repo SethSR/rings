@@ -3,6 +3,7 @@ use std::{env, fmt, fs};
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 
+mod discovery;
 mod lexer;
 mod tokens;
 
@@ -33,7 +34,14 @@ type RowData = Vec<(IdentId, Range<usize>)>;
 pub fn compile(source: String) -> Data {
 	let mut data = Data::new(source);
 	lexer::eval(&mut data);
+	discovery::eval(&mut data);
 	data
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ValueKind {
+	Integer(i64),
+	Decimal(f64),
 }
 
 #[derive(Default)]
@@ -46,8 +54,8 @@ pub struct Data {
 	identifiers: Vec<Range<usize>>,
 	/* Discovery */
 	proc_start: Vec<TokenId>,
-	// val-name -> value
-	values: HashMap<IdentId, i64>,
+	// val-name -> value-kind
+	values: HashMap<IdentId, ValueKind>,
 	// rec-name -> (field, type)*
 	records: HashMap<IdentId, RowData>,
 	tables: HashMap<IdentId, TableData>,
@@ -72,16 +80,25 @@ impl fmt::Display for Data {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		writeln!(f, "=== Rings Compiler ===")?;
 		writeln!(f)?;
-		write!(f, "Tokens:")?;
+
+		if !self.error.is_empty() {
+			writeln!(f, "Error: {}", self.error)?;
+			writeln!(f)?;
+		}
+
+		write!(f, "Tokens:\n ")?;
 		for (token, start) in self.tok_list.iter().zip(self.tok_pos.iter()) {
 			write!(f, " {token:?}[{start}]")?;
 		}
 		writeln!(f)?;
-		write!(f, "Identifiers:")?;
+
+		write!(f, "Identifiers:\n ")?;
 		for (ident_id, identifier) in self.identifiers.iter().enumerate() {
 			write!(f, " [{ident_id}] {}", &self.source[identifier.clone()])?;
 		}
-		writeln!(f)
+		writeln!(f)?;
+
+		Ok(())
 	}
 }
 
@@ -109,12 +126,6 @@ struct ScopeStack(Vec<HashMap<IdentId, NodeId>>);
 enum TypeDef {
 	Int(u8),
 	Bool,
-}
-
-enum NodeKind {}
-
-
-
 }
 
 enum NodeKind {}
