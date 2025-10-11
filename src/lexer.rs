@@ -79,7 +79,7 @@ impl<'a> Lexer<'a> {
 			Some(c) if c.is_numeric() => {
 				self.advance();
 				while let Some(c) = self.peek(0) {
-					if !c.is_numeric() || c != '_' {
+					if !c.is_numeric() && c != '_' {
 						break;
 					}
 					self.advance();
@@ -89,7 +89,7 @@ impl<'a> Lexer<'a> {
 					is_decimal = true;
 					self.advance();
 					while let Some(c) = self.peek(0) {
-						if !c.is_numeric() || c != '_' {
+						if !c.is_numeric() && c != '_' {
 							break;
 						}
 						self.advance();
