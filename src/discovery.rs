@@ -1,5 +1,5 @@
 
-use crate::{Data, RingType, TokenKind, ValueKind};
+use crate::{Data, MemoryLocation, RingType, TokenKind, ValueKind};
 
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
@@ -22,7 +22,7 @@ pub fn eval(data: &mut Data) {
 			} else if TokenKind::Record == cursor.peek(data, 1) {
 				discover_record(cursor, data, ident_id);
 			} else if TokenKind::Table == cursor.peek(data, 1) {
-				todo!("handle table declaration");
+				discover_table(cursor, data, ident_id);
 			}
 		} else if TokenKind::Eof == kind {
 			break;
@@ -139,9 +139,9 @@ fn expect_type(data: &mut Data, kind: TokenKind) -> RingType {
 	}
 }
 
-fn discover_fields(cursor: &mut Cursor, data: &mut Data, end_token: TokenKind) -> crate::RowData {
+fn discover_fields(cursor: &mut Cursor, data: &mut Data) -> crate::RowData {
 	let mut fields = crate::RowData::default();
-	while end_token != cursor.current(data) {
+	while TokenKind::CBrace != cursor.current(data) {
 		let TokenKind::Identifier(field_id) = cursor.current(data) else {
 			error_expected_token(data, "field name", cursor.current(data))
 		};
@@ -176,10 +176,45 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data, ident_id: u64) {
 	cursor.expect(data, TokenKind::ColonColon);
 	cursor.advance(); // skip over the 'record' keyword
 	cursor.expect(data, TokenKind::OBrace);
-	let fields = discover_fields(cursor, data,
-		TokenKind::CBrace);
+	let fields = discover_fields(cursor, data);
 	cursor.expect(data, TokenKind::CBrace);
 	data.records.insert(ident_id, 	fields);
+}
+
+fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: u64) {
+	cursor.expect(data, TokenKind::ColonColon);
+	cursor.advance(); // skip over the 'table' keyword
+	cursor.expect(data, TokenKind::OBracket);
+	let TokenKind::Integer(row_count) = cursor.current(data) else {
+		error_expected_token(data, "table size", cursor.current(data))
+	};
+	if !(0..u32::MAX as i64).contains(&row_count) {
+		error_expected(data, "valid table size", &row_count.to_string())
+	}
+	cursor.advance();
+	cursor.expect(data, TokenKind::CBracket);
+	cursor.expect(data, TokenKind::At);
+	let memory_location = match cursor.current(data) {
+		TokenKind::Identifier(region) => MemoryLocation::Region(region),
+		TokenKind::Integer(address) => {
+			if !(0..u32::MAX as i64).contains(&address) {
+				error_expected(data, "memory region or valid address", &address.to_string())
+			}
+			MemoryLocation::Address(address as u32)
+		}
+		kind => {
+			error_expected_token(data, "memory region or address", kind)
+		}
+	};
+	cursor.advance();
+	cursor.expect(data, TokenKind::OBrace);
+	let row_spec = discover_fields(cursor, data);
+	cursor.expect(data, TokenKind::CBrace);
+	data.tables.insert(ident_id, crate::TableData {
+		row_count: row_count as u32,
+		memory_location,
+		row_spec,
+	});
 }
 
 #[cfg(test)]
@@ -248,6 +283,17 @@ mod can_parse {
 		assert_eq!(data.records[&"b".id()], vec![
 			("c".id(), RingType::Record("a".id())),
 		]);
+	}
+
+	#[test]
+	fn empty_table() {
+		let data = setup("a :: table[10] @ high_work_ram {}");
+		assert_eq!(data.tables.len(), 1);
+		assert_eq!(data.tables[&"a".id()], crate::TableData {
+			row_count: 10,
+			memory_location: MemoryLocation::Region("high_work_ram".id()),
+			row_spec: vec![],
+		});
 	}
 }
 

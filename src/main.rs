@@ -71,6 +71,9 @@ enum ValueKind {
 	Decimal(f64),
 }
 
+// TODO - srenshaw - Need to add Record and Table size calculations, and Table location
+// calculations.
+
 #[derive(Default)]
 pub struct Data {
 	source: Box<str>,
@@ -129,9 +132,16 @@ impl fmt::Display for Data {
 	}
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemoryLocation {
+	Region(IdentId),
+	Address(u32),
+}
+
+#[derive(Debug, PartialEq)]
 struct TableData {
 	row_count: u32,
-	memory_region: IdentId,
+	memory_location: MemoryLocation,
 	row_spec: RowData,
 }
 
