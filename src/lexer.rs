@@ -1,9 +1,10 @@
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::{Data, Identifier, TokenKind};
+use crate::token;
+use crate::identifier::{self, Identifier};
+use crate::{Data, SrcPos};
 
 pub fn eval(data: &mut Data) {
 	let Data {
@@ -13,7 +14,11 @@ pub fn eval(data: &mut Data) {
 		identifiers,
 		..
 	} = data;
-	let mut lexer = Lexer { source, pos: 0 };
+	let mut lexer = Lexer {
+		source,
+		..Default::default()
+	};
+
 	lexer.skip_whitespace_and_comments();
 	while lexer.next(kinds, starts, identifiers) {
 		lexer.skip_whitespace_and_comments();
@@ -23,20 +28,20 @@ pub fn eval(data: &mut Data) {
 #[derive(Default)]
 struct Lexer<'a> {
 	source: &'a str,
-	pos: usize
+	pos: SrcPos,
 }
 
 impl<'a> Lexer<'a> {
 	fn next(&mut self,
-		kinds: &mut Vec<TokenKind>,
-		starts: &mut Vec<usize>,
-		identifiers: &mut HashMap<u64, Range<usize>>,
+		kinds: &mut token::KindList,
+		starts: &mut token::PosList,
+		identifiers: &mut identifier::Map<Range<SrcPos>>,
 	) -> bool {
 		let start = self.pos;
 
 		let kind = match self.peek(0) {
 			None => {
-				kinds.push(TokenKind::Eof);
+				kinds.push(token::Kind::Eof);
 				starts.push(start);
 				return false;
 			}
@@ -50,30 +55,30 @@ impl<'a> Lexer<'a> {
 					self.advance();
 				}
 				match &self.source[start..self.pos] {
-					"return" => TokenKind::Return,
-					"record" => TokenKind::Record,
-					"table" => TokenKind::Table,
-					"proc" => TokenKind::Proc,
-					"bool" => TokenKind::Bool,
-					"true" => TokenKind::True,
-					"false" => TokenKind::False,
-					"in" => TokenKind::In,
-					"if" => TokenKind::If,
-					"else" => TokenKind::Else,
-					"for" => TokenKind::For,
-					"u8" => TokenKind::U8,
-					"s8" => TokenKind::S8,
-					"u16" => TokenKind::U16,
-					"s16" => TokenKind::S16,
-					"u32" => TokenKind::U32,
-					"s32" => TokenKind::S32,
+					"return" => token::Kind::Return,
+					"record" => token::Kind::Record,
+					"table" => token::Kind::Table,
+					"proc" => token::Kind::Proc,
+					"bool" => token::Kind::Bool,
+					"true" => token::Kind::True,
+					"false" => token::Kind::False,
+					"in" => token::Kind::In,
+					"if" => token::Kind::If,
+					"else" => token::Kind::Else,
+					"for" => token::Kind::For,
+					"u8" => token::Kind::U8,
+					"s8" => token::Kind::S8,
+					"u16" => token::Kind::U16,
+					"s16" => token::Kind::S16,
+					"u32" => token::Kind::U32,
+					"s32" => token::Kind::S32,
 
-					_ => {
-						let ident_id = self.source[start..self.pos].id();
+					text => {
+						let ident_id = text.id();
 						if let Entry::Vacant(e) = identifiers.entry(ident_id) {
 							e.insert(start..self.pos);
 						}
-						TokenKind::Identifier(ident_id)
+						token::Kind::Identifier(ident_id)
 					}
 				}
 			}
@@ -102,91 +107,91 @@ impl<'a> Lexer<'a> {
 					let num = text.replace('_', "")
 						.parse::<f64>()
 						.expect("unable to parse decimal");
-					TokenKind::Decimal(num)
+					token::Kind::Decimal(num)
 				} else {
 					let num = text.replace('_', "")
 						.parse::<i64>()
 						.expect("unable to parse integer");
-					TokenKind::Integer(num)
+					token::Kind::Integer(num)
 				}
 			}
 
 			Some('-') => {
 				self.advance();
 				if self.expect('=') {
-					TokenKind::DashEqual
+					token::Kind::DashEqual
 				} else if self.expect('>') {
-					TokenKind::Arrow
+					token::Kind::Arrow
 				} else {
-					TokenKind::Dash
+					token::Kind::Dash
 				}
 			}
 
 			Some(':') => {
 				self.advance();
 				if self.expect(':') {
-					TokenKind::ColonColon
+					token::Kind::ColonColon
 				} else if self.expect('=') {
-					TokenKind::ColonEqual
+					token::Kind::ColonEqual
 				} else {
-					TokenKind::Colon
+					token::Kind::Colon
 				}
 			}
 
 			Some('+') => {
 				self.advance();
-				if self.expect('=') { TokenKind::PlusEqual } else { TokenKind::Plus }
+				if self.expect('=') { token::Kind::PlusEqual } else { token::Kind::Plus }
 			}
 
 			Some('*') => {
 				self.advance();
-				if self.expect('=') { TokenKind::StarEqual } else { TokenKind::Star }
+				if self.expect('=') { token::Kind::StarEqual } else { token::Kind::Star }
 			}
 
 			Some('/') => {
 				self.advance();
-				if self.expect('=') { TokenKind::SlashEqual } else { TokenKind::Slash }
+				if self.expect('=') { token::Kind::SlashEqual } else { token::Kind::Slash }
 			}
 
 			Some('=') => {
 				self.advance();
-				if self.expect('=') { TokenKind::EqualEqual } else { TokenKind::Equal }
+				if self.expect('=') { token::Kind::EqualEqual } else { token::Kind::Equal }
 			}
 
 			Some('!') => {
 				self.advance();
-				if self.expect('=') { TokenKind::BangEqual } else { TokenKind::Eof }
+				if self.expect('=') { token::Kind::BangEqual } else { token::Kind::Eof }
 			}
 
 			Some('<') => {
 				self.advance();
-				if self.expect('=') { TokenKind::LessEqual } else { TokenKind::Less }
+				if self.expect('=') { token::Kind::LessEqual } else { token::Kind::Less }
 			}
 
 			Some('>') => {
 				self.advance();
-				if self.expect('=') { TokenKind::GreaterEqual } else { TokenKind::Greater }
+				if self.expect('=') { token::Kind::GreaterEqual } else { token::Kind::Greater }
 			}
 
-			Some('(') => { self.advance(); TokenKind::OParen }
+			Some('(') => { self.advance(); token::Kind::OParen }
 
-			Some(')') => { self.advance(); TokenKind::CParen }
+			Some(')') => { self.advance(); token::Kind::CParen }
 
-			Some('{') => { self.advance(); TokenKind::OBrace }
+			Some('{') => { self.advance(); token::Kind::OBrace }
 
-			Some('}') => { self.advance(); TokenKind::CBrace }
+			Some('}') => { self.advance(); token::Kind::CBrace }
 
-			Some('[') => { self.advance(); TokenKind::OBracket }
+			Some('[') => { self.advance(); token::Kind::OBracket }
 
-			Some(']') => { self.advance(); TokenKind::CBracket }
+			Some(']') => { self.advance(); token::Kind::CBracket }
 
-			Some(';') => { self.advance(); TokenKind::Semicolon }
+			Some(';') => { self.advance(); token::Kind::Semicolon }
 
-			Some(',') => { self.advance(); TokenKind::Comma }
+			Some(',') => { self.advance(); token::Kind::Comma }
 
-			Some('@') => { self.advance(); TokenKind::At }
+			Some('@') => { self.advance(); token::Kind::At }
 
-			Some(_) => { self.advance(); TokenKind::Eof }
+			Some(_) => { self.advance(); token::Kind::Eof }
 		};
 
 		kinds.push(kind);
@@ -249,13 +254,13 @@ mod can_lex {
 	fn a_simple_program() {
 		let data = setup("main { return 3; }");
 		assert_eq!(data.tok_list, [
-			TokenKind::Identifier("main".id()),
-			TokenKind::OBrace,
-			TokenKind::Return,
-			TokenKind::Integer(3),
-			TokenKind::Semicolon,
-			TokenKind::CBrace,
-			TokenKind::Eof,
+			token::Kind::Identifier("main".id()),
+			token::Kind::OBrace,
+			token::Kind::Return,
+			token::Kind::Integer(3),
+			token::Kind::Semicolon,
+			token::Kind::CBrace,
+			token::Kind::Eof,
 		]);
 		assert_eq!(data.tok_pos, [ 0, 5, 7, 14, 15, 17, 18 ]);
 		assert_eq!(data.identifiers.len(), 1);
@@ -266,10 +271,10 @@ mod can_lex {
 	fn decimal_numbers() {
 		let data = setup("5.6 4. 2_3.4_5");
 		assert_eq!(data.tok_list, [
-			TokenKind::Decimal(5.6),
-			TokenKind::Decimal(4.),
-			TokenKind::Decimal(23.45),
-			TokenKind::Eof,
+			token::Kind::Decimal(5.6),
+			token::Kind::Decimal(4.),
+			token::Kind::Decimal(23.45),
+			token::Kind::Eof,
 		]);
 	}
 }

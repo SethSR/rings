@@ -4,10 +4,9 @@ use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 
 mod discovery;
+mod identifier;
 mod lexer;
-mod tokens;
-
-use tokens::TokenKind;
+mod token;
 
 fn main() {
 	let mut args = env::args();
@@ -22,12 +21,14 @@ fn main() {
 	println!("{data}")
 }
 
-type SrcPos  = usize;
-type TokenId = usize;
-type IdentId = u64;
-type GraphId = usize;
-type ScopeId = usize;
-type NodeId  = usize;
+type SrcPos = usize;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+struct GraphId(usize);
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+struct ScopeId(usize);
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+struct NodeId(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RingType {
@@ -36,8 +37,8 @@ enum RingType {
 	U16, S16,
 	U32, S32,
 	// F16, F32
-	Record(IdentId),
-	Table(IdentId),
+	Record(identifier::Id),
+	Table(identifier::Id),
 	Unit,
 }
 
@@ -47,22 +48,6 @@ pub fn compile(source: Box<str>) -> Data {
 	discovery::eval(&mut data);
 	data
 }
-
-trait Identifier: std::hash::Hash {
-	fn id(&self) -> u64 {
-		use std::hash::{DefaultHasher, Hasher};
-
-		let mut hasher = DefaultHasher::new();
-		self.hash(&mut hasher);
-		hasher.finish()
-	}
-}
-
-impl Identifier for String {}
-impl Identifier for &String {}
-impl Identifier for &mut String {}
-impl Identifier for str {}
-impl Identifier for &str {}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ValueKind {
@@ -78,23 +63,23 @@ pub struct Data {
 	source: Box<str>,
 	error: String,
 	/* Lexer */
-	tok_list: Vec<TokenKind>,
-	tok_pos: Vec<SrcPos>,
-	identifiers: HashMap<u64, Range<usize>>,
+	tok_list: token::KindList,
+	tok_pos: token::PosList,
+	identifiers: identifier::Map<Range<SrcPos>>,
 	/* Discovery */
-	proc_start: Vec<TokenId>,
+	proc_start: identifier::Map<token::Id>,
 	// val-name -> value-kind
-	values: HashMap<IdentId, ValueKind>,
-	procedures: HashMap<IdentId, ProcData>,
+	values: identifier::Map<ValueKind>,
+	procedures: identifier::Map<ProcData>,
 	// rec-name -> (field, type)*
-	records: HashMap<IdentId, RowData>,
-	tables: HashMap<IdentId, TableData>,
+	records: identifier::Map<RowData>,
+	tables: identifier::Map<TableData>,
 	/* Parsing */
 	proc_queue: VecDeque<Task>,
 	node_graphs: Vec<NodeGraph>,
 	scope_stacks: Vec<ScopeStack>,
 	// procedures ready to be inlined and/or lowered
-	ready_procs: HashMap<IdentId, NodeGraph>,
+	ready_procs: identifier::Map<NodeGraph>,
 }
 
 impl Data {
@@ -122,7 +107,7 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
-		write!(f, "Identifiers:\n ")?;
+		write!(f, "identifier::ifiers:\n ")?;
 		for (ident_id, identifier) in self.identifiers.iter() {
 			write!(f, " [{ident_id}] '{}'", &self.source[identifier.clone()])?;
 		}
@@ -134,15 +119,15 @@ impl fmt::Display for Data {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProcData {
-	params: Vec<(IdentId, RingType)>,
+	params: Vec<(identifier::Id, RingType)>,
 	ret_type: RingType,
 }
 
-type RowData = Vec<(IdentId, RingType)>;
+type RowData = Vec<(identifier::Id, RingType)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MemoryLocation {
-	Region(IdentId),
+	Region(identifier::Id),
 	Address(u32),
 }
 
@@ -154,8 +139,8 @@ struct TableData {
 }
 
 struct Task {
-	proc_name: IdentId,
-	tok_pos: SrcPos,
+	proc_name: identifier::Id,
+	tok_pos: token::Id,
 	graph_id: GraphId,
 	scope_id: ScopeId,
 }
@@ -166,12 +151,7 @@ struct NodeGraph {
 	def_uses: Vec<Vec<NodeId>>,
 }
 
-struct ScopeStack(Vec<HashMap<IdentId, NodeId>>);
-
-enum TypeDef {
-	Int(u8),
-	Bool,
-}
+struct ScopeStack(Vec<HashMap<identifier::Id, NodeId>>);
 
 enum NodeKind {}
 

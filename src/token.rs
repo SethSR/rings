@@ -1,9 +1,23 @@
 
-use crate::IdentId;
+use index_vec::IndexVec;
+use index_vec::define_index_type;
+
+use crate::identifier;
+use crate::SrcPos;
+
+pub type KindList = IndexVec<Id, Kind>;
+pub type PosList = IndexVec<Id, SrcPos>;
+
+define_index_type! {
+	pub struct Id = usize;
+	DEFAULT = Id::from_raw_unchecked(0);
+	DEBUG_FORMAT = "tokens::Id({})";
+	DISPLAY_FORMAT = "{}";
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TokenKind {
-	Identifier(IdentId),
+pub enum Kind {
+	Identifier(identifier::Id),
 	Integer(i64),
 	Decimal(f64),
 
