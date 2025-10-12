@@ -1,19 +1,21 @@
 
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::{Data, TokenKind};
+use crate::{Data, Identifier, TokenKind};
 
 pub fn eval(data: &mut Data) {
 	let Data {
 		source,
-		tok_list,
-		tok_pos,
+		tok_list: kinds,
+		tok_pos: starts,
 		identifiers,
 		..
 	} = data;
 	let mut lexer = Lexer { source, pos: 0 };
 	lexer.skip_whitespace_and_comments();
-	while lexer.next(tok_list, tok_pos, identifiers) {
+	while lexer.next(kinds, starts, identifiers) {
 		lexer.skip_whitespace_and_comments();
 	}
 }
@@ -28,7 +30,7 @@ impl<'a> Lexer<'a> {
 	fn next(&mut self,
 		kinds: &mut Vec<TokenKind>,
 		starts: &mut Vec<usize>,
-		identifiers: &mut Vec<Range<usize>>,
+		identifiers: &mut HashMap<u64, Range<usize>>,
 	) -> bool {
 		let start = self.pos;
 
@@ -67,10 +69,10 @@ impl<'a> Lexer<'a> {
 					"s32" => TokenKind::S32,
 
 					_ => {
-						// NOTE - srenshaw - We may want to intern/memoize the strings at some point if we end
-						// up storing tons of duplicates.
-						let ident_id = identifiers.len();
-						identifiers.push(start..self.pos);
+						let ident_id = self.source[start..self.pos].id();
+						if let Entry::Vacant(e) = identifiers.entry(ident_id) {
+							e.insert(start..self.pos);
+						}
 						TokenKind::Identifier(ident_id)
 					}
 				}
@@ -239,8 +241,10 @@ fn can_lex_a_simple_program() {
 	let mut data = Data::new(source.into());
 	eval(&mut data);
 
+	let hash_main = "main".id();
+
 	assert_eq!(data.tok_list, [
-		TokenKind::Identifier(0),
+		TokenKind::Identifier(hash_main),
 		TokenKind::OBrace,
 		TokenKind::Return,
 		TokenKind::Integer(3),
@@ -250,6 +254,20 @@ fn can_lex_a_simple_program() {
 	]);
 	assert_eq!(data.tok_pos, [ 0, 5, 7, 14, 15, 17, 18 ]);
 	assert_eq!(data.identifiers.len(), 1);
-	assert_eq!(data.identifiers[0], 0..4);
+	assert_eq!(data.identifiers[&hash_main], 0..4);
+}
+
+#[test]
+fn can_lex_decimal_numbers() {
+	let source = "5.6 4. 2_3.4_5";
+	let mut data = Data::new(source.into());
+	eval(&mut data);
+
+	assert_eq!(data.tok_list, [
+		TokenKind::Decimal(5.6),
+		TokenKind::Decimal(4.),
+		TokenKind::Decimal(23.45),
+		TokenKind::Eof,
+	]);
 }
 

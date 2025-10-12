@@ -18,25 +18,52 @@ fn main() {
 	let source = fs::read_to_string(file_path)
 		.expect("unable to read source file");
 
-	let data = compile(source);
+	let data = compile(source.into());
 	println!("{data}")
 }
 
 type SrcPos  = usize;
 type TokenId = usize;
-type IdentId = usize;
+type IdentId = u64;
 type GraphId = usize;
 type ScopeId = usize;
 type NodeId  = usize;
 
-type RowData = Vec<(IdentId, Range<usize>)>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RingType {
+	Bool,
+	U8, S8,
+	U16, S16,
+	U32, S32,
+	// F16, F32
+	Record(IdentId),
+	Table(IdentId),
+}
 
-pub fn compile(source: String) -> Data {
+type RowData = Vec<(IdentId, RingType)>;
+
+pub fn compile(source: Box<str>) -> Data {
 	let mut data = Data::new(source);
 	lexer::eval(&mut data);
 	discovery::eval(&mut data);
 	data
 }
+
+trait Identifier: std::hash::Hash {
+	fn id(&self) -> u64 {
+		use std::hash::{DefaultHasher, Hasher};
+
+		let mut hasher = DefaultHasher::new();
+		self.hash(&mut hasher);
+		hasher.finish()
+	}
+}
+
+impl Identifier for String {}
+impl Identifier for &String {}
+impl Identifier for &mut String {}
+impl Identifier for str {}
+impl Identifier for &str {}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ValueKind {
@@ -46,12 +73,12 @@ enum ValueKind {
 
 #[derive(Default)]
 pub struct Data {
-	source: String,
+	source: Box<str>,
 	error: String,
 	/* Lexer */
 	tok_list: Vec<TokenKind>,
 	tok_pos: Vec<SrcPos>,
-	identifiers: Vec<Range<usize>>,
+	identifiers: HashMap<u64, Range<usize>>,
 	/* Discovery */
 	proc_start: Vec<TokenId>,
 	// val-name -> value-kind
@@ -68,7 +95,7 @@ pub struct Data {
 }
 
 impl Data {
-	pub fn new(source: String) -> Self {
+	pub fn new(source: Box<str>) -> Self {
 		Self {
 			source,
 			..Default::default()
@@ -93,8 +120,8 @@ impl fmt::Display for Data {
 		writeln!(f)?;
 
 		write!(f, "Identifiers:\n ")?;
-		for (ident_id, identifier) in self.identifiers.iter().enumerate() {
-			write!(f, " [{ident_id}] {}", &self.source[identifier.clone()])?;
+		for (ident_id, identifier) in self.identifiers.iter() {
+			write!(f, " [{ident_id}] '{}'", &self.source[identifier.clone()])?;
 		}
 		writeln!(f)?;
 
