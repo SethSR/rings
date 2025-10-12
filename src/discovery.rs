@@ -196,69 +196,44 @@ mod can_parse {
 	}
 
 	#[test]
-	fn can_parse_constant_values() {
-		let data = setup("
-	a :: 3;
-	b :: 4.2;
-	");
-
+	fn constant_values() {
+		let data = setup("a :: 3; b :: 4.2;");
 		assert_eq!(data.values.len(), 2);
 		assert_eq!(data.values[&"a".id()], ValueKind::Integer(3), "{data}");
 		assert_eq!(data.values[&"b".id()], ValueKind::Decimal(4.2), "{data}");
 	}
 
 	#[test]
-	fn can_parse_procedure_locations() {
-		let data = setup("
-	main {}
-	a :: proc() {}
-	");
-
-		assert_eq!(data.proc_start.len(), 2);
-		assert_eq!(data.proc_start[0], 0, "{data}");
-		assert_eq!(data.proc_start[1], 3, "{data}");
+	fn procedure_locations() {
+		let data = setup("a :: 5; b :: proc() {}");
+		assert_eq!(data.proc_start.len(), 1);
+		assert_eq!(data.proc_start[0], 4, "{data}");
 	}
 
 	#[test]
-	fn can_parse_empty_record() {
-		let data = setup("
-	main {}
-	a :: record {}
-	");
-
+	fn empty_record() {
+		let data = setup("a :: record {}");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], vec![]);
 	}
 
 	#[test]
-	fn can_parse_record_field_no_trailing_comma() {
-		let data = setup("
-	main {}
-	a :: record { b: u8 }
-	");
-
+	fn record_with_one_field_no_trailing_comma() {
+		let data = setup("a :: record { b: u8 }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], vec![("b".id(), RingType::U8)]);
 	}
 
 	#[test]
-	fn can_parse_record_with_trailing_comma() {
-		let data = setup("
-	main {}
-	a :: record { b: u8, }
-	");
-
+	fn record_with_one_field_and_trailing_comma() {
+		let data = setup("a :: record { b: u8, }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], vec![("b".id(), RingType::U8)]);
 	}
 
 	#[test]
-	fn can_parse_record_multiple_fields() {
-		let data = setup("
-	main {}
-	a :: record { b: u8, c: s16 }
-	");
-
+	fn record_with_multiple_fields() {
+		let data = setup("a :: record { b: u8, c: s16 }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], vec![
 			("b".id(), RingType::U8),
@@ -267,13 +242,8 @@ mod can_parse {
 	}
 
 	#[test]
-	fn can_parse_record_with_user_defined_field() {
-		let data = setup("
-	main {}
-	a :: record {}
-	b :: record { c: a }
-	");
-
+	fn record_with_user_defined_field() {
+		let data = setup("a :: record {} b :: record { c: a }");
 		assert_eq!(data.records.len(), 2);
 		assert_eq!(data.records[&"b".id()], vec![
 			("c".id(), RingType::Record("a".id())),

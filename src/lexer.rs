@@ -235,39 +235,42 @@ impl<'a> Lexer<'a> {
 	}
 }
 
-#[test]
-fn can_lex_a_simple_program() {
-	let source = "main { return 3; }";
-	let mut data = Data::new(source.into());
-	eval(&mut data);
+#[cfg(test)]
+mod can_lex {
+	use super::*;
 
-	let hash_main = "main".id();
+	fn setup(source: &str) -> Data {
+		let mut data = Data::new(source.into());
+		eval(&mut data);
+		data
+	}
 
-	assert_eq!(data.tok_list, [
-		TokenKind::Identifier(hash_main),
-		TokenKind::OBrace,
-		TokenKind::Return,
-		TokenKind::Integer(3),
-		TokenKind::Semicolon,
-		TokenKind::CBrace,
-		TokenKind::Eof,
-	]);
-	assert_eq!(data.tok_pos, [ 0, 5, 7, 14, 15, 17, 18 ]);
-	assert_eq!(data.identifiers.len(), 1);
-	assert_eq!(data.identifiers[&hash_main], 0..4);
-}
+	#[test]
+	fn a_simple_program() {
+		let data = setup("main { return 3; }");
+		assert_eq!(data.tok_list, [
+			TokenKind::Identifier("main".id()),
+			TokenKind::OBrace,
+			TokenKind::Return,
+			TokenKind::Integer(3),
+			TokenKind::Semicolon,
+			TokenKind::CBrace,
+			TokenKind::Eof,
+		]);
+		assert_eq!(data.tok_pos, [ 0, 5, 7, 14, 15, 17, 18 ]);
+		assert_eq!(data.identifiers.len(), 1);
+		assert_eq!(data.identifiers[&"main".id()], 0..4);
+	}
 
-#[test]
-fn can_lex_decimal_numbers() {
-	let source = "5.6 4. 2_3.4_5";
-	let mut data = Data::new(source.into());
-	eval(&mut data);
-
-	assert_eq!(data.tok_list, [
-		TokenKind::Decimal(5.6),
-		TokenKind::Decimal(4.),
-		TokenKind::Decimal(23.45),
-		TokenKind::Eof,
-	]);
+	#[test]
+	fn decimal_numbers() {
+		let data = setup("5.6 4. 2_3.4_5");
+		assert_eq!(data.tok_list, [
+			TokenKind::Decimal(5.6),
+			TokenKind::Decimal(4.),
+			TokenKind::Decimal(23.45),
+			TokenKind::Eof,
+		]);
+	}
 }
 
