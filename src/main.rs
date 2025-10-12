@@ -38,9 +38,8 @@ enum RingType {
 	// F16, F32
 	Record(IdentId),
 	Table(IdentId),
+	Unit,
 }
-
-type RowData = Vec<(IdentId, RingType)>;
 
 pub fn compile(source: Box<str>) -> Data {
 	let mut data = Data::new(source);
@@ -86,6 +85,7 @@ pub struct Data {
 	proc_start: Vec<TokenId>,
 	// val-name -> value-kind
 	values: HashMap<IdentId, ValueKind>,
+	procedures: HashMap<IdentId, ProcData>,
 	// rec-name -> (field, type)*
 	records: HashMap<IdentId, RowData>,
 	tables: HashMap<IdentId, TableData>,
@@ -131,6 +131,14 @@ impl fmt::Display for Data {
 		Ok(())
 	}
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcData {
+	params: Vec<(IdentId, RingType)>,
+	ret_type: RingType,
+}
+
+type RowData = Vec<(IdentId, RingType)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MemoryLocation {

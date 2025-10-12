@@ -1,5 +1,8 @@
 
-use crate::{Data, MemoryLocation, RingType, TokenKind, ValueKind};
+use crate::{
+	Data, IdentId, MemoryLocation, ProcData, RingType, RowData, SrcPos, TableData, TokenKind,
+	ValueKind,
+};
 
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
@@ -12,13 +15,13 @@ pub fn eval(data: &mut Data) {
 
 		if let TokenKind::Identifier(ident_id) = kind {
 			if &data.source[data.identifiers[&ident_id].clone()] == "main" {
-				discover_main_proc(cursor, data, start);
+				discover_main_proc(cursor, data, ident_id, start);
 			} else if let TokenKind::Integer(value) = cursor.peek(data, 1) {
 				discover_integer(cursor, data, ident_id, value);
 			} else if let TokenKind::Decimal(value) = cursor.peek(data, 1) {
 				discover_decimal(cursor, data, ident_id, value);
 			} else if let TokenKind::Proc = cursor.peek(data, 1) {
-				discover_proc(cursor, data, start);
+				discover_proc(cursor, data, ident_id, start);
 			} else if TokenKind::Record == cursor.peek(data, 1) {
 				discover_record(cursor, data, ident_id);
 			} else if TokenKind::Table == cursor.peek(data, 1) {
@@ -50,10 +53,10 @@ fn error_expected_token2(data: &mut Data, expected: TokenKind, found: TokenKind)
 }
 
 #[derive(Default)]
-struct Cursor(usize);
+struct Cursor(SrcPos);
 
 impl Cursor {
-	pub fn index(&self) -> usize {
+	pub fn index(&self) -> SrcPos {
 		self.0
 	}
 
@@ -96,21 +99,30 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) {
 	}
 }
 
-fn discover_main_proc(cursor: &mut Cursor, data: &mut Data, start: usize) {
+fn discover_main_proc(cursor: &mut Cursor, data: &mut Data, ident_id: IdentId, start: SrcPos) {
 	cursor.expect(data, TokenKind::OBrace);
 	check_braces(cursor, data);
+	data.procedures.insert(ident_id, ProcData {
+		params: vec![], // `main` has no parameters 
+		ret_type: RingType::Unit, // `main` has no return type
+	});
 	data.proc_start.push(start);
 }
 
-fn discover_proc(cursor: &mut Cursor, data: &mut Data, start: usize) {
+fn discover_proc(cursor: &mut Cursor, data: &mut Data, ident_id: IdentId, start: SrcPos) {
 	cursor.expect(data, TokenKind::ColonColon);
 	cursor.expect(data, TokenKind::Proc);
 	cursor.expect(data, TokenKind::OParen);
-	// TODO - srenshaw - Handle parameter lists in function declarations
+	let params = discover_fields(cursor, data, TokenKind::CParen);
 	cursor.expect(data, TokenKind::CParen);
 	// TODO - srenshaw - Handle return type declarations
 	cursor.expect(data, TokenKind::OBrace);
 	check_braces(cursor, data);
+	data.procedures.insert(ident_id, ProcData {
+		params,
+		// TODO - srenshaw - Handle return type
+		ret_type: RingType::Unit,
+	});
 	data.proc_start.push(start);
 }
 
@@ -139,9 +151,9 @@ fn expect_type(data: &mut Data, kind: TokenKind) -> RingType {
 	}
 }
 
-fn discover_fields(cursor: &mut Cursor, data: &mut Data) -> crate::RowData {
-	let mut fields = crate::RowData::default();
-	while TokenKind::CBrace != cursor.current(data) {
+fn discover_fields(cursor: &mut Cursor, data: &mut Data, end_token: TokenKind) -> RowData {
+	let mut fields = RowData::default();
+	while end_token != cursor.current(data) {
 		let TokenKind::Identifier(field_id) = cursor.current(data) else {
 			error_expected_token(data, "field name", cursor.current(data))
 		};
@@ -158,30 +170,30 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data) -> crate::RowData {
 	fields
 }
 
-fn discover_integer(cursor: &mut Cursor, data: &mut Data, ident_id: u64, value: i64) {
+fn discover_integer(cursor: &mut Cursor, data: &mut Data, ident_id: IdentId, value: i64) {
 	cursor.expect(data, TokenKind::ColonColon);
 	cursor.advance(); // increment past the integer, as we already have it
 	cursor.expect(data, TokenKind::Semicolon);
 	data.values.insert(ident_id, ValueKind::Integer(value));
 }
 
-fn discover_decimal(cursor: &mut Cursor, data: &mut Data, ident_id: u64, value: f64) {
+fn discover_decimal(cursor: &mut Cursor, data: &mut Data, ident_id: IdentId, value: f64) {
 	cursor.expect(data, TokenKind::ColonColon);
 	cursor.advance(); // increment past the decimal, as we already have it
 	cursor.expect(data, TokenKind::Semicolon);
 	data.values.insert(ident_id, ValueKind::Decimal(value));
 }
 
-fn discover_record(cursor: &mut Cursor, data: &mut Data, ident_id: u64) {
+fn discover_record(cursor: &mut Cursor, data: &mut Data, ident_id: IdentId) {
 	cursor.expect(data, TokenKind::ColonColon);
 	cursor.advance(); // skip over the 'record' keyword
 	cursor.expect(data, TokenKind::OBrace);
-	let fields = discover_fields(cursor, data);
+	let fields = discover_fields(cursor, data, TokenKind::CBrace);
 	cursor.expect(data, TokenKind::CBrace);
 	data.records.insert(ident_id, 	fields);
 }
 
-fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: u64) {
+fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: IdentId) {
 	cursor.expect(data, TokenKind::ColonColon);
 	cursor.advance(); // skip over the 'table' keyword
 	cursor.expect(data, TokenKind::OBracket);
@@ -208,9 +220,9 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: u64) {
 	};
 	cursor.advance();
 	cursor.expect(data, TokenKind::OBrace);
-	let row_spec = discover_fields(cursor, data);
+	let row_spec = discover_fields(cursor, data, TokenKind::CBrace);
 	cursor.expect(data, TokenKind::CBrace);
-	data.tables.insert(ident_id, crate::TableData {
+	data.tables.insert(ident_id, TableData {
 		row_count: row_count as u32,
 		memory_location,
 		row_spec,
@@ -243,6 +255,24 @@ mod can_parse {
 		let data = setup("a :: 5; b :: proc() {}");
 		assert_eq!(data.proc_start.len(), 1);
 		assert_eq!(data.proc_start[0], 4, "{data}");
+		assert_eq!(data.procedures[&"b".id()], ProcData {
+			params: vec![],
+			ret_type: RingType::Unit,
+		});
+	}
+
+	#[test]
+	fn procedure_with_params() {
+		let data = setup("a :: proc(b: u8, c: s32) {}");
+		assert_eq!(data.proc_start.len(), 1);
+		assert_eq!(data.proc_start[0], 0, "{data}");
+		assert_eq!(data.procedures[&"a".id()], ProcData {
+			params: vec![
+				("b".id(), RingType::U8),
+				("c".id(), RingType::S32),
+			],
+			ret_type: RingType::Unit,
+		});
 	}
 
 	#[test]
@@ -289,7 +319,7 @@ mod can_parse {
 	fn empty_table() {
 		let data = setup("a :: table[10] @ high_work_ram {}");
 		assert_eq!(data.tables.len(), 1);
-		assert_eq!(data.tables[&"a".id()], crate::TableData {
+		assert_eq!(data.tables[&"a".id()], TableData {
 			row_count: 10,
 			memory_location: MemoryLocation::Region("high_work_ram".id()),
 			row_spec: vec![],
