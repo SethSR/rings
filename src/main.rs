@@ -71,6 +71,7 @@ pub struct Data {
 	procedures: identifier::Map<ProcData>,
 	// val-name -> value-kind
 	values: identifier::Map<ValueKind>,
+	regions: identifier::Map<RegionData>,
 	// rec-name -> (field, type)*
 	records: identifier::Map<ColumnData>,
 	record_sizes: identifier::Map<usize>,
@@ -82,6 +83,30 @@ pub struct Data {
 	scope_stacks: Vec<ScopeStack>,
 	// procedures ready to be inlined and/or lowered
 	ready_procs: identifier::Map<NodeGraph>,
+}
+
+fn fmt_size(size: usize) -> String {
+	let mut buffer = [size,0,0,0];
+	for idx in 0..3 {
+		if buffer[idx] > 1023 {
+			buffer[idx + 1] = buffer[idx] / 1024;
+			buffer[idx] %= 1024;
+		}
+	}
+	if buffer[3] > 0 {
+		return format!("\x1b[31m{size}B\x1b[0m");
+	}
+	let mut out = String::with_capacity(20);
+	if buffer[2] > 0 {
+		out.push_str(&format!("{} MB", buffer[2]));
+	}
+	if buffer[1] > 0 {
+		out.push_str(&format!(" {} KB", buffer[1]));
+	}
+	if buffer[0] > 0 {
+		out.push_str(&format!(" {} B", buffer[0]));
+	}
+	out.trim_start().to_string()
 }
 
 impl Data {
@@ -154,13 +179,25 @@ impl fmt::Display for Data {
 
 		writeln!(f, "{:<16} | HASH-VALUE",
 			"IDENTIFIER")?;
+		writeln!(f, "{:-<16} | {:-<16}", "", "")?;
 		for ident_id in self.identifiers.keys() {
 			writeln!(f, "{:<16} | {ident_id}", self.text(*ident_id))?;
 		}
 		writeln!(f)?;
 
+		writeln!(f, "{:<16} | {:<9} | {:<9}", "REGION", "ADDRESS", "SIZE")?;
+		writeln!(f, "{:-<16} | {:-<9} | {:-<9}", "", "", "")?;
+		for (ident_id, data) in self.regions.iter() {
+			let name = self.text(*ident_id);
+			let address = data.address;
+			let size = fmt_size(data.byte_count as usize);
+			writeln!(f, "{name:<16} | #{address:<08X} | {size:<8}")?;
+		}
+		writeln!(f)?;
+
 		writeln!(f, "{:<16} | {:<8} | FIELDS",
 			"RECORD", "SIZE")?;
+		writeln!(f, "{:-<16} | {:-<8} | {:-<16}", "", "", "")?;
 		for (ident_id, fields) in self.records.iter() {
 			let name = self.text(*ident_id);
 			let size = self.record_sizes[ident_id];
@@ -171,6 +208,7 @@ impl fmt::Display for Data {
 
 		writeln!(f, "{:<16} | {:<10} | {:<8} | {:<9} | COLUMNS",
 			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT")?;
+		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "", "")?;
 		for (ident_id, data) in self.tables.iter() {
 			let name = self.text(*ident_id);
 			let size = self.table_sizes[ident_id];
@@ -182,6 +220,7 @@ impl fmt::Display for Data {
 
 		writeln!(f, "{:<16} | {:<16} | PARAMETERS",
 			"PROCEDURE", "RETURN-TYPE")?;
+		writeln!(f, "{:-<16} | {:-<16} | {:-<16}", "", "", "")?;
 		for ident_id in self.procedures.keys() {
 			let name = self.text(*ident_id);
 			let data = &self.procedures[ident_id];
@@ -204,15 +243,14 @@ struct ProcData {
 type ColumnData = Vec<(identifier::Id, RingType)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MemoryLocation {
-	Region(identifier::Id),
-	Address(u32),
+struct RegionData {
+	address: u32,
+	byte_count: u32,
 }
 
 #[derive(Debug, PartialEq)]
 struct TableData {
 	row_count: u32,
-	memory_location: MemoryLocation,
 	column_spec: ColumnData,
 }
 

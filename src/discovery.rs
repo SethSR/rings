@@ -1,10 +1,7 @@
 
 use crate::identifier;
 use crate::token;
-use crate::{
-	Data, MemoryLocation, ProcData, RingType, ColumnData, TableData,
-	ValueKind,
-};
+use crate::{ Data, ProcData, RegionData, RingType, ColumnData, TableData, ValueKind };
 
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
@@ -22,7 +19,9 @@ pub fn eval(data: &mut Data) {
 				discover_integer(cursor, data, ident_id, value);
 			} else if let token::Kind::Decimal(value) = cursor.peek(data, 1) {
 				discover_decimal(cursor, data, ident_id, value);
-			} else if let token::Kind::Proc = cursor.peek(data, 1) {
+			} else if token::Kind::Region == cursor.peek(data, 1) {
+				discover_region(cursor, data, ident_id);
+			} else if token::Kind::Proc == cursor.peek(data, 1) {
 				discover_proc(cursor, data, ident_id, start);
 			} else if token::Kind::Record == cursor.peek(data, 1) {
 				discover_record(cursor, data, ident_id);
@@ -84,6 +83,31 @@ impl Cursor {
 		}
 		self.advance();
 	}
+
+	fn expect_identifier(&mut self, data: &mut Data, expected: &str) -> identifier::Id {
+		let found = self.current(data);
+		let token::Kind::Identifier(ident_id) = found else {
+			error_expected_token(data, expected, found)
+		};
+		self.advance();
+		ident_id
+	}
+
+	fn expect_integer(&mut self, data: &mut Data, expected: &str) -> i64 {
+		let found = self.current(data);
+		let token::Kind::Integer(value) = found else {
+			error_expected_token(data, expected, found)
+		};
+		self.advance();
+		value
+	}
+}
+
+fn check_integer_as_u32(data: &mut Data, expected: &str, found: i64) -> u32 {
+	if !(0..u32::MAX as i64).contains(&found) {
+		error_expected(data, expected, &found.to_string())
+	};
+	found as u32
 }
 
 fn check_braces(cursor: &mut Cursor, data: &mut Data) {
@@ -156,10 +180,7 @@ fn expect_type(data: &mut Data, kind: token::Kind) -> RingType {
 fn discover_fields(cursor: &mut Cursor, data: &mut Data, end_token: token::Kind) -> ColumnData {
 	let mut fields = ColumnData::default();
 	while end_token != cursor.current(data) {
-		let token::Kind::Identifier(field_id) = cursor.current(data) else {
-			error_expected_token(data, "field name", cursor.current(data))
-		};
-		cursor.advance();
+		let field_id = cursor.expect_identifier(data, "field name");
 		cursor.expect(data, token::Kind::Colon);
 		let field_type = expect_type(data, cursor.current(data));
 		cursor.advance();
@@ -186,6 +207,23 @@ fn discover_decimal(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::
 	data.values.insert(ident_id, ValueKind::Decimal(value));
 }
 
+fn discover_region(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id) {
+	cursor.expect(data, token::Kind::ColonColon);
+	cursor.advance(); // skip over the 'region' keyword
+	cursor.expect(data, token::Kind::OBracket);
+	let byte_count = cursor.expect_integer(data, "region size");
+	let byte_count = check_integer_as_u32(data, "valid region size", byte_count);
+	cursor.expect(data, token::Kind::CBracket);
+	cursor.expect(data, token::Kind::At);
+	let address = cursor.expect_integer(data, "region address");
+	let address = check_integer_as_u32(data, "valid region address", address);
+	cursor.expect(data, token::Kind::Semicolon);
+	data.regions.insert(ident_id, RegionData {
+		address,
+		byte_count,
+	});
+}
+
 fn discover_record(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id) {
 	cursor.expect(data, token::Kind::ColonColon);
 	cursor.advance(); // skip over the 'record' keyword
@@ -203,28 +241,9 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id
 	cursor.expect(data, token::Kind::ColonColon);
 	cursor.advance(); // skip over the 'table' keyword
 	cursor.expect(data, token::Kind::OBracket);
-	let token::Kind::Integer(row_count) = cursor.current(data) else {
-		error_expected_token(data, "table size", cursor.current(data))
-	};
-	if !(0..u32::MAX as i64).contains(&row_count) {
-		error_expected(data, "valid table size", &row_count.to_string())
-	}
-	cursor.advance();
+	let row_count = cursor.expect_integer(data, "table size");
+	let row_count = check_integer_as_u32(data, "valid table size", row_count);
 	cursor.expect(data, token::Kind::CBracket);
-	cursor.expect(data, token::Kind::At);
-	let memory_location = match cursor.current(data) {
-		token::Kind::Identifier(region) => MemoryLocation::Region(region),
-		token::Kind::Integer(address) => {
-			if !(0..u32::MAX as i64).contains(&address) {
-				error_expected(data, "memory region or valid address", &address.to_string())
-			}
-			MemoryLocation::Address(address as u32)
-		}
-		kind => {
-			error_expected_token(data, "memory region or address", kind)
-		}
-	};
-	cursor.advance();
 	cursor.expect(data, token::Kind::OBrace);
 	let column_spec = discover_fields(cursor, data, token::Kind::CBrace);
 	cursor.expect(data, token::Kind::CBrace);
@@ -232,8 +251,7 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id
 		.map(|(_, col_type)| data.type_size(*col_type))
 		.sum();
 	data.tables.insert(ident_id, TableData {
-		row_count: row_count as u32,
-		memory_location,
+		row_count,
 		column_spec,
 	});
 	data.table_sizes.insert(ident_id, row_count as usize * col_size);
@@ -286,6 +304,16 @@ mod can_parse {
 	}
 
 	#[test]
+	fn region() {
+		let data = setup("a :: region[1024] at 0x0020_0000;");
+		assert_eq!(data.regions.len(), 1);
+		assert_eq!(data.regions[&"a".id()], RegionData {
+			byte_count: 1024,
+			address: 0x0020_0000,
+		});
+	}
+
+	#[test]
 	fn empty_record() {
 		let data = setup("a :: record {}");
 		assert_eq!(data.records.len(), 1);
@@ -327,11 +355,10 @@ mod can_parse {
 
 	#[test]
 	fn empty_table() {
-		let data = setup("a :: table[10] @ high_work_ram {}");
+		let data = setup("a :: table[10] {}");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"a".id()], TableData {
 			row_count: 10,
-			memory_location: MemoryLocation::Region("high_work_ram".id()),
 			column_spec: vec![],
 		});
 	}

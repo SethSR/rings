@@ -26,6 +26,7 @@ pub enum Kind {
 	// FixedF(u8),
 	// FixedD(u8),
 
+	Region,
 	Record,
 	Table,
 	Proc,
@@ -52,6 +53,7 @@ pub enum Kind {
 	Dash,    DashEqual,
 	Star,    StarEqual,
 	Slash,   SlashEqual,
+	Carrot,  CarrotEqual,
 	Less,    LessEqual,
 	Greater, GreaterEqual,
 	Equal,   EqualEqual,

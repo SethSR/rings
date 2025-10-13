@@ -55,6 +55,7 @@ impl<'a> Lexer<'a> {
 					self.advance();
 				}
 				match &self.source[start..self.pos] {
+					"region" => token::Kind::Region,
 					"return" => token::Kind::Return,
 					"record" => token::Kind::Record,
 					"table" => token::Kind::Table,
@@ -62,6 +63,7 @@ impl<'a> Lexer<'a> {
 					"bool" => token::Kind::Bool,
 					"true" => token::Kind::True,
 					"false" => token::Kind::False,
+					"at" => token::Kind::At,
 					"in" => token::Kind::In,
 					"if" => token::Kind::If,
 					"else" => token::Kind::Else,
@@ -186,6 +188,11 @@ impl<'a> Lexer<'a> {
 				if self.expect('=') { token::Kind::SlashEqual } else { token::Kind::Slash }
 			}
 
+			Some('^') => {
+				self.advance();
+				if self.expect('=') { token::Kind::CarrotEqual } else { token::Kind::Carrot }
+			}
+
 			Some('=') => {
 				self.advance();
 				if self.expect('=') { token::Kind::EqualEqual } else { token::Kind::Equal }
@@ -221,8 +228,6 @@ impl<'a> Lexer<'a> {
 			Some(';') => { self.advance(); token::Kind::Semicolon }
 
 			Some(',') => { self.advance(); token::Kind::Comma }
-
-			Some('@') => { self.advance(); token::Kind::At }
 
 			Some(_) => { self.advance(); token::Kind::Eof }
 		};
@@ -276,6 +281,7 @@ impl<'a> Lexer<'a> {
 #[cfg(test)]
 mod can_lex {
 	use super::*;
+	use super::token::Kind;
 
 	fn setup(source: &str) -> Data {
 		let mut data = Data::new(source.into());
@@ -287,13 +293,13 @@ mod can_lex {
 	fn a_simple_program() {
 		let data = setup("main { return 3; }");
 		assert_eq!(data.tok_list, [
-			token::Kind::Identifier("main".id()),
-			token::Kind::OBrace,
-			token::Kind::Return,
-			token::Kind::Integer(3),
-			token::Kind::Semicolon,
-			token::Kind::CBrace,
-			token::Kind::Eof,
+			Kind::Identifier("main".id()),
+			Kind::OBrace,
+			Kind::Return,
+			Kind::Integer(3),
+			Kind::Semicolon,
+			Kind::CBrace,
+			Kind::Eof,
 		]);
 		assert_eq!(data.tok_pos, [ 0, 5, 7, 14, 15, 17, 18 ]);
 		assert_eq!(data.identifiers.len(), 1);
@@ -301,13 +307,34 @@ mod can_lex {
 	}
 
 	#[test]
+	fn a_region_declaration() {
+		let data = setup("wram_high :: region[2*1024^3] at 0x0020_0000;");
+		assert_eq!(data.tok_list, [
+			Kind::Identifier("wram_high".id()),
+			Kind::ColonColon,
+			Kind::Region,
+			Kind::OBracket,
+			Kind::Integer(2),
+			Kind::Star,
+			Kind::Integer(1024),
+			Kind::Carrot,
+			Kind::Integer(3),
+			Kind::CBracket,
+			Kind::At,
+			Kind::Integer(0x0020_0000),
+			Kind::Semicolon,
+			Kind::Eof,
+		]);
+	}
+
+	#[test]
 	fn decimal_numbers() {
 		let data = setup("5.6 4. 2_3.4_5");
 		assert_eq!(data.tok_list, [
-			token::Kind::Decimal(5.6),
-			token::Kind::Decimal(4.),
-			token::Kind::Decimal(23.45),
-			token::Kind::Eof,
+			Kind::Decimal(5.6),
+			Kind::Decimal(4.),
+			Kind::Decimal(23.45),
+			Kind::Eof,
 		]);
 	}
 }
