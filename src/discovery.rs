@@ -2,7 +2,7 @@
 use crate::identifier;
 use crate::token;
 use crate::{
-	Data, MemoryLocation, ProcData, RingType, RowData, TableData,
+	Data, MemoryLocation, ProcData, RingType, ColumnData, TableData,
 	ValueKind,
 };
 
@@ -153,8 +153,8 @@ fn expect_type(data: &mut Data, kind: token::Kind) -> RingType {
 	}
 }
 
-fn discover_fields(cursor: &mut Cursor, data: &mut Data, end_token: token::Kind) -> RowData {
-	let mut fields = RowData::default();
+fn discover_fields(cursor: &mut Cursor, data: &mut Data, end_token: token::Kind) -> ColumnData {
+	let mut fields = ColumnData::default();
 	while end_token != cursor.current(data) {
 		let token::Kind::Identifier(field_id) = cursor.current(data) else {
 			error_expected_token(data, "field name", cursor.current(data))
@@ -192,7 +192,11 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::I
 	cursor.expect(data, token::Kind::OBrace);
 	let fields = discover_fields(cursor, data, token::Kind::CBrace);
 	cursor.expect(data, token::Kind::CBrace);
+	let size = fields.iter()
+		.map(|(_, field_type)| data.type_size(*field_type))
+		.sum();
 	data.records.insert(ident_id, 	fields);
+	data.record_sizes.insert(ident_id, size);
 }
 
 fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id) {
@@ -222,13 +226,17 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id
 	};
 	cursor.advance();
 	cursor.expect(data, token::Kind::OBrace);
-	let row_spec = discover_fields(cursor, data, token::Kind::CBrace);
+	let column_spec = discover_fields(cursor, data, token::Kind::CBrace);
 	cursor.expect(data, token::Kind::CBrace);
+	let col_size: usize = column_spec.iter()
+		.map(|(_, col_type)| data.type_size(*col_type))
+		.sum();
 	data.tables.insert(ident_id, TableData {
 		row_count: row_count as u32,
 		memory_location,
-		row_spec,
+		column_spec,
 	});
+	data.table_sizes.insert(ident_id, row_count as usize * col_size);
 }
 
 #[cfg(test)]
@@ -324,7 +332,7 @@ mod can_parse {
 		assert_eq!(data.tables[&"a".id()], TableData {
 			row_count: 10,
 			memory_location: MemoryLocation::Region("high_work_ram".id()),
-			row_spec: vec![],
+			column_spec: vec![],
 		});
 	}
 }

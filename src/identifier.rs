@@ -9,7 +9,7 @@ pub type Map<T> = HashMap<Id, T>;
 pub struct Id(u64);
 impl Display for Id {
 	fn fmt(&self, f: &mut Formatter) -> Result {
-		write!(f, "{}", self.0)
+		write!(f, "<{}>", self.0)
 	}
 }
 

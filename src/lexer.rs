@@ -84,16 +84,36 @@ impl<'a> Lexer<'a> {
 			}
 
 			Some(c) if c.is_numeric() => {
+				let mut inner_start = start;
 				self.advance();
+
+				#[derive(PartialEq)]
+				enum NumType { Bin, Hex, Dec }
+
+				let num_type = if c == '0' {
+					match self.peek(0) {
+						Some('b') => NumType::Bin,
+						Some('x') => NumType::Hex,
+						_ => NumType::Dec,
+					}
+				} else {
+					NumType::Dec
+				};
+
+				if num_type != NumType::Dec {
+					self.advance();
+					inner_start = self.pos;
+				}
+
 				while let Some(c) = self.peek(0) {
 					if !c.is_numeric() && c != '_' {
 						break;
 					}
 					self.advance();
 				}
-				let mut is_decimal = false;
+				let mut is_fractional = false;
 				if self.peek(0) == Some('.') {
-					is_decimal = true;
+					is_fractional = true;
 					self.advance();
 					while let Some(c) = self.peek(0) {
 						if !c.is_numeric() && c != '_' {
@@ -102,16 +122,29 @@ impl<'a> Lexer<'a> {
 						self.advance();
 					}
 				}
-				let text = &self.source[start..self.pos];
-				if is_decimal {
-					let num = text.replace('_', "")
-						.parse::<f64>()
-						.expect("unable to parse decimal");
-					token::Kind::Decimal(num)
+
+				let text = &self.source[inner_start..self.pos];
+				if is_fractional {
+					match num_type {
+						NumType::Bin => panic!("parsing binary fixed-point numbers not implemented"),
+						NumType::Hex => panic!("parsing hexadecimal fixed-point numbers not implemented"),
+						NumType::Dec => {
+							let num = text.replace('_', "")
+								.parse::<f64>()
+								.expect("unable to parse decimal fixed-point number");
+							token::Kind::Decimal(num)
+						}
+					}
 				} else {
-					let num = text.replace('_', "")
-						.parse::<i64>()
-						.expect("unable to parse integer");
+					let text = text.replace('_', "");
+					let num = match num_type {
+						NumType::Bin => i64::from_str_radix(&text, 2)
+							.expect("unable to parse binary integer"),
+						NumType::Hex => i64::from_str_radix(&text, 16)
+							.expect("unable to parse hexadecimal integer"),
+						NumType::Dec => text.parse::<i64>()
+							.expect("unable to parse decimal integer"),
+					};
 					token::Kind::Integer(num)
 				}
 			}
