@@ -10,30 +10,30 @@ pub fn eval(data: &mut Data) {
 	let cursor = &mut cursor;
 
 	loop {
-		let kind = cursor.current(data);
 		let start = cursor.index();
-		cursor.advance();
+		match cursor.current(data) {
+			token::Kind::Identifier(ident_id) => {
+				let result = if data.text(ident_id) == "main" {
+					discover_main_proc(cursor, data, ident_id, start)
+				} else {
+					match cursor.peek(data, 2) {
+						token::Kind::Integer(value) => discover_integer(cursor, data, ident_id, value),
+						token::Kind::Decimal(value) => discover_decimal(cursor, data, ident_id, value),
+						token::Kind::Region => discover_region(cursor, data, ident_id),
+						token::Kind::Proc => discover_proc(cursor, data, ident_id, start),
+						token::Kind::Record => discover_record(cursor, data, ident_id),
+						token::Kind::Table => discover_table(cursor, data, ident_id),
+						kind => error::expected_token(data, "top-level statement", kind),
+					}
+				};
 
-		if let token::Kind::Identifier(ident_id) = kind {
-			if &data.source[data.identifiers[&ident_id].clone()] == "main" {
-				discover_main_proc(cursor, data, ident_id, start);
-			} else if let token::Kind::Integer(value) = cursor.peek(data, 1) {
-				discover_integer(cursor, data, ident_id, value);
-			} else if let token::Kind::Decimal(value) = cursor.peek(data, 1) {
-				discover_decimal(cursor, data, ident_id, value);
-			} else if token::Kind::Region == cursor.peek(data, 1) {
-				discover_region(cursor, data, ident_id);
-			} else if token::Kind::Proc == cursor.peek(data, 1) {
-				discover_proc(cursor, data, ident_id, start);
-			} else if token::Kind::Record == cursor.peek(data, 1) {
-				discover_record(cursor, data, ident_id);
-			} else if token::Kind::Table == cursor.peek(data, 1) {
-				discover_table(cursor, data, ident_id);
+				if let Err(e) = result {
+					data.errors.push(e);
+					panic!("{data}");
+				}
 			}
-		} else if token::Kind::Eof == kind {
-			break;
-		} else {
-			error::expected_token(data, "identifier or EoF", kind)
+			token::Kind::Eof => break,
+			kind => error::expected_token(data, "identifier or EoF", kind),
 		}
 	}
 }
@@ -62,26 +62,29 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) {
 
 fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, start: token::Id,
-) {
-	cursor.expect(data, token::Kind::OBrace);
+) -> Result<(), String> {
+	cursor.advance();
+	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data);
 	data.procedures.insert(ident_id, ProcType {
 		params: vec![], // `main` has no parameters 
 		ret_type: crate::Type::Unit, // `main` has no return type
 	});
 	data.proc_start.insert(ident_id, start);
+	Ok(())
 }
 
 fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, start: token::Id,
 ) -> Result<(), String> {
-	cursor.expect(data, token::Kind::ColonColon);
-	cursor.expect(data, token::Kind::Proc);
-	cursor.expect(data, token::Kind::OParen);
+	cursor.advance();
+	cursor.expect(data, token::Kind::ColonColon)?;
+	cursor.expect(data, token::Kind::Proc)?;
+	cursor.expect(data, token::Kind::OParen)?;
 	let params = discover_fields(cursor, data, token::Kind::CParen)?;
-	cursor.expect(data, token::Kind::CParen);
+	cursor.expect(data, token::Kind::CParen)?;
 	// TODO - srenshaw - Handle return type declarations
-	cursor.expect(data, token::Kind::OBrace);
+	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data);
 	data.procedures.insert(ident_id, ProcType {
 		params,
@@ -98,7 +101,7 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	let mut fields = ColumnData::default();
 	while end_token != cursor.current(data) {
 		let field_id = cursor.expect_identifier(data, "field name")?;
-		cursor.expect(data, token::Kind::Colon);
+		cursor.expect(data, token::Kind::Colon)?;
 		let field_type = cursor.expect_type(data, "type-specifier")?;
 		cursor.advance();
 		fields.push((field_id, field_type));
@@ -112,35 +115,40 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 
 fn discover_integer(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, value: i64,
-) {
-	cursor.expect(data, token::Kind::ColonColon);
+) -> Result<(), String> {
+	cursor.advance();
+	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // increment past the integer, as we already have it
-	cursor.expect(data, token::Kind::Semicolon);
+	cursor.expect(data, token::Kind::Semicolon)?;
 	data.values.insert(ident_id, ValueKind::Integer(value));
+	Ok(())
 }
 
 fn discover_decimal(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, value: f64,
-) {
-	cursor.expect(data, token::Kind::ColonColon);
+) -> Result<(), String> {
+	cursor.advance();
+	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // increment past the decimal, as we already have it
-	cursor.expect(data, token::Kind::Semicolon);
+	cursor.expect(data, token::Kind::Semicolon)?;
 	data.values.insert(ident_id, ValueKind::Decimal(value));
+	Ok(())
 }
 
 fn discover_region(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
 ) -> Result<(), String> {
-	cursor.expect(data, token::Kind::ColonColon);
+	cursor.advance();
+	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // skip over the 'region' keyword
-	cursor.expect(data, token::Kind::OBracket);
+	cursor.expect(data, token::Kind::OBracket)?;
 	let byte_count = cursor.expect_integer(data, "region size")?;
 	let byte_count = check_integer_as_u32(data, "valid region size", byte_count);
-	cursor.expect(data, token::Kind::CBracket);
-	cursor.expect(data, token::Kind::At);
+	cursor.expect(data, token::Kind::CBracket)?;
+	cursor.expect(data, token::Kind::At)?;
 	let address = cursor.expect_integer(data, "region address")?;
 	let address = check_integer_as_u32(data, "valid region address", address);
-	cursor.expect(data, token::Kind::Semicolon);
+	cursor.expect(data, token::Kind::Semicolon)?;
 	data.regions.insert(ident_id, RegionData {
 		address,
 		byte_count,
@@ -151,11 +159,12 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data,
 fn discover_record(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
 ) -> Result<(), String> {
-	cursor.expect(data, token::Kind::ColonColon);
+	cursor.advance();
+	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // skip over the 'record' keyword
-	cursor.expect(data, token::Kind::OBrace);
+	cursor.expect(data, token::Kind::OBrace)?;
 	let fields = discover_fields(cursor, data, token::Kind::CBrace)?;
-	cursor.expect(data, token::Kind::CBrace);
+	cursor.expect(data, token::Kind::CBrace)?;
 	let size = fields.iter()
 		.map(|(_, field_type)| data.type_size(*field_type))
 		.sum();
@@ -167,15 +176,16 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data,
 fn discover_table(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
 ) -> Result<(), String> {
-	cursor.expect(data, token::Kind::ColonColon);
+	cursor.advance();
+	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // skip over the 'table' keyword
-	cursor.expect(data, token::Kind::OBracket);
+	cursor.expect(data, token::Kind::OBracket)?;
 	let row_count = cursor.expect_integer(data, "table size")?;
 	let row_count = check_integer_as_u32(data, "valid table size", row_count);
-	cursor.expect(data, token::Kind::CBracket);
-	cursor.expect(data, token::Kind::OBrace);
+	cursor.expect(data, token::Kind::CBracket)?;
+	cursor.expect(data, token::Kind::OBrace)?;
 	let column_spec = discover_fields(cursor, data, token::Kind::CBrace)?;
-	cursor.expect(data, token::Kind::CBrace);
+	cursor.expect(data, token::Kind::CBrace)?;
 	let col_size: usize = column_spec.iter()
 		.map(|(_, col_type)| data.type_size(*col_type))
 		.sum();
