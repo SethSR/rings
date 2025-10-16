@@ -215,24 +215,6 @@ fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, t
 	Ok(new_ast(data, AKind::If(cond_id, then_block, else_block), start..end))
 }
 
-fn expect_ident(cursor: &mut Cursor, data: &Data) -> Option<identifier::Id> {
-	if let TKind::Identifier(ident_id) = cursor.current(data) {
-		cursor.advance();
-		Some(ident_id)
-	} else {
-		None
-	}
-}
-
-fn expect_integer(cursor: &mut Cursor, data: &Data) -> Option<i64> {
-	if let TKind::Integer(num) = cursor.current(data) {
-		cursor.advance();
-		Some(num)
-	} else {
-		None
-	}
-}
-
 fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, token::Id> {
 	let start = cursor.location(data);
 	cursor.expect(data, TKind::For);
@@ -252,13 +234,13 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, 
 
 	cursor.expect(data, TKind::In);
 
-	let table_id = expect_ident(cursor, data);
+	let table_id = cursor.expect_identifier(data);
 
 	let range = if TKind::OBracket == cursor.current(data) {
 		cursor.advance();
-		let range_start = expect_integer(cursor, data);
+		let range_start = cursor.expect_integer(data);
 		cursor.expect(data, TKind::DotDot);
-		let range_end = expect_integer(cursor, data);
+		let range_end = cursor.expect_integer(data);
 		cursor.expect(data, TKind::CBracket);
 		match (range_start, range_end) {
 			(Some(start), Some(end)) => Some(RangeType::Full { start, end }),

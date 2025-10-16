@@ -43,22 +43,22 @@ impl Cursor {
 		self.advance();
 	}
 
-	pub fn expect_identifier(&mut self, data: &mut Data, expected: &str) -> identifier::Id {
-		let found = self.current(data);
-		let token::Kind::Identifier(ident_id) = found else {
-			error::expected_token(data, expected, found)
-		};
-		self.advance();
-		ident_id
+	pub fn expect_identifier(&mut self, data: &Data) -> Option<identifier::Id> {
+		if let token::Kind::Identifier(ident_id) = self.current(data) {
+			self.advance();
+			Some(ident_id)
+		} else {
+			None
+		}
 	}
 
-	pub fn expect_integer(&mut self, data: &mut Data, expected: &str) -> i64 {
-		let found = self.current(data);
-		let token::Kind::Integer(value) = found else {
-			error::expected_token(data, expected, found)
-		};
-		self.advance();
-		value
+	pub fn expect_integer(&mut self, data: &Data) -> Option<i64> {
+		if let token::Kind::Integer(num) = self.current(data) {
+			self.advance();
+			Some(num)
+		} else {
+			None
+		}
 	}
 
 	pub fn expect_type(&mut self, data: &mut Data) -> crate::Type {

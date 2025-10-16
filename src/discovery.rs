@@ -90,7 +90,8 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id,
 fn discover_fields(cursor: &mut Cursor, data: &mut Data, end_token: token::Kind) -> ColumnData {
 	let mut fields = ColumnData::default();
 	while end_token != cursor.current(data) {
-		let field_id = cursor.expect_identifier(data, "field name");
+		let field_id = cursor.expect_identifier(data)
+			.expect("field name");
 		cursor.expect(data, token::Kind::Colon);
 		let field_type = cursor.expect_type(data);
 		cursor.advance();
@@ -121,11 +122,13 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::I
 	cursor.expect(data, token::Kind::ColonColon);
 	cursor.advance(); // skip over the 'region' keyword
 	cursor.expect(data, token::Kind::OBracket);
-	let byte_count = cursor.expect_integer(data, "region size");
+	let byte_count = cursor.expect_integer(data)
+		.expect("region size");
 	let byte_count = check_integer_as_u32(data, "valid region size", byte_count);
 	cursor.expect(data, token::Kind::CBracket);
 	cursor.expect(data, token::Kind::At);
-	let address = cursor.expect_integer(data, "region address");
+	let address = cursor.expect_integer(data)
+		.expect("region address");
 	let address = check_integer_as_u32(data, "valid region address", address);
 	cursor.expect(data, token::Kind::Semicolon);
 	data.regions.insert(ident_id, RegionData {
@@ -151,7 +154,8 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id
 	cursor.expect(data, token::Kind::ColonColon);
 	cursor.advance(); // skip over the 'table' keyword
 	cursor.expect(data, token::Kind::OBracket);
-	let row_count = cursor.expect_integer(data, "table size");
+	let row_count = cursor.expect_integer(data)
+		.expect("table size");
 	let row_count = check_integer_as_u32(data, "valid table size", row_count);
 	cursor.expect(data, token::Kind::CBracket);
 	cursor.expect(data, token::Kind::OBrace);
