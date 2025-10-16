@@ -1,7 +1,9 @@
 
+use crate::cursor::Cursor;
+use crate::error;
 use crate::identifier;
 use crate::token;
-use crate::{ Data, ProcData, RegionData, RingType, ColumnData, TableData, ValueKind };
+use crate::{ Data, ProcType, RegionData, ColumnData, TableData, ValueKind };
 
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
@@ -31,81 +33,14 @@ pub fn eval(data: &mut Data) {
 		} else if token::Kind::Eof == kind {
 			break;
 		} else {
-			error_expected_token(data, "identifier or EoF", kind)
+			error::expected_token(data, "identifier or EoF", kind)
 		}
-	}
-}
-
-fn error(data: &mut Data, msg: &str) -> ! {
-	data.error = msg.to_string();
-	panic!("{data}")
-}
-
-fn error_expected(data: &mut Data, expected: &str, found: &str) -> ! {
-	error(data, &format!("Expected {expected}, found {found}"))
-}
-
-fn error_expected_token(data: &mut Data, expected: &str, found: token::Kind) -> ! {
-	error(data, &format!("Expected {expected}, found {found:?}"))
-}
-
-fn error_expected_token2(data: &mut Data, expected: token::Kind, found: token::Kind) -> ! {
-	error(data, &format!("Expected {expected:?}, found {found:?}"))
-}
-
-#[derive(Default)]
-struct Cursor(token::Id);
-
-impl Cursor {
-	pub fn index(&self) -> token::Id {
-		self.0
-	}
-
-	pub fn advance(&mut self) {
-		self.0 += 1;
-	}
-
-	pub fn peek(&self, data: &Data, offset: usize) -> token::Kind {
-		data.tok_list
-			.get(self.0 + offset)
-			.copied()
-			.unwrap_or(token::Kind::Eof)
-	}
-
-	pub fn current(&self, data: &Data) -> token::Kind {
-		self.peek(data, 0)
-	}
-
-	fn expect(&mut self, data: &mut Data, expected: token::Kind) {
-		let found = self.current(data);
-		if found != expected {
-			error_expected_token2(data, expected, found)
-		}
-		self.advance();
-	}
-
-	fn expect_identifier(&mut self, data: &mut Data, expected: &str) -> identifier::Id {
-		let found = self.current(data);
-		let token::Kind::Identifier(ident_id) = found else {
-			error_expected_token(data, expected, found)
-		};
-		self.advance();
-		ident_id
-	}
-
-	fn expect_integer(&mut self, data: &mut Data, expected: &str) -> i64 {
-		let found = self.current(data);
-		let token::Kind::Integer(value) = found else {
-			error_expected_token(data, expected, found)
-		};
-		self.advance();
-		value
 	}
 }
 
 fn check_integer_as_u32(data: &mut Data, expected: &str, found: i64) -> u32 {
 	if !(0..u32::MAX as i64).contains(&found) {
-		error_expected(data, expected, &found.to_string())
+		error::expected(data, expected, &found.to_string())
 	};
 	found as u32
 }
@@ -117,7 +52,7 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) {
 			token::Kind::OBrace => 1,
 			token::Kind::CBrace => -1,
 			token::Kind::Eof => {
-				error_expected_token(data, "end of procedure", token::Kind::Eof)
+				error::expected_token(data, "end of procedure", token::Kind::Eof)
 			}
 			_ => 0,
 		};
@@ -128,9 +63,9 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) {
 fn discover_main_proc(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id, start: token::Id) {
 	cursor.expect(data, token::Kind::OBrace);
 	check_braces(cursor, data);
-	data.procedures.insert(ident_id, ProcData {
+	data.procedures.insert(ident_id, ProcType {
 		params: vec![], // `main` has no parameters 
-		ret_type: RingType::Unit, // `main` has no return type
+		ret_type: crate::Type::Unit, // `main` has no return type
 	});
 	data.proc_start.insert(ident_id, start);
 }
@@ -144,37 +79,12 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data, ident_id: identifier::Id,
 	// TODO - srenshaw - Handle return type declarations
 	cursor.expect(data, token::Kind::OBrace);
 	check_braces(cursor, data);
-	data.procedures.insert(ident_id, ProcData {
+	data.procedures.insert(ident_id, ProcType {
 		params,
 		// TODO - srenshaw - Handle return type
-		ret_type: RingType::Unit,
+		ret_type: crate::Type::Unit,
 	});
 	data.proc_start.insert(ident_id, start);
-}
-
-fn expect_type(data: &mut Data, kind: token::Kind) -> RingType {
-	match kind {
-		token::Kind::Identifier(ident_id) => {
-			if data.records.contains_key(&ident_id) {
-				RingType::Record(ident_id)
-			} else if data.tables.contains_key(&ident_id) {
-				RingType::Table(ident_id)
-			} else {
-				let found = &data.source[data.identifiers[&ident_id].clone()].to_string();
-				error_expected(data, "type-specifier", found)
-			}
-		}
-		token::Kind::Bool => RingType::Bool,
-		token::Kind::U8 => RingType::U8,
-		token::Kind::S8 => RingType::S8,
-		token::Kind::U16 => RingType::U16,
-		token::Kind::S16 => RingType::S16,
-		token::Kind::U32 => RingType::U32,
-		token::Kind::S32 => RingType::S32,
-		kind => {
-			error_expected_token(data, "type-specifier", kind)
-		}
-	}
 }
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data, end_token: token::Kind) -> ColumnData {
@@ -182,7 +92,7 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data, end_token: token::Kind)
 	while end_token != cursor.current(data) {
 		let field_id = cursor.expect_identifier(data, "field name");
 		cursor.expect(data, token::Kind::Colon);
-		let field_type = expect_type(data, cursor.current(data));
+		let field_type = cursor.expect_type(data);
 		cursor.advance();
 		fields.push((field_id, field_type));
 		if cursor.current(data) != token::Kind::Comma {
@@ -283,9 +193,9 @@ mod can_parse {
 		let data = setup("a :: 5; b :: proc() {}");
 		assert_eq!(data.proc_start.len(), 1);
 		assert_eq!(data.proc_start[&"b".id()], 4, "{data}");
-		assert_eq!(data.procedures[&"b".id()], ProcData {
+		assert_eq!(data.procedures[&"b".id()], ProcType {
 			params: vec![],
-			ret_type: RingType::Unit,
+			ret_type: crate::Type::Unit,
 		});
 	}
 
@@ -294,12 +204,12 @@ mod can_parse {
 		let data = setup("a :: proc(b: u8, c: s32) {}");
 		assert_eq!(data.proc_start.len(), 1);
 		assert_eq!(data.proc_start[&"a".id()], 0, "{data}");
-		assert_eq!(data.procedures[&"a".id()], ProcData {
+		assert_eq!(data.procedures[&"a".id()], ProcType {
 			params: vec![
-				("b".id(), RingType::U8),
-				("c".id(), RingType::S32),
+				("b".id(), crate::Type::U8),
+				("c".id(), crate::Type::S32),
 			],
-			ret_type: RingType::Unit,
+			ret_type: crate::Type::Unit,
 		});
 	}
 
@@ -324,14 +234,14 @@ mod can_parse {
 	fn record_with_one_field_no_trailing_comma() {
 		let data = setup("a :: record { b: u8 }");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], vec![("b".id(), RingType::U8)]);
+		assert_eq!(data.records[&"a".id()], vec![("b".id(), crate::Type::U8)]);
 	}
 
 	#[test]
 	fn record_with_one_field_and_trailing_comma() {
 		let data = setup("a :: record { b: u8, }");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], vec![("b".id(), RingType::U8)]);
+		assert_eq!(data.records[&"a".id()], vec![("b".id(), crate::Type::U8)]);
 	}
 
 	#[test]
@@ -339,8 +249,8 @@ mod can_parse {
 		let data = setup("a :: record { b: u8, c: s16 }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], vec![
-			("b".id(), RingType::U8),
-			("c".id(), RingType::S16),
+			("b".id(), crate::Type::U8),
+			("c".id(), crate::Type::S16),
 		]);
 	}
 
@@ -349,7 +259,7 @@ mod can_parse {
 		let data = setup("a :: record {} b :: record { c: a }");
 		assert_eq!(data.records.len(), 2);
 		assert_eq!(data.records[&"b".id()], vec![
-			("c".id(), RingType::Record("a".id())),
+			("c".id(), crate::Type::Record("a".id())),
 		]);
 	}
 

@@ -3,9 +3,13 @@ use std::{env, fmt, fs};
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 
+mod ast;
+mod cursor;
 mod discovery;
+mod error;
 mod identifier;
 mod lexer;
+mod parser;
 mod token;
 
 fn main() {
@@ -23,15 +27,8 @@ fn main() {
 
 type SrcPos = usize;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-struct GraphId(usize);
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-struct ScopeId(usize);
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-struct NodeId(usize);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RingType {
+enum Type {
 	Bool,
 	U8, S8,
 	U16, S16,
@@ -46,6 +43,7 @@ pub fn compile(source: Box<str>) -> Data {
 	let mut data = Data::new(source);
 	lexer::eval(&mut data);
 	discovery::eval(&mut data);
+	parser::eval(&mut data);
 	data
 }
 
@@ -61,14 +59,14 @@ enum ValueKind {
 #[derive(Default)]
 pub struct Data {
 	source: Box<str>,
-	error: String,
+	errors: Vec<String>,
 	/* Lexer */
 	tok_list: token::KindList,
 	tok_pos: token::PosList,
 	identifiers: identifier::Map<Range<SrcPos>>,
 	/* Discovery */
 	proc_start: identifier::Map<token::Id>,
-	procedures: identifier::Map<ProcData>,
+	procedures: identifier::Map<ProcType>,
 	// val-name -> value-kind
 	values: identifier::Map<ValueKind>,
 	regions: identifier::Map<RegionData>,
@@ -79,10 +77,10 @@ pub struct Data {
 	table_sizes: identifier::Map<usize>,
 	/* Parsing */
 	proc_queue: VecDeque<Task>,
-	node_graphs: Vec<NodeGraph>,
-	scope_stacks: Vec<ScopeStack>,
-	// procedures ready to be inlined and/or lowered
-	ready_procs: identifier::Map<NodeGraph>,
+	ast_nodes: ast::KindList,
+	ast_locations: ast::LocList,
+	// procedures ready to be type-checked
+	completed_procs: identifier::Map<Range<ast::Id>>,
 }
 
 fn fmt_size(size: usize) -> String {
@@ -121,26 +119,26 @@ impl Data {
 		&self.source[self.identifiers[&ident_id].clone()]
 	}
 
-	fn type_text(&self, ring_type: RingType) -> String {
+	fn type_text(&self, ring_type: Type) -> String {
 		match ring_type {
-			RingType::Record(ident_id) => self.text(ident_id).to_string(),
-			RingType::Table(ident_id) => self.text(ident_id).to_string(),
+			Type::Record(ident_id) => self.text(ident_id).to_string(),
+			Type::Table(ident_id) => self.text(ident_id).to_string(),
 			_ => format!("{ring_type:?}"),
 		}
 	}
 
-	fn type_size(&self, ring_type: RingType) -> usize {
+	fn type_size(&self, ring_type: Type) -> usize {
 		match ring_type {
-			RingType::Bool |
-			RingType::U8 |
-			RingType::S8 => 1,
-			RingType::U16 |
-			RingType::S16 => 2,
-			RingType::U32 |
-			RingType::S32 => 4,
-			RingType::Record(ident_id) => self.record_sizes[&ident_id],
-			RingType::Table(ident_id) => self.table_sizes[&ident_id],
-			RingType::Unit => 0,
+			Type::Bool |
+			Type::U8 |
+			Type::S8 => 1,
+			Type::U16 |
+			Type::S16 => 2,
+			Type::U32 |
+			Type::S32 => 4,
+			Type::Record(ident_id) => self.record_sizes[&ident_id],
+			Type::Table(ident_id) => self.table_sizes[&ident_id],
+			Type::Unit => 0,
 		}
 	}
 }
@@ -150,13 +148,16 @@ impl fmt::Display for Data {
 		writeln!(f, "=== Rings Compiler ===")?;
 		writeln!(f)?;
 
-		if !self.error.is_empty() {
+		if !self.errors.is_empty() {
 			// Errors are printed in bold(1m) red(31m)
-			writeln!(f, "Error: \x1b[31;1m{}\x1b[0m", self.error)?;
+			writeln!(f, "Error:")?;
+			for emsg in &self.errors {
+				writeln!(f, "  \x1b[31;1m{emsg}\x1b[0m")?;
+			}
 			writeln!(f)?;
 		}
 
-		fn fields_to_str(data: &Data, fields: &[(identifier::Id, RingType)]) -> String {
+		fn fields_to_str(data: &Data, fields: &[(identifier::Id, Type)]) -> String {
 			fields.iter()
 				.map(|(field_id, field_type)| {
 					format!("{} : {}", data.text(*field_id), data.type_text(*field_type))
@@ -219,7 +220,7 @@ impl fmt::Display for Data {
 		writeln!(f)?;
 
 		writeln!(f, "{:<16} | {:<16} | PARAMETERS",
-			"PROCEDURE", "RETURN-TYPE")?;
+			"PROC-TYPE", "RETURN-TYPE")?;
 		writeln!(f, "{:-<16} | {:-<16} | {:-<16}", "", "", "")?;
 		for ident_id in self.procedures.keys() {
 			let name = self.text(*ident_id);
@@ -230,17 +231,47 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
+		writeln!(f, "{:<16} | {:<11} | {:<10} | PREV READY COUNT",
+			"PROC-TASK", "START TOKEN", "PREV TOKEN")?;
+		writeln!(f, "{:-<16} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "")?;
+		for task in &self.proc_queue {
+			writeln!(f, "{:<16} | {:<11} | {:<10} | {}",
+				self.text(task.proc_name),
+				task.start_token.index(),
+				task.prev_furthest_token.index(),
+				task.prev_ready_proc_count,
+			)?;
+		}
+		writeln!(f)?;
+
+		writeln!(f, "{:<16} | AST-NODES", "PROCEDURE")?;
+		writeln!(f, "{:-<16} | {:-<16}", "", "")?;
+		for (ident_id, data) in &self.completed_procs {
+			write!(f, "{:<16} | ", self.text(*ident_id))?;
+			let nodes = self.ast_nodes[data.clone()].iter();
+			let locations = self.ast_locations[data.clone()].iter();
+			for (token, location) in nodes.zip(locations) {
+				if let ast::Kind::Ident(ident_id) = token {
+					write!(f, " Ident({})", self.text(*ident_id))?;
+				} else {
+					write!(f, " {token:?}")?;
+				}
+				write!(f, "[{location:?}]")?;
+			}
+		}
+		writeln!(f)?;
+
 		Ok(())
 	}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ProcData {
-	params: Vec<(identifier::Id, RingType)>,
-	ret_type: RingType,
+struct ProcType {
+	params: Vec<(identifier::Id, Type)>,
+	ret_type: Type,
 }
 
-type ColumnData = Vec<(identifier::Id, RingType)>;
+type ColumnData = Vec<(identifier::Id, Type)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RegionData {
@@ -254,20 +285,56 @@ struct TableData {
 	column_spec: ColumnData,
 }
 
+#[derive(Debug)]
 struct Task {
 	proc_name: identifier::Id,
-	tok_pos: token::Id,
-	graph_id: GraphId,
-	scope_id: ScopeId,
+	start_token: token::Id,
+	prev_furthest_token: token::Id,
+	prev_ready_proc_count: usize,
 }
 
-struct NodeGraph {
-	node_kinds: Vec<NodeKind>,
-	use_defs: Vec<Vec<NodeId>>,
-	def_uses: Vec<Vec<NodeId>>,
+#[derive(Debug)]
+enum BinaryOp {
+	Add,
+	Sub,
+	Mul,
+	Div,
+	Mod,
+	ShL,
+	ShR,
+	BinAnd,
+	BinOr,
+	BinXor,
+	LogAnd,
+	LogOr,
+	LogXor,
+	CmpEQ,
+	CmpNE,
+	CmpGE,
+	CmpGT,
+	CmpLE,
+	CmpLT,
 }
 
-struct ScopeStack(Vec<HashMap<identifier::Id, NodeId>>);
+#[derive(Debug)]
+enum UnaryOp {
+	Neg,
+	Not,
+}
 
-enum NodeKind {}
+#[derive(Debug)]
+enum RangeType {
+	Full { start: i64, end: i64 },
+	From { start: i64 },
+	To { end: i64 },
+}
+
+#[derive(Debug)]
+struct ScopeStack(Vec<HashMap<identifier::Id, ast::Id>>);
+
+impl Default for ScopeStack {
+	fn default() -> Self {
+		Self(vec![HashMap::default()])
+	}
+}
 

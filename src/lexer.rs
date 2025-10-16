@@ -59,6 +59,7 @@ impl<'a> Lexer<'a> {
 					"return" => token::Kind::Return,
 					"record" => token::Kind::Record,
 					"table" => token::Kind::Table,
+					"index" => token::Kind::Index,
 					"proc" => token::Kind::Proc,
 					"bool" => token::Kind::Bool,
 					"true" => token::Kind::True,
@@ -68,6 +69,7 @@ impl<'a> Lexer<'a> {
 					"if" => token::Kind::If,
 					"else" => token::Kind::Else,
 					"for" => token::Kind::For,
+					"where" => token::Kind::Where,
 					"u8" => token::Kind::U8,
 					"s8" => token::Kind::S8,
 					"u16" => token::Kind::U16,
@@ -211,6 +213,11 @@ impl<'a> Lexer<'a> {
 			Some('>') => {
 				self.advance();
 				if self.expect('=') { token::Kind::GreaterEqual } else { token::Kind::Greater }
+			}
+
+			Some('.') => {
+				self.advance();
+				if self.expect('.') { token::Kind::DotDot } else { token::Kind::Dot }
 			}
 
 			Some('(') => { self.advance(); token::Kind::OParen }
