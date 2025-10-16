@@ -175,6 +175,39 @@ impl<'a> Lexer<'a> {
 				}
 			}
 
+			Some('<') => {
+				self.advance();
+				if self.expect('<') {
+					token::Kind::LessLess
+				} else if self.expect('=') {
+					token::Kind::LessEqual
+				} else {
+					token::Kind::Less
+				}
+			}
+
+			Some('>') => {
+				self.advance();
+				if self.expect('>') {
+					token::Kind::GreaterGreater
+				} else if self.expect('=') {
+					token::Kind::GreaterEqual
+				} else {
+					token::Kind::Greater
+				}
+			}
+
+			Some('^') => {
+				self.advance();
+				if self.expect('^') {
+					token::Kind::CarrotCarrot
+				} else if self.expect('=') {
+					token::Kind::CarrotEqual
+				} else {
+					token::Kind::Carrot
+				}
+			}
+
 			Some('+') => {
 				self.advance();
 				if self.expect('=') { token::Kind::PlusEqual } else { token::Kind::Plus }
@@ -190,9 +223,9 @@ impl<'a> Lexer<'a> {
 				if self.expect('=') { token::Kind::SlashEqual } else { token::Kind::Slash }
 			}
 
-			Some('^') => {
+			Some('%') => {
 				self.advance();
-				if self.expect('=') { token::Kind::CarrotEqual } else { token::Kind::Carrot }
+				if self.expect('=') { token::Kind::PercentEqual } else { token::Kind::Percent }
 			}
 
 			Some('=') => {
@@ -205,19 +238,19 @@ impl<'a> Lexer<'a> {
 				if self.expect('=') { token::Kind::BangEqual } else { token::Kind::Eof }
 			}
 
-			Some('<') => {
-				self.advance();
-				if self.expect('=') { token::Kind::LessEqual } else { token::Kind::Less }
-			}
-
-			Some('>') => {
-				self.advance();
-				if self.expect('=') { token::Kind::GreaterEqual } else { token::Kind::Greater }
-			}
-
 			Some('.') => {
 				self.advance();
 				if self.expect('.') { token::Kind::DotDot } else { token::Kind::Dot }
+			}
+
+			Some('&') => {
+				self.advance();
+				if self.expect('&') { token::Kind::AmpAmp } else { token::Kind::Amp }
+			}
+
+			Some('|') => {
+				self.advance();
+				if self.expect('|') { token::Kind::BarBar } else { token::Kind::Bar }
 			}
 
 			Some('(') => { self.advance(); token::Kind::OParen }
