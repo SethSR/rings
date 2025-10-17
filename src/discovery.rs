@@ -1,4 +1,6 @@
 
+use std::ops::Range;
+
 use crate::cursor::Cursor;
 use crate::error;
 use crate::identifier;
@@ -23,26 +25,32 @@ pub fn eval(data: &mut Data) {
 						token::Kind::Proc => discover_proc(cursor, data, ident_id, start),
 						token::Kind::Record => discover_record(cursor, data, ident_id),
 						token::Kind::Table => discover_table(cursor, data, ident_id),
-						kind => error::expected_token(data, "top-level statement", kind),
+						_ => {
+							error::expected_token(data, "top-level statement", cursor.index() + 2);
+							return;
+						}
 					}
 				};
 
-				if let Err(e) = result {
-					data.errors.push(e);
-					panic!("{data}");
+				if result.is_none() {
+					break;
 				}
 			}
 			token::Kind::Eof => break,
-			kind => error::expected_token(data, "identifier or EoF", kind),
+			_ => {
+				error::expected_token(data, "identifier or EoF", cursor.index());
+				return
+			}
 		}
 	}
 }
 
-fn check_integer_as_u32(data: &mut Data, expected: &str, found: i64) -> u32 {
+fn check_integer_as_u32(data: &mut Data, expected: &str, found: i64, span: Range<usize>) -> Option<u32> {
 	if !(0..u32::MAX as i64).contains(&found) {
-		error::expected(data, expected, &found.to_string())
-	};
-	found as u32
+		error::expected(data, span, expected, &found.to_string());
+		return None;
+	}
+	Some(found as u32)
 }
 
 fn check_braces(cursor: &mut Cursor, data: &mut Data) {
@@ -52,7 +60,8 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) {
 			token::Kind::OBrace => 1,
 			token::Kind::CBrace => -1,
 			token::Kind::Eof => {
-				error::expected_token(data, "end of procedure", token::Kind::Eof)
+				// error::expected_token(data, "end of procedure", cursor.index());
+				todo!()
 			}
 			_ => 0,
 		};
@@ -62,7 +71,7 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) {
 
 fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, start: token::Id,
-) -> Result<(), String> {
+) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data);
@@ -71,12 +80,12 @@ fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
 		ret_type: crate::Type::Unit, // `main` has no return type
 	});
 	data.proc_start.insert(ident_id, start);
-	Ok(())
+	Some(())
 }
 
 fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, start: token::Id,
-) -> Result<(), String> {
+) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.expect(data, token::Kind::Proc)?;
@@ -92,12 +101,12 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 		ret_type: crate::Type::Unit,
 	});
 	data.proc_start.insert(ident_id, start);
-	Ok(())
+	Some(())
 }
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	end_token: token::Kind,
-) -> Result<ColumnData, String> {
+) -> Option<ColumnData> {
 	let mut fields = ColumnData::default();
 	while end_token != cursor.current(data) {
 		let field_id = cursor.expect_identifier(data, "field name")?;
@@ -110,55 +119,59 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 		}
 		cursor.advance();
 	}
-	Ok(fields)
+	Some(fields)
 }
 
 fn discover_integer(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, value: i64,
-) -> Result<(), String> {
+) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // increment past the integer, as we already have it
 	cursor.expect(data, token::Kind::Semicolon)?;
 	data.values.insert(ident_id, ValueKind::Integer(value));
-	Ok(())
+	Some(())
 }
 
 fn discover_decimal(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, value: f64,
-) -> Result<(), String> {
+) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // increment past the decimal, as we already have it
 	cursor.expect(data, token::Kind::Semicolon)?;
 	data.values.insert(ident_id, ValueKind::Decimal(value));
-	Ok(())
+	Some(())
 }
 
 fn discover_region(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
-) -> Result<(), String> {
+) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // skip over the 'region' keyword
 	cursor.expect(data, token::Kind::OBracket)?;
 	let byte_count = cursor.expect_integer(data, "region size")?;
-	let byte_count = check_integer_as_u32(data, "valid region size", byte_count);
+	let byte_count = check_integer_as_u32(data, "valid region size", byte_count,
+		(cursor.index() - 1).into()..cursor.index().into(),
+	)?;
 	cursor.expect(data, token::Kind::CBracket)?;
 	cursor.expect(data, token::Kind::At)?;
 	let address = cursor.expect_integer(data, "region address")?;
-	let address = check_integer_as_u32(data, "valid region address", address);
+	let address = check_integer_as_u32(data, "valid region address", address,
+		(cursor.index() - 1).into()..cursor.index().into(),
+	)?;
 	cursor.expect(data, token::Kind::Semicolon)?;
 	data.regions.insert(ident_id, RegionData {
 		address,
 		byte_count,
 	});
-	Ok(())
+	Some(())
 }
 
 fn discover_record(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
-) -> Result<(), String> {
+) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // skip over the 'record' keyword
@@ -170,18 +183,20 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data,
 		.sum();
 	data.records.insert(ident_id, 	fields);
 	data.record_sizes.insert(ident_id, size);
-	Ok(())
+	Some(())
 }
 
 fn discover_table(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
-) -> Result<(), String> {
+) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // skip over the 'table' keyword
 	cursor.expect(data, token::Kind::OBracket)?;
 	let row_count = cursor.expect_integer(data, "table size")?;
-	let row_count = check_integer_as_u32(data, "valid table size", row_count);
+	let row_count = check_integer_as_u32(data, "valid table size", row_count,
+		(cursor.index() - 1).into()..cursor.index().into(),
+	)?;
 	cursor.expect(data, token::Kind::CBracket)?;
 	cursor.expect(data, token::Kind::OBrace)?;
 	let column_spec = discover_fields(cursor, data, token::Kind::CBrace)?;
@@ -194,7 +209,7 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data,
 		column_spec,
 	});
 	data.table_sizes.insert(ident_id, row_count as usize * col_size);
-	Ok(())
+	Some(())
 }
 
 #[cfg(test)]
@@ -204,7 +219,7 @@ mod can_parse {
 	use super::*;
 
 	fn setup(source: &str) -> Data {
-		let mut data = Data::new(source.into());
+		let mut data = Data::new(file!().to_string(), source.into());
 		crate::lexer::eval(&mut data);
 		eval(&mut data);
 		data

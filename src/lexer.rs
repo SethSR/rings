@@ -1,60 +1,45 @@
 
 use std::collections::hash_map::Entry;
-use std::ops::Range;
 
+use crate::error;
 use crate::token;
-use crate::identifier::{self, Identifier};
+use crate::identifier::Identifier;
 use crate::{Data, SrcPos};
 
 pub fn eval(data: &mut Data) {
-	let Data {
-		source,
-		tok_list: kinds,
-		tok_pos: starts,
-		identifiers,
-		..
-	} = data;
-	let mut lexer = Lexer {
-		source,
-		..Default::default()
-	};
+	let mut lexer = Lexer { pos: 0 };
 
-	lexer.skip_whitespace_and_comments();
-	while lexer.next(kinds, starts, identifiers) {
-		lexer.skip_whitespace_and_comments();
+	lexer.skip_whitespace_and_comments(data);
+	while lexer.next(data) {
+		lexer.skip_whitespace_and_comments(data);
 	}
 }
 
 #[derive(Default)]
-struct Lexer<'a> {
-	source: &'a str,
+struct Lexer {
 	pos: SrcPos,
 }
 
-impl<'a> Lexer<'a> {
-	fn next(&mut self,
-		kinds: &mut token::KindList,
-		starts: &mut token::PosList,
-		identifiers: &mut identifier::Map<Range<SrcPos>>,
-	) -> bool {
+impl Lexer {
+	fn next(&mut self, data: &mut Data) -> bool {
 		let start = self.pos;
 
-		let kind = match self.peek(0) {
+		let kind = match self.peek(data, 0) {
 			None => {
-				kinds.push(token::Kind::Eof);
-				starts.push(start);
+				data.tok_list.push(token::Kind::Eof);
+				data.tok_pos.push(start);
 				return false;
 			}
 
 			Some(c) if c.is_alphabetic() || c == '_' => {
-				self.advance();
-				while let Some(c) = self.peek(0) {
+				self.advance(data);
+				while let Some(c) = self.peek(data, 0) {
 					if !c.is_alphanumeric() && c != '_' {
 						break;
 					}
-					self.advance();
+					self.advance(data);
 				}
-				match &self.source[start..self.pos] {
+				match &data.source[start..self.pos] {
 					"region" => token::Kind::Region,
 					"return" => token::Kind::Return,
 					"record" => token::Kind::Record,
@@ -79,7 +64,7 @@ impl<'a> Lexer<'a> {
 
 					text => {
 						let ident_id = text.id();
-						if let Entry::Vacant(e) = identifiers.entry(ident_id) {
+						if let Entry::Vacant(e) = data.identifiers.entry(ident_id) {
 							e.insert(start..self.pos);
 						}
 						token::Kind::Identifier(ident_id)
@@ -89,13 +74,13 @@ impl<'a> Lexer<'a> {
 
 			Some(c) if c.is_numeric() => {
 				let mut inner_start = start;
-				self.advance();
+				self.advance(data);
 
 				#[derive(PartialEq)]
 				enum NumType { Bin, Hex, Dec }
 
 				let num_type = if c == '0' {
-					match self.peek(0) {
+					match self.peek(data, 0) {
 						Some('b') => NumType::Bin,
 						Some('x') => NumType::Hex,
 						_ => NumType::Dec,
@@ -105,38 +90,53 @@ impl<'a> Lexer<'a> {
 				};
 
 				if num_type != NumType::Dec {
-					self.advance();
+					self.advance(data);
 					inner_start = self.pos;
 				}
 
-				while let Some(c) = self.peek(0) {
+				while let Some(c) = self.peek(data, 0) {
 					if !c.is_numeric() && c != '_' {
 						break;
 					}
-					self.advance();
+					self.advance(data);
 				}
 				let mut is_fractional = false;
-				if self.peek(0) == Some('.') {
+				if self.peek(data, 0) == Some('.') {
 					is_fractional = true;
-					self.advance();
-					while let Some(c) = self.peek(0) {
+					self.advance(data);
+					while let Some(c) = self.peek(data, 0) {
 						if !c.is_numeric() && c != '_' {
 							break;
 						}
-						self.advance();
+						self.advance(data);
 					}
 				}
 
-				let text = &self.source[inner_start..self.pos];
+				let text = &data.source[inner_start..self.pos];
 				if is_fractional {
 					match num_type {
-						NumType::Bin => panic!("parsing binary fixed-point numbers not implemented"),
-						NumType::Hex => panic!("parsing hexadecimal fixed-point numbers not implemented"),
+						NumType::Bin => {
+							error::error(data,
+								inner_start..self.pos,
+								"parsing binary fixed-point numbers not implemented");
+							return false;
+						}
+						NumType::Hex => {
+							error::error(data,
+								inner_start..self.pos,
+								"parsing hexadecimal fixed-point numbers not implemented");
+							return false;
+						}
 						NumType::Dec => {
-							let num = text.replace('_', "")
-								.parse::<f64>()
-								.expect("unable to parse decimal fixed-point number");
-							token::Kind::Decimal(num)
+							match text.replace('_', "").parse::<f64>() {
+								Ok(num) => token::Kind::Decimal(num),
+								Err(_) => {
+									error::error(data,
+										inner_start..self.pos,
+										"unable to parse decimal fixed-point number");
+									return false;
+								}
+							}
 						}
 					}
 				} else {
@@ -154,10 +154,10 @@ impl<'a> Lexer<'a> {
 			}
 
 			Some('-') => {
-				self.advance();
-				if self.expect('=') {
+				self.advance(data);
+				if self.expect(data, '=') {
 					token::Kind::DashEqual
-				} else if self.expect('>') {
+				} else if self.expect(data, '>') {
 					token::Kind::Arrow
 				} else {
 					token::Kind::Dash
@@ -165,10 +165,10 @@ impl<'a> Lexer<'a> {
 			}
 
 			Some(':') => {
-				self.advance();
-				if self.expect(':') {
+				self.advance(data);
+				if self.expect(data, ':') {
 					token::Kind::ColonColon
-				} else if self.expect('=') {
+				} else if self.expect(data, '=') {
 					token::Kind::ColonEqual
 				} else {
 					token::Kind::Colon
@@ -176,10 +176,10 @@ impl<'a> Lexer<'a> {
 			}
 
 			Some('<') => {
-				self.advance();
-				if self.expect('<') {
+				self.advance(data);
+				if self.expect(data, '<') {
 					token::Kind::LessLess
-				} else if self.expect('=') {
+				} else if self.expect(data, '=') {
 					token::Kind::LessEqual
 				} else {
 					token::Kind::Less
@@ -187,10 +187,10 @@ impl<'a> Lexer<'a> {
 			}
 
 			Some('>') => {
-				self.advance();
-				if self.expect('>') {
+				self.advance(data);
+				if self.expect(data, '>') {
 					token::Kind::GreaterGreater
-				} else if self.expect('=') {
+				} else if self.expect(data, '=') {
 					token::Kind::GreaterEqual
 				} else {
 					token::Kind::Greater
@@ -198,10 +198,10 @@ impl<'a> Lexer<'a> {
 			}
 
 			Some('^') => {
-				self.advance();
-				if self.expect('^') {
+				self.advance(data);
+				if self.expect(data, '^') {
 					token::Kind::CarrotCarrot
-				} else if self.expect('=') {
+				} else if self.expect(data, '=') {
 					token::Kind::CarrotEqual
 				} else {
 					token::Kind::Carrot
@@ -209,88 +209,92 @@ impl<'a> Lexer<'a> {
 			}
 
 			Some('+') => {
-				self.advance();
-				if self.expect('=') { token::Kind::PlusEqual } else { token::Kind::Plus }
+				self.advance(data);
+				if self.expect(data, '=') { token::Kind::PlusEqual } else { token::Kind::Plus }
 			}
 
 			Some('*') => {
-				self.advance();
-				if self.expect('=') { token::Kind::StarEqual } else { token::Kind::Star }
+				self.advance(data);
+				if self.expect(data, '=') { token::Kind::StarEqual } else { token::Kind::Star }
 			}
 
 			Some('/') => {
-				self.advance();
-				if self.expect('=') { token::Kind::SlashEqual } else { token::Kind::Slash }
+				self.advance(data);
+				if self.expect(data, '=') { token::Kind::SlashEqual } else { token::Kind::Slash }
 			}
 
 			Some('%') => {
-				self.advance();
-				if self.expect('=') { token::Kind::PercentEqual } else { token::Kind::Percent }
+				self.advance(data);
+				if self.expect(data, '=') { token::Kind::PercentEqual } else { token::Kind::Percent }
 			}
 
 			Some('=') => {
-				self.advance();
-				if self.expect('=') { token::Kind::EqualEqual } else { token::Kind::Equal }
+				self.advance(data);
+				if self.expect(data, '=') { token::Kind::EqualEqual } else { token::Kind::Equal }
 			}
 
 			Some('!') => {
-				self.advance();
-				if self.expect('=') { token::Kind::BangEqual } else { token::Kind::Eof }
+				self.advance(data);
+				if self.expect(data, '=') { token::Kind::BangEqual } else { token::Kind::Eof }
 			}
 
 			Some('.') => {
-				self.advance();
-				if self.expect('.') { token::Kind::DotDot } else { token::Kind::Dot }
+				self.advance(data);
+				if self.expect(data, '.') { token::Kind::DotDot } else { token::Kind::Dot }
 			}
 
 			Some('&') => {
-				self.advance();
-				if self.expect('&') { token::Kind::AmpAmp } else { token::Kind::Amp }
+				self.advance(data);
+				if self.expect(data, '&') { token::Kind::AmpAmp } else { token::Kind::Amp }
 			}
 
 			Some('|') => {
-				self.advance();
-				if self.expect('|') { token::Kind::BarBar } else { token::Kind::Bar }
+				self.advance(data);
+				if self.expect(data, '|') { token::Kind::BarBar } else { token::Kind::Bar }
 			}
 
-			Some('(') => { self.advance(); token::Kind::OParen }
+			Some('(') => { self.advance(data); token::Kind::OParen }
 
-			Some(')') => { self.advance(); token::Kind::CParen }
+			Some(')') => { self.advance(data); token::Kind::CParen }
 
-			Some('{') => { self.advance(); token::Kind::OBrace }
+			Some('{') => { self.advance(data); token::Kind::OBrace }
 
-			Some('}') => { self.advance(); token::Kind::CBrace }
+			Some('}') => { self.advance(data); token::Kind::CBrace }
 
-			Some('[') => { self.advance(); token::Kind::OBracket }
+			Some('[') => { self.advance(data); token::Kind::OBracket }
 
-			Some(']') => { self.advance(); token::Kind::CBracket }
+			Some(']') => { self.advance(data); token::Kind::CBracket }
 
-			Some(';') => { self.advance(); token::Kind::Semicolon }
+			Some(';') => { self.advance(data); token::Kind::Semicolon }
 
-			Some(',') => { self.advance(); token::Kind::Comma }
+			Some(',') => { self.advance(data); token::Kind::Comma }
 
-			Some(_) => { self.advance(); token::Kind::Eof }
+			Some(_) => { self.advance(data); token::Kind::Eof }
 		};
 
-		kinds.push(kind);
-		starts.push(start);
+		data.tok_list.push(kind);
+		data.tok_pos.push(start);
 		true
 	}
 
-	fn skip_whitespace_and_comments(&mut self) {
+	fn skip_whitespace_and_comments(&mut self, data: &mut Data) {
 		loop {
-			match self.peek(0) {
-				Some(c) if c.is_whitespace() => {
-					self.advance();
+			match self.peek(data, 0) {
+				Some('\n') => {
+					data.line_pos.push(self.pos);
+					self.advance(data);
 				}
-				Some('-') if self.peek(1) == Some('-') => {
-					self.advance();
-					self.advance();
-					while let Some(c) = self.peek(0) {
+				Some(c) if c.is_whitespace() => {
+					self.advance(data);
+				}
+				Some('-') if self.peek(data, 1) == Some('-') => {
+					self.advance(data);
+					self.advance(data);
+					while let Some(c) = self.peek(data, 0) {
 						if c == '\n' {
 							break;
 						}
-						self.advance();
+						self.advance(data);
 					}
 				}
 				_ => break,
@@ -298,21 +302,21 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	fn peek(&self, offset: usize) -> Option<char> {
-		self.source[self.pos..].chars().nth(offset)
+	fn peek(&self, data: &Data, offset: usize) -> Option<char> {
+		data.source[self.pos..].chars().nth(offset)
 	}
 
-	fn expect(&mut self, ch: char) -> bool {
-		if self.peek(0) == Some(ch) {
-			self.advance();
+	fn expect(&mut self, data: &Data, ch: char) -> bool {
+		if self.peek(data, 0) == Some(ch) {
+			self.advance(data);
 			true
 		} else {
 			false
 		}
 	}
 
-	fn advance(&mut self) {
-		if let Some(c) = self.peek(0) {
+	fn advance(&mut self, data: &Data) {
+		if let Some(c) = self.peek(data, 0) {
 			self.pos += c.len_utf8();
 		}
 	}
@@ -324,7 +328,7 @@ mod can_lex {
 	use super::token::Kind;
 
 	fn setup(source: &str) -> Data {
-		let mut data = Data::new(source.into());
+		let mut data = Data::new(file!().to_string(), source.into());
 		eval(&mut data);
 		data
 	}

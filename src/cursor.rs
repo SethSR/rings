@@ -1,4 +1,5 @@
 
+use crate::error;
 use crate::identifier;
 use crate::token;
 use crate::Data;
@@ -34,64 +35,67 @@ impl Cursor {
 		self.peek(data, 0)
 	}
 
-	pub fn expect(&mut self, data: &mut Data, expected: token::Kind) -> Result<(), String> {
+	pub fn expect(&mut self, data: &mut Data, expected: token::Kind) -> Option<()> {
 		let found = self.current(data);
 		if found == expected {
 			self.advance();
-			Ok(())
+			Some(())
 		} else {
-			Err(format!("Expected {expected:?}, found {found:?}"))
+			error::expected_token(data, &format!("{expected:?}"), self.index());
+			None
 		}
 	}
 
-	pub fn expect_identifier(&mut self, data: &Data,
+	pub fn expect_identifier(&mut self, data: &mut Data,
 		expected: &str,
-	) -> Result<identifier::Id, String> {
+	) -> Option<identifier::Id> {
 		let kind = self.current(data);
 		if let token::Kind::Identifier(ident_id) = kind {
 			self.advance();
-			Ok(ident_id)
+			Some(ident_id)
 		} else {
-			Err(format!("Expected {expected}, found {kind:?}"))
+			error::expected_token(data, expected, self.index());
+			None
 		}
 	}
 
-	pub fn expect_integer(&mut self, data: &Data,
+	pub fn expect_integer(&mut self, data: &mut Data,
 		expected: &str,
-	) -> Result<i64, String> {
+	) -> Option<i64> {
 		let kind = self.current(data);
 		if let token::Kind::Integer(num) = kind {
 			self.advance();
-			Ok(num)
+			Some(num)
 		} else {
-			Err(format!("Expected {expected}, found {kind:?}"))
+			error::expected_token(data, expected, self.index());
+			None
 		}
 	}
 
 	pub fn expect_type(&mut self, data: &mut Data,
 		expected: &str,
-	) -> Result<crate::Type, String> {
+	) -> Option<crate::Type> {
 		match self.current(data) {
 			token::Kind::Identifier(ident_id) => {
 				if data.records.contains_key(&ident_id) {
-					Ok(crate::Type::Record(ident_id))
+					Some(crate::Type::Record(ident_id))
 				} else if data.tables.contains_key(&ident_id) {
-					Ok(crate::Type::Table(ident_id))
+					Some(crate::Type::Table(ident_id))
 				} else {
-					Err(format!("Expected {expected}, found {}", data.text(ident_id)))
-					// error::expected(data, "type-specifier", found)
+					error::expected_token(data, expected, self.index());
+					None
 				}
 			}
-			token::Kind::Bool => Ok(crate::Type::Bool),
-			token::Kind::U8 => Ok(crate::Type::U8),
-			token::Kind::S8 => Ok(crate::Type::S8),
-			token::Kind::U16 => Ok(crate::Type::U16),
-			token::Kind::S16 => Ok(crate::Type::S16),
-			token::Kind::U32 => Ok(crate::Type::U32),
-			token::Kind::S32 => Ok(crate::Type::S32),
-			kind => {
-				Err(format!("Expected {expected}, found {kind:?}"))
-				// error::expected_token(data, "type-specifier", kind)
+			token::Kind::Bool => Some(crate::Type::Bool),
+			token::Kind::U8 => Some(crate::Type::U8),
+			token::Kind::S8 => Some(crate::Type::S8),
+			token::Kind::U16 => Some(crate::Type::U16),
+			token::Kind::S16 => Some(crate::Type::S16),
+			token::Kind::U32 => Some(crate::Type::U32),
+			token::Kind::S32 => Some(crate::Type::S32),
+			_ => {
+				error::expected_token(data, expected, self.index());
+				None
 			}
 		}
 	}

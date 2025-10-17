@@ -12,16 +12,18 @@ mod lexer;
 mod parser;
 mod token;
 
+use error::CompilerError;
+
 fn main() {
 	let mut args = env::args();
 	args.next();
 
 	let file_path = args.next()
 		.expect("expected source file");
-	let source = fs::read_to_string(file_path)
+	let source = fs::read_to_string(&file_path)
 		.expect("unable to read source file");
 
-	let data = compile(source.into());
+	let data = compile(file_path, source.into());
 	println!("{data}")
 }
 
@@ -39,8 +41,8 @@ enum Type {
 	Unit,
 }
 
-pub fn compile(source: Box<str>) -> Data {
-	let mut data = Data::new(source);
+pub fn compile(file_path: String, source: Box<str>) -> Data {
+	let mut data = Data::new(file_path, source);
 	lexer::eval(&mut data);
 	discovery::eval(&mut data);
 	parser::eval(&mut data);
@@ -58,8 +60,11 @@ enum ValueKind {
 
 #[derive(Default)]
 pub struct Data {
+	source_file: String,
 	source: Box<str>,
-	errors: Vec<String>,
+	// stores the position of each newline (\n) character in the source
+	line_pos: token::PosList,
+	errors: Vec<CompilerError>,
 	/* Lexer */
 	tok_list: token::KindList,
 	tok_pos: token::PosList,
@@ -108,8 +113,9 @@ fn fmt_size(size: usize) -> String {
 }
 
 impl Data {
-	pub fn new(source: Box<str>) -> Self {
+	pub fn new(source_file: String, source: Box<str>) -> Self {
 		Self {
+			source_file,
 			source,
 			..Default::default()
 		}
@@ -141,21 +147,41 @@ impl Data {
 			Type::Unit => 0,
 		}
 	}
+
+	// Get the text of a specific line
+	pub fn get_line(&self, line_number: usize) -> &str {
+		if !(1..=self.line_pos.len()).contains(&line_number) {
+			return "";
+		}
+
+		let start = self.line_pos[line_number - 1] as usize;
+		let end = if line_number < self.line_pos.len() {
+			self.line_pos[line_number] as usize - 1
+		} else {
+			self.source.len()
+		};
+
+		&self.source[start..end]
+	}
+
+	// Convert byte offset to line and column
+	pub fn lookup_position(&self, tok_pos: SrcPos) -> (usize, usize) {
+		let line = match self.line_pos.binary_search(&tok_pos) {
+			Ok(line) => line,
+			Err(line) => line - 1,
+		};
+
+		let line_pos = self.line_pos[line];
+		let column = tok_pos - line_pos;
+
+		(line.index() + 1, column + 1)
+	}
 }
 
 impl fmt::Display for Data {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		writeln!(f, "=== Rings Compiler ===")?;
 		writeln!(f)?;
-
-		if !self.errors.is_empty() {
-			// Errors are printed in bold(1m) red(31m)
-			writeln!(f, "Error:")?;
-			for emsg in &self.errors {
-				writeln!(f, "  \x1b[31;1m{emsg}\x1b[0m")?;
-			}
-			writeln!(f)?;
-		}
 
 		fn fields_to_str(data: &Data, fields: &[(identifier::Id, Type)]) -> String {
 			fields.iter()
@@ -260,6 +286,15 @@ impl fmt::Display for Data {
 			}
 		}
 		writeln!(f)?;
+
+		if !self.errors.is_empty() {
+			// Errors are printed in bold(1m) red(31m)
+			writeln!(f, "Error:")?;
+			for err in &self.errors {
+				writeln!(f, "{}", err.display(self))?;
+			}
+			writeln!(f)?;
+		}
 
 		Ok(())
 	}
