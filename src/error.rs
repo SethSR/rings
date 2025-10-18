@@ -37,7 +37,7 @@ pub struct Note {
 
 // Color codes
 const RED   : &str = "\x1b[31m";
-const YELLOW: &str = "\x1b[33m";
+// const YELLOW: &str = "\x1b[33m";
 const BLUE  : &str = "\x1b[34m";
 const BOLD  : &str = "\x1b[1m";
 const RESET : &str = "\x1b[0m";
@@ -84,31 +84,24 @@ impl CompilerError {
 		// Main error header
 		let file = &data.source_file;
 		let (line, col) = data.lookup_position(self.location.start);
-		let line_num_width = line.to_string().len();
+		let line_num_digit_count = line.to_string().len();
 
-		// Error header: "error message"
 		output.push(header(&error_lead(), &self.message));
-
-		// Location: "  --> file.rings:10:5"
-		output.push(location(file, line, col, line_num_width));
-
-		// Line number and separator
-		output.push(vbar_empty(line_num_width));
-
-		// The actual line
-		output.push(vbar_text(line_num_width, line, data.get_line(line)));
+		output.push(location(line_num_digit_count,
+			file, line, col));
+		output.push(vbar_empty(line_num_digit_count));
+		output.push(vbar_text(line_num_digit_count,
+			line, data.get_line(line)));
 
 		// Highlight underline
 		let (end_line, end_col) = data.lookup_position(self.location.end);
-
-		if line == end_line {
-			// Single line highlight
-			let underline_len = (end_col - col).max(1);
-			output.push(vbar_highlight(line_num_width, col, underline_len));
+		let underline_len = if line == end_line {
+			end_col.saturating_sub(col).max(1) // Single line highlight
 		} else {
-			// Multi-line highlight
-			output.push(vbar_highlight(line_num_width, col, 1));
-		}
+			1 // Multi-line highlight
+		};
+		output.push(vbar_highlight(line_num_digit_count,
+			col, underline_len));
 
 		// Notes
 		for note in &self.notes {
@@ -121,12 +114,11 @@ impl CompilerError {
 				let (note_line, note_col) = data.lookup_position(note_loc.start);
 
 				output.push(header(&note_lead(), &note.message));
-				output.push(location(note_file, note_line, note_col, line_num_width));
-
-				// Show note context
-				let note_line_text = data.get_line(note_line);
-				output.push(vbar_empty(line_num_width));
-				output.push(vbar_text(line_num_width, note_line, note_line_text));
+				output.push(location(line_num_digit_count,
+					note_file, note_line, note_col));
+				output.push(vbar_empty(line_num_digit_count));
+				output.push(vbar_text(line_num_digit_count,
+					note_line, data.get_line(note_line)));
 			} else {
 				// Note without location
 				output.push(header(&note_lead(), &note.message));
@@ -149,25 +141,25 @@ fn header(lead: &str, msg: &str) -> String {
 	format!("{BOLD}{lead}{RESET}{BOLD}: {msg}")
 }
 
-fn location(file: &str, line: usize, col: usize, width: usize) -> String {
-	format!("{:width$}{BLUE}-->{RESET}{file}:{line}:{col}", "")
+fn location(gutter_width: usize, file: &str, line: usize, col: usize) -> String {
+	format!("{:gutter_width$}{BLUE}-->{RESET}{file}:{line}:{col}", "")
 }
 
-fn vbar<T: std::fmt::Display>(width: usize, text: T) -> String {
-	format!("{BLUE}{text:width$} |{RESET}")
+fn vbar<T: std::fmt::Display>(gutter_width: usize, text: T) -> String {
+	format!("{BLUE}{text:gutter_width$} |{RESET}")
 }
 
-fn vbar_empty(width: usize) -> String {
-	vbar(width, "")
+fn vbar_empty(gutter_width: usize) -> String {
+	vbar(gutter_width, "")
 }
 
-fn vbar_text(width: usize, line: usize, text: &str) -> String {
-	format!("{} {text}", vbar(width, line))
+fn vbar_text(gutter_width: usize, line: usize, text: &str) -> String {
+	format!("{} {text}", vbar(gutter_width, line))
 }
 
-fn vbar_highlight(width: usize, padding: usize, length: usize) -> String {
+fn vbar_highlight(gutter_width: usize, padding: usize, length: usize) -> String {
 	let padding = " ".repeat(padding);
 	let arrows = "^".repeat(length);
-	format!("{} {padding}{RED}{arrows}{RESET}", vbar(width, ""))
+	format!("{} {padding}{RED}{arrows}{RESET}", vbar(gutter_width, ""))
 }
 
