@@ -6,10 +6,18 @@ use crate::cursor::Cursor;
 use crate::error;
 use crate::identifier;
 use crate::token;
-use crate::{BinaryOp, Data, RangeType, SrcPos, Task};
+use crate::{BinaryOp, Data, RangeType, SrcPos};
 
 use ast::Kind as AKind;
 use token::Kind as TKind;
+
+#[derive(Debug)]
+pub struct Task {
+	pub proc_name: identifier::Id,
+	pub start_token: token::Id,
+	pub prev_furthest_token: token::Id,
+	pub prev_ready_proc_count: usize,
+}
 
 pub fn eval(data: &mut Data) {
 	data.proc_queue = data.procedures.keys()
@@ -130,7 +138,7 @@ fn parse_ident_statement(cursor: &mut Cursor, data: &mut Data,
 		TKind::Equal => parse_assignment(cursor, data, ident_id, start),
 		TKind::ColonEqual => {
 			error::expected_token(data, "type-inference is not implemented yet: {}",
-				cursor.index());
+				cursor.index() - 1);
 			None
 		}
 		TKind::PlusEqual => parse_op_assignment(cursor, data, ident_id, start, BinaryOp::Add),

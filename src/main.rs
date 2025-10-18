@@ -1,6 +1,6 @@
 
 use std::{env, fmt, fs};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::ops::Range;
 
 mod ast;
@@ -71,17 +71,17 @@ pub struct Data {
 	identifiers: identifier::Map<Range<SrcPos>>,
 	/* Discovery */
 	proc_start: identifier::Map<token::Id>,
-	procedures: identifier::Map<ProcType>,
+	procedures: identifier::Map<discovery::ProcType>,
 	// val-name -> value-kind
 	values: identifier::Map<ValueKind>,
-	regions: identifier::Map<RegionData>,
+	regions: identifier::Map<discovery::RegionData>,
 	// rec-name -> (field, type)*
-	records: identifier::Map<ColumnData>,
+	records: identifier::Map<discovery::ColumnData>,
 	record_sizes: identifier::Map<usize>,
-	tables: identifier::Map<TableData>,
+	tables: identifier::Map<discovery::TableData>,
 	table_sizes: identifier::Map<usize>,
 	/* Parsing */
-	proc_queue: VecDeque<Task>,
+	proc_queue: VecDeque<parser::Task>,
 	ast_nodes: ast::KindList,
 	ast_locations: ast::LocList,
 	// procedures ready to be type-checked
@@ -154,9 +154,9 @@ impl Data {
 			return "";
 		}
 
-		let start = self.line_pos[line_number - 1] as usize;
+		let start = self.line_pos[line_number - 1] + 1;
 		let end = if line_number < self.line_pos.len() {
-			self.line_pos[line_number] as usize - 1
+			self.line_pos[line_number] - 1
 		} else {
 			self.source.len()
 		};
@@ -287,45 +287,14 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
-		if !self.errors.is_empty() {
-			// Errors are printed in bold(1m) red(31m)
-			writeln!(f, "Error:")?;
-			for err in &self.errors {
-				writeln!(f, "{}", err.display(self))?;
-			}
-			writeln!(f)?;
+		// Errors are printed in bold(1m) red(31m)
+		for err in &self.errors {
+			writeln!(f, "{}", err.display(self))?;
 		}
+		writeln!(f)?;
 
 		Ok(())
 	}
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProcType {
-	params: Vec<(identifier::Id, Type)>,
-	ret_type: Type,
-}
-
-type ColumnData = Vec<(identifier::Id, Type)>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RegionData {
-	address: u32,
-	byte_count: u32,
-}
-
-#[derive(Debug, PartialEq)]
-struct TableData {
-	row_count: u32,
-	column_spec: ColumnData,
-}
-
-#[derive(Debug)]
-struct Task {
-	proc_name: identifier::Id,
-	start_token: token::Id,
-	prev_furthest_token: token::Id,
-	prev_ready_proc_count: usize,
 }
 
 #[derive(Debug)]
@@ -362,14 +331,5 @@ enum RangeType {
 	Full { start: i64, end: i64 },
 	From { start: i64 },
 	To { end: i64 },
-}
-
-#[derive(Debug)]
-struct ScopeStack(Vec<HashMap<identifier::Id, ast::Id>>);
-
-impl Default for ScopeStack {
-	fn default() -> Self {
-		Self(vec![HashMap::default()])
-	}
 }
 

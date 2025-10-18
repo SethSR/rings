@@ -5,7 +5,27 @@ use crate::cursor::Cursor;
 use crate::error;
 use crate::identifier;
 use crate::token;
-use crate::{ Data, ProcType, RegionData, ColumnData, TableData, ValueKind };
+use crate::{Data, ValueKind};
+
+pub type ColumnData = Vec<(identifier::Id, crate::Type)>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegionData {
+	pub address: u32,
+	pub byte_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcType {
+	pub params: Vec<(identifier::Id, crate::Type)>,
+	pub ret_type: crate::Type,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct TableData {
+	pub row_count: u32,
+	pub column_spec: ColumnData,
+}
 
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
