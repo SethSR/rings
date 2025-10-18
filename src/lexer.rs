@@ -1,7 +1,6 @@
 
 use std::collections::hash_map::Entry;
 
-use crate::error;
 use crate::token;
 use crate::identifier::Identifier;
 use crate::{Data, SrcPos};
@@ -13,6 +12,13 @@ pub fn eval(data: &mut Data) {
 	while lexer.next(data) {
 		lexer.skip_whitespace_and_comments(data);
 	}
+}
+
+macro_rules! parse_error {
+	($data:expr, $msg:expr) => {{
+		crate::error::error($data, $msg, crate::token::Id::new($data.tok_list.len()));
+		return false;
+	}}
 }
 
 #[derive(Default)]
@@ -115,39 +121,32 @@ impl Lexer {
 				let text = &data.source[inner_start..self.pos];
 				if is_fractional {
 					match num_type {
-						NumType::Bin => {
-							error::error(data,
-								inner_start..self.pos,
-								"parsing binary fixed-point numbers not implemented");
-							return false;
-						}
-						NumType::Hex => {
-							error::error(data,
-								inner_start..self.pos,
-								"parsing hexadecimal fixed-point numbers not implemented");
-							return false;
-						}
+						NumType::Bin => parse_error!(data,
+							"parsing binary fixed-point numbers not implemented yet"),
+						NumType::Hex => parse_error!(data,
+							"parsing hexadecimal fixed-point numbers not implemented yet"),
 						NumType::Dec => {
 							match text.replace('_', "").parse::<f64>() {
 								Ok(num) => token::Kind::Decimal(num),
-								Err(_) => {
-									error::error(data,
-										inner_start..self.pos,
-										"unable to parse decimal fixed-point number");
-									return false;
-								}
+								Err(_) => parse_error!(data, "unable to parse decimal fixed-point number"),
 							}
 						}
 					}
 				} else {
 					let text = text.replace('_', "");
 					let num = match num_type {
-						NumType::Bin => i64::from_str_radix(&text, 2)
-							.expect("unable to parse binary integer"),
-						NumType::Hex => i64::from_str_radix(&text, 16)
-							.expect("unable to parse hexadecimal integer"),
-						NumType::Dec => text.parse::<i64>()
-							.expect("unable to parse decimal integer"),
+						NumType::Bin => match i64::from_str_radix(&text, 2) {
+							Ok(num) => num,
+							Err(_) => parse_error!(data, "unable to parse binary integer"),
+						},
+						NumType::Hex => match i64::from_str_radix(&text, 16) {
+							Ok(num) => num,
+							Err(_) => parse_error!(data, "unable to parse hexadecimal integer"),
+						},
+						NumType::Dec => match text.parse::<i64>() {
+							Ok(num) => num,
+							Err(_) => parse_error!(data, "unable to parse decimal integer"),
+						},
 					};
 					token::Kind::Integer(num)
 				}

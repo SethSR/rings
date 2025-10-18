@@ -73,20 +73,22 @@ fn check_integer_as_u32(data: &mut Data, expected: &str, found: i64, span: Range
 	Some(found as u32)
 }
 
-fn check_braces(cursor: &mut Cursor, data: &mut Data) {
+fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 	let mut brace_count = 1;
 	while brace_count > 0 && cursor.current(data) != token::Kind::Eof {
 		brace_count += match cursor.current(data) {
 			token::Kind::OBrace => 1,
 			token::Kind::CBrace => -1,
 			token::Kind::Eof => {
-				// error::expected_token(data, "end of procedure", cursor.index());
-				todo!()
+				error::expected_token(data, "end of procedure", cursor.index());
+				return None;
 			}
 			_ => 0,
 		};
 		cursor.advance();
 	}
+
+	Some(())
 }
 
 fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
@@ -94,7 +96,7 @@ fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
 ) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::OBrace)?;
-	check_braces(cursor, data);
+	check_braces(cursor, data)?;
 	data.procedures.insert(ident_id, ProcType {
 		params: vec![], // `main` has no parameters 
 		ret_type: crate::Type::Unit, // `main` has no return type

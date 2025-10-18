@@ -50,21 +50,14 @@ pub fn eval(data: &mut Data) {
 					task.prev_ready_proc_count = data.completed_procs.len();
 					data.proc_queue.push_back(task);
 				} else {
-
 					let name = data.text(task.proc_name).to_string();
-					println!("No progress made since last attempt to parse '{name}'");
-					print!("Tokens:");
-					for token in &data.tok_list[task.start_token..task.prev_furthest_token] {
-						if let token::Kind::Identifier(ident_id) = token {
-							print!(" {}", data.text(*ident_id));
-						} else {
-							print!(" {token:?}");
-						}
-					}
-					println!();
+					error::error_with_notes(data,
+						&format!("No progress made since last attempt to parse '{name}'"),
+						task.start_token,
+						&[("reached this point before failing", task.prev_furthest_token)]
+					);
 					data.proc_queue.push_back(task);
 					return;
-					// error::error(data, &format!("No progress made since last attempt to parse '{name}'"))
 				}
 			}
 
@@ -137,8 +130,9 @@ fn parse_ident_statement(cursor: &mut Cursor, data: &mut Data,
 		TKind::Colon => parse_definition(cursor, data, ident_id, start),
 		TKind::Equal => parse_assignment(cursor, data, ident_id, start),
 		TKind::ColonEqual => {
-			error::expected_token(data, "type-inference is not implemented yet: {}",
-				cursor.index() - 1);
+			error::error(data,
+				"type-inference is not implemented yet, please add a type-specifier",
+				cursor.index());
 			None
 		}
 		TKind::PlusEqual => parse_op_assignment(cursor, data, ident_id, start, BinaryOp::Add),

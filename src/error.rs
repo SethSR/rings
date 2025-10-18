@@ -4,25 +4,41 @@ use std::ops::Range;
 use crate::token;
 use crate::Data;
 
-pub fn error(data: &mut Data, span: Range<usize>, msg: &str) {
-	let span = Span { start: span.start, end: span.end };
-	let err = CompilerError::new(span, msg);
+pub fn error(data: &mut Data, message: &str, token_id: token::Id) {
+	let err = CompilerError::new(get_location(data, token_id), message);
+	data.errors.push(err);
+}
+
+pub fn error_with_notes(data: &mut Data, message: &str, token_id: token::Id,
+	notes: &[(&str, token::Id)],
+) {
+	let mut err = CompilerError::new(get_location(data, token_id), message);
+	for (note_msg, note_id) in notes {
+		err.with_note_at(get_location(data, *note_id), *note_msg);
+	}
 	data.errors.push(err);
 }
 
 pub fn expected(data: &mut Data, span: Range<usize>, expected: &str, found: &str) {
-	error(data, span, &format!("Expected {expected}, found {found}"))
+	let span = Span { start: span.start, end: span.end };
+	let err = CompilerError::new(span,
+		format!("Expected {expected}, found {found}"));
+	data.errors.push(err);
 }
 
-pub fn expected_token(data: &mut Data, expected: &str, id: token::Id) {
-	let found = data.tok_list[id];
-	let start = data.tok_pos[id];
-	let span = start..start + found.size(data);
+pub fn expected_token(data: &mut Data, expected: &str, token_id: token::Id) {
+	let found = data.tok_list[token_id];
 	if let token::Kind::Identifier(ident_id) = found {
-		error(data, span, &format!("Expected {expected}, found '{}'", data.text(ident_id)))
+		error(data, &format!("Expected {expected}, found '{}'", data.text(ident_id)), token_id)
 	} else {
-		error(data, span, &format!("Expected {expected}, found {found:?}"))
+		error(data, &format!("Expected {expected}, found {found:?}"), token_id)
 	}
+}
+
+fn get_location(data: &Data, token_id: token::Id) -> Span {
+	let kind = data.tok_list[token_id];
+	let start = data.tok_pos[token_id];
+	Span { start, end: start + kind.size(data) }
 }
 
 pub struct Span {
@@ -91,7 +107,7 @@ impl CompilerError {
 			file, line, col));
 		output.push(vbar_empty(line_num_digit_count));
 		output.push(vbar_text(line_num_digit_count,
-			line, data.get_line(line)));
+			line, &data.get_line(line)));
 
 		// Highlight underline
 		let (end_line, end_col) = data.lookup_position(self.location.end);
@@ -101,12 +117,10 @@ impl CompilerError {
 			1 // Multi-line highlight
 		};
 		output.push(vbar_highlight(line_num_digit_count,
-			col, underline_len));
+			col - 1, underline_len));
 
 		// Notes
 		for note in &self.notes {
-			output.push(String::from('\n'));
-
 			if let Some(note_loc) = &note.location {
 				// TODO - srenshaw - Eventually, we'll want to change this to allow more than one source
 				// file.
@@ -118,7 +132,9 @@ impl CompilerError {
 					note_file, note_line, note_col));
 				output.push(vbar_empty(line_num_digit_count));
 				output.push(vbar_text(line_num_digit_count,
-					note_line, data.get_line(note_line)));
+					note_line, &data.get_line(note_line)));
+				output.push(vbar_highlight(line_num_digit_count,
+					note_col - 1, 1));
 			} else {
 				// Note without location
 				output.push(header(&note_lead(), &note.message));
@@ -160,6 +176,6 @@ fn vbar_text(gutter_width: usize, line: usize, text: &str) -> String {
 fn vbar_highlight(gutter_width: usize, padding: usize, length: usize) -> String {
 	let padding = " ".repeat(padding);
 	let arrows = "^".repeat(length);
-	format!("{} {padding}{RED}{arrows}{RESET}", vbar(gutter_width, ""))
+	format!("{}{padding}{RED}{arrows}{RESET}", vbar(gutter_width, ""))
 }
 

@@ -149,19 +149,8 @@ impl Data {
 	}
 
 	// Get the text of a specific line
-	pub fn get_line(&self, line_number: usize) -> &str {
-		if !(1..=self.line_pos.len()).contains(&line_number) {
-			return "";
-		}
-
-		let start = self.line_pos[line_number - 1] + 1;
-		let end = if line_number < self.line_pos.len() {
-			self.line_pos[line_number] - 1
-		} else {
-			self.source.len()
-		};
-
-		&self.source[start..end]
+	pub fn get_line(&self, line_number: usize) -> String {
+		self.get_line_text(line_number).replace('\t', "  ")
 	}
 
 	// Convert byte offset to line and column
@@ -173,8 +162,27 @@ impl Data {
 
 		let line_pos = self.line_pos[line];
 		let column = tok_pos - line_pos;
+		let line_text = self.get_line_text(line.index() + 1);
+		let tab_count = line_text.chars()
+			.filter(|ch| *ch == '\t')
+			.count();
 
-		(line.index() + 1, column + 1)
+		(line.index() + 1, column + tab_count + 1)
+	}
+
+	fn get_line_text(&self, line_number: usize) -> &str {
+		if !(1..=self.line_pos.len()).contains(&line_number) {
+			return "";
+		}
+
+		let start = self.line_pos[line_number - 1] + 1;
+		let end = if line_number < self.line_pos.len() {
+			self.line_pos[line_number]
+		} else {
+			self.source.len()
+		};
+
+		&self.source[start..end]
 	}
 }
 
@@ -289,7 +297,7 @@ impl fmt::Display for Data {
 
 		// Errors are printed in bold(1m) red(31m)
 		for err in &self.errors {
-			writeln!(f, "{}", err.display(self))?;
+			writeln!(f, "{}\n", err.display(self))?;
 		}
 		writeln!(f)?;
 
