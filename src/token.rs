@@ -11,7 +11,7 @@ pub type PosList = IndexVec<Id, SrcPos>;
 define_index_type! {
 	pub struct Id = usize;
 	DEFAULT = Id::from_raw_unchecked(0);
-	DEBUG_FORMAT = "tokens::Id({})";
+	DEBUG_FORMAT = "TOK<{}>";
 	DISPLAY_FORMAT = "{}";
 }
 

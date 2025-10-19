@@ -5,6 +5,7 @@ use index_vec::define_index_type;
 use index_vec::IndexVec;
 
 use crate::identifier;
+use crate::token;
 use crate::{BinaryOp, RangeType, SrcPos, UnaryOp};
 
 define_index_type! {
@@ -34,7 +35,8 @@ pub enum Kind {
 }
 
 pub type KindList = IndexVec<Id, Kind>;
-pub type LocList = IndexVec<Id, Range<SrcPos>>;
+pub type PosList = IndexVec<Id, Range<SrcPos>>;
+pub type LocList = IndexVec<Id, Range<token::Id>>;
 
 #[derive(Debug, Default)]
 pub struct Graph {

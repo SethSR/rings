@@ -42,6 +42,23 @@ enum Type {
 	Unit,
 }
 
+impl Type {
+	pub fn display<'a>(&self, data: &'a Data) -> &'a str {
+		match self {
+			Self::Bool => "bool",
+			Self::S8 => "s8",
+			Self::U8 => "u8",
+			Self::S16 => "s16",
+			Self::U16 => "u16",
+			Self::S32 => "s32",
+			Self::U32 => "u32",
+			Self::Record(ident_id) => data.text(*ident_id),
+			Self::Table(ident_id) => data.text(*ident_id),
+			Self::Unit => "_",
+		}
+	}
+}
+
 pub fn compile(file_path: String, source: Box<str>) -> Data {
 	let mut data = Data::new(file_path, source);
 	lexer::eval(&mut data);
@@ -84,7 +101,8 @@ pub struct Data {
 	/* Parsing */
 	proc_queue: VecDeque<parser::Task>,
 	ast_nodes: ast::KindList,
-	ast_locations: ast::LocList,
+	ast_pos_src: ast::PosList,
+	ast_pos_tok: ast::LocList,
 	// procedures ready to be type-checked
 	completed_procs: identifier::Map<Range<ast::Id>>,
 }
@@ -284,14 +302,15 @@ impl fmt::Display for Data {
 		for (ident_id, data) in &self.completed_procs {
 			write!(f, "{:<16} | ", self.text(*ident_id))?;
 			let nodes = self.ast_nodes[data.clone()].iter();
-			let locations = self.ast_locations[data.clone()].iter();
-			for (token, location) in nodes.zip(locations) {
+			let src_pos = self.ast_pos_src[data.clone()].iter();
+			let tok_pos = self.ast_pos_tok[data.clone()].iter();
+			for ((token, pos), location) in nodes.zip(src_pos).zip(tok_pos) {
 				if let ast::Kind::Ident(ident_id) = token {
 					write!(f, " Ident({})", self.text(*ident_id))?;
 				} else {
 					write!(f, " {token:?}")?;
 				}
-				write!(f, "[{location:?}]")?;
+				write!(f, "[{pos:?}]<{location:?}>")?;
 			}
 		}
 		writeln!(f)?;
@@ -305,7 +324,7 @@ impl fmt::Display for Data {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BinaryOp {
 	Add,
 	Sub,
