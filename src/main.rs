@@ -11,6 +11,7 @@ mod identifier;
 mod lexer;
 mod parser;
 mod token;
+mod type_checker;
 
 use error::CompilerError;
 
@@ -46,6 +47,7 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	lexer::eval(&mut data);
 	discovery::eval(&mut data);
 	parser::eval(&mut data);
+	type_checker::eval(&mut data);
 	data
 }
 
@@ -55,8 +57,7 @@ enum ValueKind {
 	Decimal(f64),
 }
 
-// TODO - srenshaw - Need to add Record and Table size calculations, and Table location
-// calculations.
+// TODO - srenshaw - Need to add Table location calculations.
 
 #[derive(Default)]
 pub struct Data {
@@ -327,10 +328,45 @@ enum BinaryOp {
 	CmpLT,
 }
 
+impl fmt::Display for BinaryOp {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Add => write!(f, "+"),
+			Self::Sub => write!(f, "-"),
+			Self::Mul => write!(f, "*"),
+			Self::Div => write!(f, "/"),
+			Self::Mod => write!(f, "%"),
+			Self::ShL => write!(f, "<<"),
+			Self::ShR => write!(f, ">>"),
+			Self::BinAnd => write!(f, "&"),
+			Self::BinOr => write!(f, "|"),
+			Self::BinXor => write!(f, "^"),
+			Self::LogAnd => write!(f, "&&"),
+			Self::LogOr => write!(f, "||"),
+			Self::LogXor => write!(f, "^^"),
+			Self::CmpEQ => write!(f, "=="),
+			Self::CmpNE => write!(f, "!="),
+			Self::CmpGE => write!(f, ">="),
+			Self::CmpGT => write!(f, ">"),
+			Self::CmpLE => write!(f, "<="),
+			Self::CmpLT => write!(f, "<"),
+		}
+	}
+}
+
 #[derive(Debug)]
 enum UnaryOp {
 	Neg,
 	Not,
+}
+
+impl fmt::Display for UnaryOp {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Neg => write!(f, "-"),
+			Self::Not => write!(f, "!"),
+		}
+	}
 }
 
 #[derive(Debug)]
@@ -338,5 +374,15 @@ enum RangeType {
 	Full { start: i64, end: i64 },
 	From { start: i64 },
 	To { end: i64 },
+}
+
+impl fmt::Display for RangeType {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Full {start, end} => write!(f, "[{start}..{end}]"),
+			Self::From {start} => write!(f, "[{start}..]"),
+			Self::To {end} => write!(f, "[..{end}]"),
+		}
+	}
 }
 
