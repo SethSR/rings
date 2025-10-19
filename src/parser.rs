@@ -267,6 +267,10 @@ fn parse_expr_main(cursor: &mut Cursor, data: &mut Data,
 fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 	min_binding_power: usize, start: usize, left: ast::Id,
 ) -> Option<ast::Id> {
+	if TKind::Semicolon == cursor.current(data) {
+		cursor.advance();
+		return Some(left);
+	}
 	let op = parse_bin_op(cursor, data)?;
 	let op_binding_power = binding_power(&op);
 	let start_inner = cursor.location(data);

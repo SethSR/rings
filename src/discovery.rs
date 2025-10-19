@@ -134,7 +134,6 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 		let field_id = cursor.expect_identifier(data, "field name")?;
 		cursor.expect(data, token::Kind::Colon)?;
 		let field_type = cursor.expect_type(data, "type-specifier")?;
-		cursor.advance();
 		fields.push((field_id, field_type));
 		if cursor.current(data) != token::Kind::Comma {
 			break;

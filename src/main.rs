@@ -295,7 +295,6 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
-		// Errors are printed in bold(1m) red(31m)
 		for err in &self.errors {
 			writeln!(f, "{}\n", err.display(self))?;
 		}

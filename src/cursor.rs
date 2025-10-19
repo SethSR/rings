@@ -75,7 +75,7 @@ impl Cursor {
 	pub fn expect_type(&mut self, data: &mut Data,
 		expected: &str,
 	) -> Option<crate::Type> {
-		match self.current(data) {
+		let result = match self.current(data) {
 			token::Kind::Identifier(ident_id) => {
 				if data.records.contains_key(&ident_id) {
 					Some(crate::Type::Record(ident_id))
@@ -97,7 +97,9 @@ impl Cursor {
 				error::expected_token(data, expected, self.index());
 				None
 			}
-		}
+		};
+		self.advance();
+		result
 	}
 }
 
