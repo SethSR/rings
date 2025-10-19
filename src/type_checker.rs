@@ -61,15 +61,18 @@ impl Checker {
 			}
 
 			Kind::Ident(ident_id) => {
-				self.check_ident(data, ident_id, ast_id);
+				println!("AST-Ident({})", data.text(*ident_id));
+				self.check_ident(ident_id, ast_id);
 				None
 			}
 
 			Kind::Define(ident_id, var_type, expr_id) => {
+				println!("AST-Define({} : {var_type:?} = {})", data.text(*ident_id), ast_id.index());
 				self.check_define(data, ident_id, *expr_id, *var_type)
 			}
 
 			Kind::Assign(ident_id, expr_id) => {
+				println!("AST-Assign({} = {})", data.text(*ident_id), ast_id.index());
 				self.check_assign(data, ident_id, *expr_id)
 			}
 
@@ -127,10 +130,9 @@ impl Checker {
 		}
 	}
 
-	fn check_ident(&mut self, data: &Data,
+	fn check_ident(&mut self,
 		ident_id: &identifier::Id, ast_id: ast::Id,
 	) {
-		println!("AST-Ident({})", data.text(*ident_id));
 		let new_type = self.ident_to_type.get(ident_id)
 			.unwrap_or(&Type::Top);
 		self.ast_to_type.insert(ast_id, *new_type);
@@ -140,7 +142,6 @@ impl Checker {
 		ident_id: &identifier::Id, ast_id: ast::Id,
 		var_type: crate::Type,
 	) -> Option<String> {
-		println!("AST-Define({} : {var_type:?} = {})", data.text(*ident_id), ast_id.index());
 		match self.ident_to_type.entry(*ident_id) {
 			Entry::Occupied(_) => {
 				Some(format!("TC - '{}' has already been defined", data.text(*ident_id)))
@@ -168,7 +169,6 @@ impl Checker {
 	fn check_assign(&mut self, data: &Data,
 		ident_id: &identifier::Id, ast_id: ast::Id,
 	) -> Option<String> {
-		println!("AST-Assign({} = {})", data.text(*ident_id), ast_id.index());
 		let Some(var_type) = self.ident_to_type.get(ident_id) else {
 			return Some(format!("TC - found unknown identifier '{}'", data.text(*ident_id)));
 		};
