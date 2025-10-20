@@ -83,7 +83,7 @@ impl Checker {
 
 			Kind::UnOp(op, right) => {
 				println!("AST-UnOp({op}{})", right.index());
-				todo!()
+				self.check_unop(data, ast_id, *op, right)
 			}
 
 			Kind::Return(expr_id) => {
@@ -207,6 +207,23 @@ impl Checker {
 		} else {
 			todo!("add the rest of the binary operators")
 		}
+	}
+
+	fn check_unop(&mut self, data: &Data,
+		ast_id: ast::Id,
+		op: crate::UnaryOp, right: &ast::Id,
+	) -> Option<String> {
+		let right_type = self.ast_to_type[right];
+		let Type::Rings(rtype) = right_type else {
+			return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type.display(data)));
+		};
+
+		use crate::Type as T;
+		if !matches!(rtype, T::Bool | T::U8 | T::S8 | T::U16 | T::S16 | T::U32 | T::S32) {
+			return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type.display(data)));
+		}
+		self.ast_to_type.insert(ast_id, right_type);
+		None
 	}
 
 	fn check_return(&mut self,

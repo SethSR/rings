@@ -6,7 +6,7 @@ use crate::cursor::Cursor;
 use crate::error;
 use crate::identifier;
 use crate::token;
-use crate::{BinaryOp, Data, RangeType, SrcPos};
+use crate::{BinaryOp, Data, RangeType, SrcPos, UnaryOp};
 
 use ast::Kind as AKind;
 use token::Kind as TKind;
@@ -321,6 +321,7 @@ fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 	}
 	let op = parse_bin_op(cursor, data)?;
 	let op_binding_power = binding_power(&op);
+	cursor.advance();
 	let src_start_inner = cursor.location(data);
 	let tok_start_inner = cursor.index();
 	let right = parse_primary(cursor, data)?;
@@ -340,8 +341,18 @@ fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 }
 
 fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
-	let src_start = cursor.location(data);
-	let tok_start = cursor.index();
+	let src_start_op = cursor.location(data);
+	let tok_start_op = cursor.index();
+	let unary_op = match cursor.current(data) {
+		TKind::Dash => { cursor.advance(); Some(UnaryOp::Neg) }
+		TKind::Bang => { cursor.advance(); Some(UnaryOp::Not) }
+		_ => None,
+	};
+	let src_end_op = cursor.location(data);
+	let tok_end_op = cursor.index();
+
+	let src_start_expr = cursor.location(data);
+	let tok_start_expr = cursor.index();
 	let kind = match cursor.current(data) {
 		TKind::Identifier(ident_id) => AKind::Ident(ident_id),
 		TKind::Integer(num) => AKind::Int(num),
@@ -352,12 +363,22 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
 		}
 	};
 	cursor.advance();
-	let src_end = cursor.location(data);
-	let tok_end = cursor.index();
-	Some(new_ast(data, kind,
-		src_start..src_end,
-		tok_start..tok_end,
-	))
+	let src_end_expr = cursor.location(data);
+	let tok_end_expr = cursor.index();
+
+	let node = new_ast(data, kind,
+		src_start_expr..src_end_expr,
+		tok_start_expr..tok_end_expr,
+	);
+
+	if let Some(op) = unary_op {
+		Some(new_ast(data, AKind::UnOp(op, node),
+			src_start_op..src_end_op,
+			tok_start_op..tok_end_op,
+		))
+	} else {
+		Some(node)
+	}
 }
 
 fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Option<BinaryOp> {
@@ -381,6 +402,7 @@ fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Option<BinaryOp> {
 		TKind::Greater => Some(BinaryOp::CmpGT),
 		TKind::GreaterEqual => Some(BinaryOp::CmpGE),
 		TKind::GreaterGreater => Some(BinaryOp::ShR),
+		TKind::Dot => Some(BinaryOp::Access),
 		_ => {
 			error::expected_token(data, "binary operator", cursor.index());
 			None
@@ -398,6 +420,7 @@ fn binding_power(op: &BinaryOp) -> usize {
 		BinaryOp::CmpEQ | BinaryOp::CmpNE |
 		BinaryOp::CmpGE | BinaryOp::CmpGT |
 		BinaryOp::CmpLE | BinaryOp::CmpLT => 60,
+		BinaryOp::Access => 70,
 	}
 }
 

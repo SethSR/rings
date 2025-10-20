@@ -345,6 +345,7 @@ enum BinaryOp {
 	CmpGT,
 	CmpLE,
 	CmpLT,
+	Access,
 }
 
 impl fmt::Display for BinaryOp {
@@ -369,11 +370,12 @@ impl fmt::Display for BinaryOp {
 			Self::CmpGT => write!(f, ">"),
 			Self::CmpLE => write!(f, "<="),
 			Self::CmpLT => write!(f, "<"),
+			Self::Access => write!(f, "."),
 		}
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnaryOp {
 	Neg,
 	Not,

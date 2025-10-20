@@ -234,7 +234,7 @@ impl Lexer {
 
 			Some('!') => {
 				self.advance(data);
-				if self.expect(data, '=') { token::Kind::BangEqual } else { token::Kind::Eof }
+				if self.expect(data, '=') { token::Kind::BangEqual } else { token::Kind::Bang }
 			}
 
 			Some('.') => {

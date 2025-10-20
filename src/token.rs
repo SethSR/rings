@@ -49,22 +49,22 @@ pub enum Kind {
 	Comma,
 	Dot,
 	DotDot,
-	Colon,   ColonColon,     ColonEqual,
-	Carrot,  CarrotCarrot,   CarrotEqual,
-	Less,    LessLess,       LessEqual,
-	Greater, GreaterGreater, GreaterEqual,
-	OParen, CParen,
-	OBrace, CBrace,
+	Colon,    ColonColon,     ColonEqual,
+	Carrot,   CarrotCarrot,   CarrotEqual,
+	Less,     LessLess,       LessEqual,
+	Greater,  GreaterGreater, GreaterEqual,
+	OParen,   CParen,
+	OBrace,   CBrace,
 	OBracket, CBracket,
-	Plus,    PlusEqual,
-	Dash,    DashEqual,
-	Star,    StarEqual,
-	Slash,   SlashEqual,
-	Percent, PercentEqual,
-	Equal,   EqualEqual,
-	Amp,     AmpAmp,
-	Bar,     BarBar,
-	BangEqual,
+	Plus,     PlusEqual,
+	Dash,     DashEqual,
+	Star,     StarEqual,
+	Slash,    SlashEqual,
+	Percent,  PercentEqual,
+	Equal,    EqualEqual,
+	Amp,      AmpAmp,
+	Bar,      BarBar,
+	Bang,     BangEqual,
 	Eof,
 }
 
@@ -115,6 +115,7 @@ impl Kind {
 			Self::SlashEqual |
 			Self::StarEqual |
 			Self::S8 | Self::U8 => 2,
+			Self::Bang |
 			Self::Carrot |
 			Self::Colon |
 			Self::Comma |
