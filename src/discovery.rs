@@ -21,6 +21,12 @@ pub struct ProcType {
 	pub ret_type: crate::Type,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Record {
+	pub size: usize,
+	pub fields: ColumnData,
+}
+
 #[derive(Debug, PartialEq)]
 pub struct TableData {
 	pub row_count: u32,
@@ -202,8 +208,7 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data,
 	let size = fields.iter()
 		.map(|(_, field_type)| data.type_size(*field_type))
 		.sum();
-	data.records.insert(ident_id, 	fields);
-	data.record_sizes.insert(ident_id, size);
+	data.records.insert(ident_id, 	Record { size, fields });
 	Some(())
 }
 
@@ -293,40 +298,55 @@ mod can_parse {
 	fn empty_record() {
 		let data = setup("a :: record {}");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], vec![]);
+		assert_eq!(data.records[&"a".id()], Record {
+			size: 0,
+			fields: vec![],
+		});
 	}
 
 	#[test]
 	fn record_with_one_field_no_trailing_comma() {
 		let data = setup("a :: record { b: u8 }");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], vec![("b".id(), crate::Type::U8)]);
+		assert_eq!(data.records[&"a".id()], Record {
+			size: 1,
+			fields: vec![("b".id(), crate::Type::U8)],
+		});
 	}
 
 	#[test]
 	fn record_with_one_field_and_trailing_comma() {
 		let data = setup("a :: record { b: u8, }");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], vec![("b".id(), crate::Type::U8)]);
+		assert_eq!(data.records[&"a".id()], Record {
+			size: 1,
+			fields: vec![("b".id(), crate::Type::U8)],
+		});
 	}
 
 	#[test]
 	fn record_with_multiple_fields() {
 		let data = setup("a :: record { b: u8, c: s16 }");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], vec![
-			("b".id(), crate::Type::U8),
-			("c".id(), crate::Type::S16),
-		]);
+		assert_eq!(data.records[&"a".id()], Record {
+			size: 3,
+			fields: vec![
+				("b".id(), crate::Type::U8),
+				("c".id(), crate::Type::S16),
+			],
+		});
 	}
 
 	#[test]
 	fn record_with_user_defined_field() {
 		let data = setup("a :: record {} b :: record { c: a }");
 		assert_eq!(data.records.len(), 2);
-		assert_eq!(data.records[&"b".id()], vec![
-			("c".id(), crate::Type::Record("a".id())),
-		]);
+		assert_eq!(data.records[&"b".id()], Record {
+			size: 0,
+			fields: vec![
+				("c".id(), crate::Type::Record("a".id())),
+			],
+		});
 	}
 
 	#[test]

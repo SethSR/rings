@@ -96,8 +96,7 @@ pub struct Data {
 	values: identifier::Map<ValueKind>,
 	regions: identifier::Map<discovery::RegionData>,
 	// rec-name -> (field, type)*
-	records: identifier::Map<discovery::ColumnData>,
-	record_sizes: identifier::Map<usize>,
+	records: identifier::Map<discovery::Record>,
 	tables: identifier::Map<discovery::TableData>,
 	table_sizes: identifier::Map<usize>,
 	/* Parsing */
@@ -163,7 +162,7 @@ impl Data {
 			Type::S16 => 2,
 			Type::U32 |
 			Type::S32 => 4,
-			Type::Record(ident_id) => self.record_sizes[&ident_id],
+			Type::Record(ident_id) => self.records[&ident_id].size,
 			Type::Table(ident_id) => self.table_sizes[&ident_id],
 			Type::Unit => 0,
 		}
@@ -254,10 +253,10 @@ impl fmt::Display for Data {
 		writeln!(f, "{:<16} | {:<8} | FIELDS",
 			"RECORD", "SIZE")?;
 		writeln!(f, "{:-<16} | {:-<8} | {:-<16}", "", "", "")?;
-		for (ident_id, fields) in self.records.iter() {
+		for (ident_id, record) in self.records.iter() {
 			let name = self.text(*ident_id);
-			let size = self.record_sizes[ident_id];
-			let field_str = fields_to_str(self, fields);
+			let size = record.size;
+			let field_str = fields_to_str(self, &record.fields);
 			writeln!(f, "{name:<16} | {size:<8} | {field_str}")?;
 		}
 		writeln!(f)?;
