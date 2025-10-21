@@ -70,12 +70,6 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	data
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ValueKind {
-	Integer(i64),
-	Decimal(f64),
-}
-
 // TODO - srenshaw - Need to add Table location calculations.
 
 #[derive(Default)]
@@ -90,14 +84,11 @@ pub struct Data {
 	tok_pos: token::PosList,
 	identifiers: identifier::Map<Range<SrcPos>>,
 	/* Discovery */
-	proc_tok_start: identifier::Map<token::Id>,
-	procedures: identifier::Map<discovery::ProcType>,
-	// val-name -> value-kind
-	values: identifier::Map<ValueKind>,
-	regions: identifier::Map<discovery::RegionData>,
-	// rec-name -> (field, type)*
-	records: identifier::Map<discovery::Record>,
-	tables: identifier::Map<discovery::Table>,
+	procedures: discovery::ProcMap,
+	values: discovery::ValueMap,
+	regions: discovery::RegionMap,
+	records: discovery::RecordMap,
+	tables: discovery::TableMap,
 	/* Parsing */
 	proc_queue: VecDeque<parser::Task>,
 	ast_nodes: ast::KindList,

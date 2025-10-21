@@ -20,10 +20,10 @@ pub struct Task {
 }
 
 pub fn eval(data: &mut Data) {
-	data.proc_queue = data.procedures.keys()
-		.map(|&proc_name| Task {
+	data.proc_queue = data.procedures.iter()
+		.map(|(&proc_name, proc)| Task {
 			proc_name,
-			start_token: data.proc_tok_start[&proc_name],
+			start_token: proc.tok_start,
 			prev_furthest_token: token::Id::default(),
 			prev_ready_proc_count: 0,
 		})

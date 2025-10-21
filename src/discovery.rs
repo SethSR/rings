@@ -5,20 +5,33 @@ use crate::cursor::Cursor;
 use crate::error;
 use crate::identifier;
 use crate::token;
-use crate::{Data, ValueKind};
+use crate::Data;
+
+pub type ValueMap = identifier::Map<Value>;
+pub type RegionMap = identifier::Map<Region>;
+pub type ProcMap = identifier::Map<Procedure>;
+pub type RecordMap = identifier::Map<Record>;
+pub type TableMap = identifier::Map<Table>;
 
 pub type ColumnData = Vec<(identifier::Id, crate::Type)>;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Value {
+	Integer(i64),
+	Decimal(f64),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RegionData {
+pub struct Region {
 	pub address: u32,
 	pub byte_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProcType {
+pub struct Procedure {
 	pub params: Vec<(identifier::Id, crate::Type)>,
 	pub ret_type: crate::Type,
+	pub tok_start: token::Id,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,21 +112,21 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 }
 
 fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id, start: token::Id,
+	ident_id: identifier::Id, tok_start: token::Id,
 ) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data)?;
-	data.procedures.insert(ident_id, ProcType {
+	data.procedures.insert(ident_id, Procedure {
 		params: vec![], // `main` has no parameters 
 		ret_type: crate::Type::Unit, // `main` has no return type
+		tok_start,
 	});
-	data.proc_tok_start.insert(ident_id, start);
 	Some(())
 }
 
 fn discover_proc(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id, start: token::Id,
+	ident_id: identifier::Id, tok_start: token::Id,
 ) -> Option<()> {
 	cursor.advance();
 	cursor.expect(data, token::Kind::ColonColon)?;
@@ -124,12 +137,12 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 	// TODO - srenshaw - Handle return type declarations
 	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data);
-	data.procedures.insert(ident_id, ProcType {
+	data.procedures.insert(ident_id, Procedure {
 		params,
 		// TODO - srenshaw - Handle return type
 		ret_type: crate::Type::Unit,
+		tok_start,
 	});
-	data.proc_tok_start.insert(ident_id, start);
 	Some(())
 }
 
@@ -157,7 +170,7 @@ fn discover_integer(cursor: &mut Cursor, data: &mut Data,
 	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // increment past the integer, as we already have it
 	cursor.expect(data, token::Kind::Semicolon)?;
-	data.values.insert(ident_id, ValueKind::Integer(value));
+	data.values.insert(ident_id, Value::Integer(value));
 	Some(())
 }
 
@@ -168,7 +181,7 @@ fn discover_decimal(cursor: &mut Cursor, data: &mut Data,
 	cursor.expect(data, token::Kind::ColonColon)?;
 	cursor.advance(); // increment past the decimal, as we already have it
 	cursor.expect(data, token::Kind::Semicolon)?;
-	data.values.insert(ident_id, ValueKind::Decimal(value));
+	data.values.insert(ident_id, Value::Decimal(value));
 	Some(())
 }
 
@@ -190,7 +203,7 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data,
 		(cursor.index() - 1).into()..cursor.index().into(),
 	)?;
 	cursor.expect(data, token::Kind::Semicolon)?;
-	data.regions.insert(ident_id, RegionData {
+	data.regions.insert(ident_id, Region {
 		address,
 		byte_count,
 	});
@@ -256,32 +269,32 @@ mod can_parse {
 	fn constant_values() {
 		let data = setup("a :: 3; b :: 4.2;");
 		assert_eq!(data.values.len(), 2);
-		assert_eq!(data.values[&"a".id()], ValueKind::Integer(3), "{data}");
-		assert_eq!(data.values[&"b".id()], ValueKind::Decimal(4.2), "{data}");
+		assert_eq!(data.values[&"a".id()], Value::Integer(3), "{data}");
+		assert_eq!(data.values[&"b".id()], Value::Decimal(4.2), "{data}");
 	}
 
 	#[test]
 	fn procedure_locations() {
 		let data = setup("a :: 5; b :: proc() {}");
-		assert_eq!(data.proc_tok_start.len(), 1);
-		assert_eq!(data.proc_tok_start[&"b".id()], 4, "{data}");
-		assert_eq!(data.procedures[&"b".id()], ProcType {
+		assert_eq!(data.procedures.len(), 1);
+		assert_eq!(data.procedures[&"b".id()], Procedure {
 			params: vec![],
 			ret_type: crate::Type::Unit,
+			tok_start: token::Id::new(4),
 		});
 	}
 
 	#[test]
 	fn procedure_with_params() {
 		let data = setup("a :: proc(b: u8, c: s32) {}");
-		assert_eq!(data.proc_tok_start.len(), 1);
-		assert_eq!(data.proc_tok_start[&"a".id()], 0, "{data}");
-		assert_eq!(data.procedures[&"a".id()], ProcType {
+		assert_eq!(data.procedures.len(), 1);
+		assert_eq!(data.procedures[&"a".id()], Procedure {
 			params: vec![
 				("b".id(), crate::Type::U8),
 				("c".id(), crate::Type::S32),
 			],
 			ret_type: crate::Type::Unit,
+			tok_start: token::Id::new(0),
 		});
 	}
 
@@ -289,7 +302,7 @@ mod can_parse {
 	fn region() {
 		let data = setup("a :: region[1024] at 0x0020_0000;");
 		assert_eq!(data.regions.len(), 1);
-		assert_eq!(data.regions[&"a".id()], RegionData {
+		assert_eq!(data.regions[&"a".id()], Region {
 			byte_count: 1024,
 			address: 0x0020_0000,
 		});
