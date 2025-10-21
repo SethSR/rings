@@ -101,7 +101,7 @@ fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
 		params: vec![], // `main` has no parameters 
 		ret_type: crate::Type::Unit, // `main` has no return type
 	});
-	data.proc_start.insert(ident_id, start);
+	data.proc_tok_start.insert(ident_id, start);
 	Some(())
 }
 
@@ -122,7 +122,7 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 		// TODO - srenshaw - Handle return type
 		ret_type: crate::Type::Unit,
 	});
-	data.proc_start.insert(ident_id, start);
+	data.proc_tok_start.insert(ident_id, start);
 	Some(())
 }
 
@@ -257,8 +257,8 @@ mod can_parse {
 	#[test]
 	fn procedure_locations() {
 		let data = setup("a :: 5; b :: proc() {}");
-		assert_eq!(data.proc_start.len(), 1);
-		assert_eq!(data.proc_start[&"b".id()], 4, "{data}");
+		assert_eq!(data.proc_tok_start.len(), 1);
+		assert_eq!(data.proc_tok_start[&"b".id()], 4, "{data}");
 		assert_eq!(data.procedures[&"b".id()], ProcType {
 			params: vec![],
 			ret_type: crate::Type::Unit,
@@ -268,8 +268,8 @@ mod can_parse {
 	#[test]
 	fn procedure_with_params() {
 		let data = setup("a :: proc(b: u8, c: s32) {}");
-		assert_eq!(data.proc_start.len(), 1);
-		assert_eq!(data.proc_start[&"a".id()], 0, "{data}");
+		assert_eq!(data.proc_tok_start.len(), 1);
+		assert_eq!(data.proc_tok_start[&"a".id()], 0, "{data}");
 		assert_eq!(data.procedures[&"a".id()], ProcType {
 			params: vec![
 				("b".id(), crate::Type::U8),

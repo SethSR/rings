@@ -20,7 +20,7 @@ struct Checker {
 }
 
 pub fn eval(data: &mut Data) {
-	for (proc_id, proc_range) in &data.completed_procs {
+	for (proc_id, &proc_start) in &data.completed_procs {
 		let proc_type = &data.procedures[proc_id];
 
 		let mut checker = Checker::default();
@@ -28,17 +28,13 @@ pub fn eval(data: &mut Data) {
 			checker.ident_to_type.insert(*param_name, Type::Rings(*param_type));
 		}
 
-		let node_iter = data.ast_nodes[proc_range.clone()].iter();
-		let range_iter = data.ast_pos_tok[proc_range.clone()].iter();
-		for (offset, (node, range)) in node_iter.zip(range_iter).enumerate() {
-			print!("[{offset:3}][{:3}..{:3}] ", range.start, range.end);
-
-			let ast_id = proc_range.start + offset;
-			if let Some(err_msg) = checker.check_stmt(data, node, ast_id, proc_type.ret_type) {
-				println!("{checker:?}");
-				error::error(data, &err_msg, range.start);
-				return;
-			}
+		let node = &data.ast_nodes[proc_start];
+		let range = &data.ast_pos_tok[proc_start];
+		let ret_type = proc_type.ret_type;
+		if let Some(err_msg) = checker.check_stmt(data, node, proc_start, ret_type) {
+			println!("{checker:?}");
+			error::error(data, &err_msg, range.start);
+			return;
 		}
 	}
 }
@@ -95,7 +91,11 @@ impl Checker {
 
 			Kind::Block(block) => {
 				println!("AST-Block({})", block.0.len());
-				todo!()
+				for stmt_id in &block.0 {
+					let node = &data.ast_nodes[*stmt_id];
+					self.check_stmt(data, node, *stmt_id, ret_type)?;
+				}
+				None
 			}
 
 			Kind::If(cond, then_block, else_block) => {

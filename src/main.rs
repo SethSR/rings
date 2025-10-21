@@ -9,6 +9,7 @@ mod discovery;
 mod error;
 mod identifier;
 mod lexer;
+mod lowering;
 mod parser;
 mod token;
 mod type_checker;
@@ -65,6 +66,7 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	discovery::eval(&mut data);
 	parser::eval(&mut data);
 	type_checker::eval(&mut data);
+	lowering::eval(&mut data);
 	data
 }
 
@@ -88,7 +90,7 @@ pub struct Data {
 	tok_pos: token::PosList,
 	identifiers: identifier::Map<Range<SrcPos>>,
 	/* Discovery */
-	proc_start: identifier::Map<token::Id>,
+	proc_tok_start: identifier::Map<token::Id>,
 	procedures: identifier::Map<discovery::ProcType>,
 	// val-name -> value-kind
 	values: identifier::Map<ValueKind>,
@@ -104,7 +106,7 @@ pub struct Data {
 	ast_pos_src: ast::PosList,
 	ast_pos_tok: ast::LocList,
 	// procedures ready to be type-checked
-	completed_procs: identifier::Map<Range<ast::Id>>,
+	completed_procs: identifier::Map<ast::Id>,
 }
 
 fn fmt_size(size: usize) -> String {
@@ -299,11 +301,11 @@ impl fmt::Display for Data {
 
 		writeln!(f, "{:<16} | AST-NODES", "PROCEDURE")?;
 		writeln!(f, "{:-<16} | {:-<16}", "", "")?;
-		for (ident_id, data) in &self.completed_procs {
+		for (ident_id, &proc_start) in &self.completed_procs {
 			write!(f, "{:<16} | ", self.text(*ident_id))?;
-			let nodes = self.ast_nodes[data.clone()].iter();
-			let src_pos = self.ast_pos_src[data.clone()].iter();
-			let tok_pos = self.ast_pos_tok[data.clone()].iter();
+			let nodes = self.ast_nodes[proc_start..].iter();
+			let src_pos = self.ast_pos_src[proc_start..].iter();
+			let tok_pos = self.ast_pos_tok[proc_start..].iter();
 			for ((token, pos), location) in nodes.zip(src_pos).zip(tok_pos) {
 				if let ast::Kind::Ident(ident_id) = token {
 					write!(f, " Ident({})", self.text(*ident_id))?;

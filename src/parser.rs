@@ -23,7 +23,7 @@ pub fn eval(data: &mut Data) {
 	data.proc_queue = data.procedures.keys()
 		.map(|&proc_name| Task {
 			proc_name,
-			start_token: data.proc_start[&proc_name],
+			start_token: data.proc_tok_start[&proc_name],
 			prev_furthest_token: token::Id::default(),
 			prev_ready_proc_count: 0,
 		})
@@ -61,15 +61,15 @@ pub fn eval(data: &mut Data) {
 				}
 			}
 
-			Ok(proc_range) => {
+			Ok(proc_start) => {
 				// We finished. Add us to the 'done' list, so dependent procedures can progress.
-				data.completed_procs.insert(task.proc_name, proc_range);
+				data.completed_procs.insert(task.proc_name, proc_start);
 			}
 		}
 	}
 }
 
-fn parse(data: &mut Data, task: &mut Task) -> Result<Range<ast::Id>, token::Id> {
+fn parse(data: &mut Data, task: &mut Task) -> Result<ast::Id, token::Id> {
 	let mut cursor = Cursor::new(task.start_token);
 	let cursor = &mut cursor;
 	let start = ast::Id::new(data.ast_nodes.len());
@@ -79,12 +79,33 @@ fn parse(data: &mut Data, task: &mut Task) -> Result<Range<ast::Id>, token::Id> 
 		cursor.advance();
 	}
 
-	parse_block(cursor, data)
+	let src_start = cursor.location(data);
+	let tok_start = cursor.index();
+	let mut block = parse_block(cursor, data)
 		.ok_or(cursor.index())?;
+	let src_end = cursor.location(data);
+	let tok_end = cursor.index();
 
 	let end = ast::Id::new(data.ast_nodes.len());
 
-	Ok(start..end)
+	let has_return = data.ast_nodes[start..end]
+		.iter()
+		.any(|kind| matches!(kind, AKind::Return(_)));
+
+	if !has_return {
+		let src_pos = cursor.location(data);
+		let tok_pos = cursor.index();
+		let ast_id = new_ast(data, AKind::Return(None),
+			src_pos..src_pos,
+			tok_pos..tok_pos,
+		);
+		block.0.push(ast_id);
+	}
+
+	Ok(new_ast(data, AKind::Block(block),
+		src_start..src_end,
+		tok_start..tok_end,
+	))
 }
 
 fn new_ast(data: &mut Data, kind: AKind,
