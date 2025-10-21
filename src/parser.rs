@@ -6,7 +6,7 @@ use crate::cursor::Cursor;
 use crate::error;
 use crate::identifier;
 use crate::token;
-use crate::{BinaryOp, Data, RangeType, SrcPos, UnaryOp};
+use crate::{BinaryOp, Data, Bounds, SrcPos, UnaryOp};
 
 use ast::Kind as AKind;
 use token::Kind as TKind;
@@ -280,9 +280,9 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> 
 			"ERROR: expect-range-end");
 		cursor.expect(data, TKind::CBracket)?;
 		match (range_start, range_end) {
-			(Some(start), Some(end)) => Some(RangeType::Full { start, end }),
-			(Some(start), None) => Some(RangeType::From { start }),
-			(None, Some(end)) => Some(RangeType::To { end }),
+			(Some(start), Some(end)) => Some(Bounds::Full { start, end }),
+			(Some(start), None) => Some(Bounds::From { start }),
+			(None, Some(end)) => Some(Bounds::To { end }),
 			(None, None) => None,
 		}
 	} else {

@@ -390,14 +390,32 @@ impl fmt::Display for UnaryOp {
 	}
 }
 
-#[derive(Debug)]
-enum RangeType {
+#[derive(Debug, Clone, Copy)]
+enum Bounds {
 	Full { start: i64, end: i64 },
 	From { start: i64 },
 	To { end: i64 },
 }
 
-impl fmt::Display for RangeType {
+impl Bounds {
+	fn get_start(&self) -> i64 {
+		match self {
+			Self::Full { start, ..} => *start,
+			Self::From { start } => *start,
+			Self::To {..} => 0,
+		}
+	}
+
+	fn get_end(&self, table_size: usize) -> i64 {
+		match self {
+			Self::Full { end, ..} => *end,
+			Self::From {..} => table_size as i64,
+			Self::To { end } => *end,
+		}
+	}
+}
+
+impl fmt::Display for Bounds {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Full {start, end} => write!(f, "[{start}..{end}]"),

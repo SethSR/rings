@@ -6,7 +6,7 @@ use index_vec::IndexVec;
 
 use crate::identifier;
 use crate::token;
-use crate::{BinaryOp, RangeType, SrcPos, UnaryOp};
+use crate::{BinaryOp, Bounds, SrcPos, UnaryOp};
 
 define_index_type! {
 	pub struct Id = usize;
@@ -15,10 +15,10 @@ define_index_type! {
 	DISPLAY_FORMAT = "{}";
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block(pub Vec<Id>);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Kind {
 	Ident(identifier::Id),
 	Int(i64),
@@ -31,7 +31,7 @@ pub enum Kind {
 	If(Id, Block, Block),
 	Block(Block),
 	While(Id, Block),
-	For(Vec<identifier::Id>, Option<identifier::Id>, Option<RangeType>, Block),
+	For(Vec<identifier::Id>, Option<identifier::Id>, Option<Bounds>, Block),
 }
 
 pub type KindList = IndexVec<Id, Kind>;
