@@ -97,8 +97,7 @@ pub struct Data {
 	regions: identifier::Map<discovery::RegionData>,
 	// rec-name -> (field, type)*
 	records: identifier::Map<discovery::Record>,
-	tables: identifier::Map<discovery::TableData>,
-	table_sizes: identifier::Map<usize>,
+	tables: identifier::Map<discovery::Table>,
 	/* Parsing */
 	proc_queue: VecDeque<parser::Task>,
 	ast_nodes: ast::KindList,
@@ -163,7 +162,7 @@ impl Data {
 			Type::U32 |
 			Type::S32 => 4,
 			Type::Record(ident_id) => self.records[&ident_id].size,
-			Type::Table(ident_id) => self.table_sizes[&ident_id],
+			Type::Table(ident_id) => self.tables[&ident_id].size,
 			Type::Unit => 0,
 		}
 	}
@@ -264,12 +263,12 @@ impl fmt::Display for Data {
 		writeln!(f, "{:<16} | {:<10} | {:<8} | {:<9} | COLUMNS",
 			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT")?;
 		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "", "")?;
-		for (ident_id, data) in self.tables.iter() {
+		for (ident_id, table) in self.tables.iter() {
 			let name = self.text(*ident_id);
-			let size = self.table_sizes[ident_id];
-			let row_size = size / data.row_count as usize;
-			let field_str = fields_to_str(self, &data.column_spec);
-			writeln!(f, "{name:<16} | {size:<10} | {row_size:<8} | {:<9} | {field_str}", data.row_count)?;
+			let size = table.size;
+			let row_size = size / table.row_count as usize;
+			let field_str = fields_to_str(self, &table.column_spec);
+			writeln!(f, "{name:<16} | {size:<10} | {row_size:<8} | {:<9} | {field_str}", table.row_count)?;
 		}
 		writeln!(f)?;
 

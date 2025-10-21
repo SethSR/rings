@@ -23,14 +23,15 @@ pub struct ProcType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-	pub size: usize,
 	pub fields: ColumnData,
+	pub size: usize,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct TableData {
+pub struct Table {
 	pub row_count: u32,
 	pub column_spec: ColumnData,
+	pub size: usize,
 }
 
 pub fn eval(data: &mut Data) {
@@ -230,11 +231,11 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data,
 	let col_size: usize = column_spec.iter()
 		.map(|(_, col_type)| data.type_size(*col_type))
 		.sum();
-	data.tables.insert(ident_id, TableData {
+	data.tables.insert(ident_id, Table {
 		row_count,
 		column_spec,
+		size: row_count as usize * col_size,
 	});
-	data.table_sizes.insert(ident_id, row_count as usize * col_size);
 	Some(())
 }
 
@@ -353,9 +354,10 @@ mod can_parse {
 	fn empty_table() {
 		let data = setup("a :: table[10] {}");
 		assert_eq!(data.tables.len(), 1);
-		assert_eq!(data.tables[&"a".id()], TableData {
+		assert_eq!(data.tables[&"a".id()], Table {
 			row_count: 10,
 			column_spec: vec![],
+			size: 0,
 		});
 	}
 }
