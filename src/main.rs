@@ -170,7 +170,9 @@ impl Data {
 			Err(line) => line - 1,
 		};
 
-		let line_pos = self.line_pos[line];
+		let line_pos = self.line_pos.get(line)
+			.unwrap_or_else(|| panic!("missing position for line number {line}"));
+		assert!(tok_pos > *line_pos, "tok({tok_pos}) line({line_pos})");
 		let column = tok_pos - line_pos;
 		let line_text = self.get_line_text(line.index() + 1);
 		let tab_count = line_text.chars()
@@ -381,7 +383,7 @@ impl fmt::Display for UnaryOp {
 	}
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bounds {
 	Full { start: i64, end: i64 },
 	From { start: i64 },

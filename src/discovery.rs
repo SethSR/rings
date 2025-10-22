@@ -13,7 +13,10 @@ pub type ProcMap = identifier::Map<Procedure>;
 pub type RecordMap = identifier::Map<Record>;
 pub type TableMap = identifier::Map<Table>;
 
-pub type ColumnData = Vec<(identifier::Id, crate::Type)>;
+pub type Field = (identifier::Id, crate::Type);
+
+// TODO - srenshaw - At some point, we'll want the discovery phase to use a work queue to allow
+// out-of-order type recognition.
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
@@ -36,14 +39,14 @@ pub struct Procedure {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-	pub fields: ColumnData,
+	pub fields: Vec<Field>,
 	pub size: usize,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Table {
 	pub row_count: u32,
-	pub column_spec: ColumnData,
+	pub column_spec: Vec<Field>,
 	pub size: usize,
 }
 
@@ -148,8 +151,8 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	end_token: token::Kind,
-) -> Option<ColumnData> {
-	let mut fields = ColumnData::default();
+) -> Option<Vec<Field>> {
+	let mut fields = Vec::default();
 	while end_token != cursor.current(data) {
 		let field_id = cursor.expect_identifier(data, "field name")?;
 		cursor.expect(data, token::Kind::Colon)?;
@@ -371,6 +374,44 @@ mod can_parse {
 			row_count: 10,
 			column_spec: vec![],
 			size: 0,
+		});
+	}
+
+	#[test]
+	fn table_with_one_field() {
+		let data = setup("a :: table[10] { b: u32 }");
+		assert_eq!(data.tables.len(), 1);
+		assert_eq!(data.tables[&"a".id()], Table {
+			row_count: 10,
+			column_spec: vec![("b".id(), crate::Type::U32)],
+			size: 40,
+		});
+	}
+
+	#[test]
+	fn table_with_multiple_field() {
+		let data = setup("a :: table[10] { b: u32, c: s16 }");
+		assert_eq!(data.tables.len(), 1);
+		assert_eq!(data.tables[&"a".id()], Table {
+			row_count: 10,
+			column_spec: vec![
+				("b".id(), crate::Type::U32),
+				("c".id(), crate::Type::S16),
+			],
+			size: 60,
+		});
+	}
+
+	#[test]
+	fn table_with_user_defined_field() {
+		let data = setup("a :: record { a1: s16 } b :: table[10] { b1: a }");
+		assert_eq!(data.tables.len(), 1);
+		assert_eq!(data.tables[&"b".id()], Table {
+			row_count: 10,
+			column_spec: vec![
+				("b1".id(), crate::Type::Record("a".id())),
+			],
+			size: 20,
 		});
 	}
 }

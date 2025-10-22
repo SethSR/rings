@@ -15,10 +15,10 @@ define_index_type! {
 	DISPLAY_FORMAT = "{}";
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block(pub Vec<Id>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Kind {
 	Ident(identifier::Id),
 	Int(i64),

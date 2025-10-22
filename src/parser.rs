@@ -445,3 +445,73 @@ fn binding_power(op: &BinaryOp) -> usize {
 	}
 }
 
+#[cfg(test)]
+mod can_parse_proc {
+	use crate::{ lexer, discovery, ast };
+	use crate::identifier::Identifier;
+
+	fn setup(source: &str) -> crate::Data {
+		let source_file = "parser".to_string();
+		let mut db = crate::Data::new(source_file, source.into());
+		lexer::eval(&mut db);
+		discovery::eval(&mut db);
+		super::eval(&mut db);
+		assert!(db.errors.is_empty(), "{}", db.errors.iter()
+			.map(|e| e.display(&db))
+			.collect::<Vec<_>>()
+			.join("\n"));
+		db
+	}
+
+	#[test]
+	fn main() {
+		let db = setup("main{}");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+		assert_eq!(db.ast_nodes, [
+			ast::Kind::Return(None),
+			ast::Kind::Block(ast::Block(vec![0.into()])),
+		]);
+	}
+
+	#[test]
+	fn with_no_params() {
+		let db = setup("main{} a :: proc() {}");
+		assert!(db.completed_procs.contains_key(&"a".id()));
+	}
+
+	// TODO - srenshaw - We still need to get return values working on procedure discovery.
+	// #[test]
+	// fn with_return() { todo!() }
+
+	#[test]
+	fn with_single_param() {
+		let db = setup("main{} a::proc(b:s8) {}");
+		assert!(db.completed_procs.contains_key(&"a".id()));
+	}
+
+	#[test]
+	fn with_multi_params() {
+		let db = setup("main{} a::proc(b:s8,c:u32) {}");
+		assert!(db.completed_procs.contains_key(&"a".id()));
+	}
+
+	#[test]
+	fn with_record_param() {
+		let db = setup("main{} a::record{} b::proc(c:a){}");
+		assert!(db.completed_procs.contains_key(&"b".id()));
+	}
+
+	// TODO - srenshaw - Check this once we have out-of-order type resolution.
+	// #[test]
+	// fn with_out_of_order_record_param() {
+	// 	let db = setup("main{} b::proc(c:a){} a::record{}");
+	// 	assert!(db.completed_procs.contains_key(&"b".id()));
+	// }
+
+	#[test]
+	fn with_table_param() {
+		let db = setup("main{} a::table[0]{} b::proc(c:a){}");
+		assert!(db.completed_procs.contains_key(&"b".id()));
+	}
+}
+

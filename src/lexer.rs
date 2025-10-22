@@ -8,6 +8,9 @@ use crate::{Data, SrcPos};
 pub fn eval(data: &mut Data) {
 	let mut lexer = Lexer { pos: 0 };
 
+	// Add the initial line
+	data.line_pos.push(lexer.pos);
+
 	lexer.skip_whitespace_and_comments(data);
 	while lexer.next(data) {
 		lexer.skip_whitespace_and_comments(data);

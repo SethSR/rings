@@ -5,8 +5,6 @@ use crate::identifier::Id as IdentId;
 use crate::{BinaryOp, Data, Bounds, UnaryOp};
 
 
-pub type TacId = u32;
-
 type TempId = u32; // Temporary variable ID
 
 #[derive(Debug, Clone)]
