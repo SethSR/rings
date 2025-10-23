@@ -55,21 +55,16 @@ pub fn eval(data: &mut Data) {
 	let cursor = &mut cursor;
 
 	loop {
-		let start = cursor.index();
 		match cursor.current(data) {
 			token::Kind::Identifier(ident_id) => {
 				let result = if data.text(ident_id) == "main" {
-					discover_main_proc(cursor, data, ident_id, start)
+					discover_main_proc(cursor, data)
 				} else {
 					match cursor.peek(data, 2) {
 						token::Kind::Integer(value) => discover_integer(cursor, data, ident_id, value),
 						token::Kind::Decimal(value) => discover_decimal(cursor, data, ident_id, value),
-						token::Kind::Region => discover_region(cursor, data, ident_id),
-						token::Kind::Proc => discover_proc(cursor, data, ident_id, start),
-						token::Kind::Record => discover_record(cursor, data, ident_id),
-						token::Kind::Table => discover_table(cursor, data, ident_id),
 						_ => {
-							error::expected_token(data, "top-level statement", cursor.index() + 2);
+							error::expected_token(data, "value statement", cursor.index() + 2);
 							return;
 						}
 					}
@@ -79,9 +74,29 @@ pub fn eval(data: &mut Data) {
 					break;
 				}
 			}
+			token::Kind::Proc => if discover_proc(cursor, data).is_none() {
+				error::error(data, "procedure definition", cursor.index());
+				return;
+			}
+			token::Kind::Region => if discover_region(cursor, data).is_none() {
+				error::error(data, "region definition", cursor.index());
+				return;
+			}
+			token::Kind::Record => if discover_record(cursor, data).is_none() {
+				error::error(data, "record definition", cursor.index());
+				return;
+			}
+			token::Kind::Table => if discover_table(cursor, data).is_none() {
+				error::error(data, "table definition", cursor.index());
+				return;
+			}
+			token::Kind::Index => {
+				error::error(data, "indexes not yet implemented", cursor.index());
+				return;
+			}
 			token::Kind::Eof => break,
 			_ => {
-				error::expected_token(data, "identifier or EoF", cursor.index());
+				error::expected_token(data, "top-level statement", cursor.index());
 				return
 			}
 		}
@@ -114,10 +129,9 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 	Some(())
 }
 
-fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id, tok_start: token::Id,
-) -> Option<()> {
-	cursor.advance();
+fn discover_main_proc(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+	let tok_start = cursor.index();
+	let ident_id = cursor.expect_identifier(data, "COMPILER ERROR")?;
 	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data)?;
 	data.procedures.insert(ident_id, Procedure {
@@ -128,12 +142,10 @@ fn discover_main_proc(cursor: &mut Cursor, data: &mut Data,
 	Some(())
 }
 
-fn discover_proc(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id, tok_start: token::Id,
-) -> Option<()> {
-	cursor.advance();
-	cursor.expect(data, token::Kind::ColonColon)?;
+fn discover_proc(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+	let tok_start = cursor.index();
 	cursor.expect(data, token::Kind::Proc)?;
+	let ident_id = cursor.expect_identifier(data, "procedure name")?;
 	cursor.expect(data, token::Kind::OParen)?;
 	let params = discover_fields(cursor, data, token::Kind::CParen)?;
 	cursor.expect(data, token::Kind::CParen)?;
@@ -188,12 +200,9 @@ fn discover_decimal(cursor: &mut Cursor, data: &mut Data,
 	Some(())
 }
 
-fn discover_region(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id,
-) -> Option<()> {
-	cursor.advance();
-	cursor.expect(data, token::Kind::ColonColon)?;
-	cursor.advance(); // skip over the 'region' keyword
+fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+	cursor.expect(data, token::Kind::Region)?;
+	let ident_id = cursor.expect_identifier(data, "region name")?;
 	cursor.expect(data, token::Kind::OBracket)?;
 	let byte_count = cursor.expect_integer(data, "region size")?;
 	let byte_count = check_integer_as_u32(data, "valid region size", byte_count,
@@ -213,12 +222,10 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data,
 	Some(())
 }
 
-fn discover_record(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id,
-) -> Option<()> {
-	cursor.advance();
-	cursor.expect(data, token::Kind::ColonColon)?;
-	cursor.advance(); // skip over the 'record' keyword
+fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+	cursor.expect(data, token::Kind::Record)?;
+	let ident_id = cursor.expect_identifier(data, "record name")?;
+	// TODO - srenshaw - Handle region allocation
 	cursor.expect(data, token::Kind::OBrace)?;
 	let fields = discover_fields(cursor, data, token::Kind::CBrace)?;
 	cursor.expect(data, token::Kind::CBrace)?;
@@ -229,12 +236,9 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data,
 	Some(())
 }
 
-fn discover_table(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id,
-) -> Option<()> {
-	cursor.advance();
-	cursor.expect(data, token::Kind::ColonColon)?;
-	cursor.advance(); // skip over the 'table' keyword
+fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+	cursor.expect(data, token::Kind::Table)?;
+	let ident_id = cursor.expect_identifier(data, "table name")?;
 	cursor.expect(data, token::Kind::OBracket)?;
 	let row_count = cursor.expect_integer(data, "table size")?;
 	let row_count = check_integer_as_u32(data, "valid table size", row_count,
@@ -278,7 +282,7 @@ mod can_parse {
 
 	#[test]
 	fn procedure_locations() {
-		let data = setup("a :: 5; b :: proc() {}");
+		let data = setup("a :: 5; proc b() {}");
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"b".id()], Procedure {
 			params: vec![],
@@ -289,7 +293,7 @@ mod can_parse {
 
 	#[test]
 	fn procedure_with_params() {
-		let data = setup("a :: proc(b: u8, c: s32) {}");
+		let data = setup("proc a(b: u8, c: s32) {}");
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], Procedure {
 			params: vec![
@@ -303,7 +307,7 @@ mod can_parse {
 
 	#[test]
 	fn region() {
-		let data = setup("a :: region[1024] at 0x0020_0000;");
+		let data = setup("region a[1024] at 0x0020_0000;");
 		assert_eq!(data.regions.len(), 1);
 		assert_eq!(data.regions[&"a".id()], Region {
 			byte_count: 1024,
@@ -313,7 +317,7 @@ mod can_parse {
 
 	#[test]
 	fn empty_record() {
-		let data = setup("a :: record {}");
+		let data = setup("record a {}");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 0,
@@ -323,7 +327,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_one_field_no_trailing_comma() {
-		let data = setup("a :: record { b: u8 }");
+		let data = setup("record a { b: u8 }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 1,
@@ -333,7 +337,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_one_field_and_trailing_comma() {
-		let data = setup("a :: record { b: u8, }");
+		let data = setup("record a { b: u8, }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 1,
@@ -343,7 +347,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_multiple_fields() {
-		let data = setup("a :: record { b: u8, c: s16 }");
+		let data = setup("record a { b: u8, c: s16 }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 3,
@@ -356,7 +360,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_user_defined_field() {
-		let data = setup("a :: record {} b :: record { c: a }");
+		let data = setup("record a {} record b { c: a }");
 		assert_eq!(data.records.len(), 2);
 		assert_eq!(data.records[&"b".id()], Record {
 			size: 0,
@@ -368,7 +372,7 @@ mod can_parse {
 
 	#[test]
 	fn empty_table() {
-		let data = setup("a :: table[10] {}");
+		let data = setup("table a[10] {}");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"a".id()], Table {
 			row_count: 10,
@@ -379,7 +383,7 @@ mod can_parse {
 
 	#[test]
 	fn table_with_one_field() {
-		let data = setup("a :: table[10] { b: u32 }");
+		let data = setup("table a[10] { b: u32 }");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"a".id()], Table {
 			row_count: 10,
@@ -390,7 +394,7 @@ mod can_parse {
 
 	#[test]
 	fn table_with_multiple_field() {
-		let data = setup("a :: table[10] { b: u32, c: s16 }");
+		let data = setup("table a[10] { b: u32, c: s16 }");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"a".id()], Table {
 			row_count: 10,
@@ -404,7 +408,7 @@ mod can_parse {
 
 	#[test]
 	fn table_with_user_defined_field() {
-		let data = setup("a :: record { a1: s16 } b :: table[10] { b1: a }");
+		let data = setup("record a { a1: s16 } table b[10] { b1: a }");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"b".id()], Table {
 			row_count: 10,
