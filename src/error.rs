@@ -86,6 +86,10 @@ impl CompilerError {
 		}
 	}
 
+	pub fn set_kind(&mut self, kind: Kind) {
+		self.kind = Some(kind);
+	}
+
 	pub fn with_note(&mut self, message: impl Into<String>) {
 		self.notes.push(Note {
 			location: None,

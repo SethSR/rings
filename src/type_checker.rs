@@ -33,7 +33,9 @@ pub fn eval(data: &mut Data) {
 		let ret_type = proc_type.ret_type;
 		if let Some(err_msg) = checker.check_stmt(data, node, proc_start, ret_type) {
 			println!("{checker:?}");
-			error::error(data, &err_msg, range.start);
+			let mut err =error::error(data, &err_msg, range.start);
+			err.set_kind(error::Kind::Checker);
+			data.errors.push(err);
 			return;
 		}
 	}

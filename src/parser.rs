@@ -51,11 +51,13 @@ pub fn eval(data: &mut Data) {
 					data.proc_queue.push_back(task);
 				} else {
 					let name = data.text(task.proc_name).to_string();
-					error::error_with_notes(data,
+					let mut err = error::error_with_notes(data,
 						&format!("No progress made since last attempt to parse '{name}'"),
 						task.start_token,
 						&[("reached this point before failing", task.prev_furthest_token)]
 					);
+					err.set_kind(error::Kind::Parser);
+					data.errors.push(err);
 					data.proc_queue.push_back(task);
 					return;
 				}
@@ -82,7 +84,8 @@ fn parse(data: &mut Data, task: &mut Task) -> Result<ast::Id, token::Id> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	let mut block = parse_block(cursor, data)
-		.map_err(|e| {
+		.map_err(|mut e| {
+			e.set_kind(error::Kind::Parser);
 			data.errors.push(e);
 			cursor.index()
 		})?;

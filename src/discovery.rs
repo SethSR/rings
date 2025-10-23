@@ -52,7 +52,8 @@ pub struct Table {
 
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
-	if let Err(e) = eval_loop(&mut cursor, data) {
+	if let Err(mut e) = eval_loop(&mut cursor, data) {
+		e.set_kind(error::Kind::Discovery);
 		data.errors.push(e);
 	}
 }

@@ -1,8 +1,9 @@
 
 use std::collections::hash_map::Entry;
 
-use crate::token;
+use crate::error::{self, CompilerError};
 use crate::identifier::Identifier;
+use crate::token;
 use crate::{Data, SrcPos};
 
 pub fn eval(data: &mut Data) {
@@ -12,16 +13,19 @@ pub fn eval(data: &mut Data) {
 	data.line_pos.push(lexer.pos);
 
 	lexer.skip_whitespace_and_comments(data);
-	while lexer.next(data) {
+	loop {
+		match lexer.next(data) {
+			Ok(true) => {}
+			Ok(false) => return, // all done!
+			Err(mut e) => {
+				e.set_kind(error::Kind::Lexer);
+				data.errors.push(e);
+				return;
+			}
+		}
+
 		lexer.skip_whitespace_and_comments(data);
 	}
-}
-
-macro_rules! parse_error {
-	($data:expr, $msg:expr) => {{
-		crate::error::error($data, $msg, crate::token::Id::new($data.tok_list.len()));
-		return false;
-	}}
 }
 
 #[derive(Default)]
@@ -30,14 +34,14 @@ struct Lexer {
 }
 
 impl Lexer {
-	fn next(&mut self, data: &mut Data) -> bool {
+	fn next(&mut self, data: &mut Data) -> Result<bool, CompilerError> {
 		let start = self.pos;
 
 		let kind = match self.peek(data, 0) {
 			None => {
 				data.tok_list.push(token::Kind::Eof);
 				data.tok_pos.push(start);
-				return false;
+				return Ok(false);
 			}
 
 			Some(c) if c.is_alphabetic() || c == '_' => {
@@ -123,14 +127,18 @@ impl Lexer {
 				let text = &data.source[inner_start..self.pos];
 				if is_fractional {
 					match num_type {
-						NumType::Bin => parse_error!(data,
-							"parsing binary fixed-point numbers not implemented yet"),
-						NumType::Hex => parse_error!(data,
-							"parsing hexadecimal fixed-point numbers not implemented yet"),
+						NumType::Bin => return Err(error::error(data,
+							"parsing binary fixed-point numbers not implemented yet",
+							self.pos.into())),
+						NumType::Hex => return Err(error::error(data,
+							"parsing hexadecimal fixed-point numbers not implemented yet",
+							self.pos.into())),
 						NumType::Dec => {
 							match text.replace('_', "").parse::<f64>() {
 								Ok(num) => token::Kind::Decimal(num),
-								Err(_) => parse_error!(data, "unable to parse decimal fixed-point number"),
+								Err(_) => return Err(error::error(data,
+									"unable to parse decimal fixed-point number",
+									self.pos.into())),
 							}
 						}
 					}
@@ -139,15 +147,21 @@ impl Lexer {
 					let num = match num_type {
 						NumType::Bin => match i64::from_str_radix(&text, 2) {
 							Ok(num) => num,
-							Err(_) => parse_error!(data, "unable to parse binary integer"),
+							Err(_) => return Err(error::error(data,
+								"unable to parse binary integer",
+								self.pos.into())),
 						},
 						NumType::Hex => match i64::from_str_radix(&text, 16) {
 							Ok(num) => num,
-							Err(_) => parse_error!(data, "unable to parse hexadecimal integer"),
+							Err(_) => return Err(error::error(data,
+								"unable to parse hexadecimal integer",
+								self.pos.into())),
 						},
 						NumType::Dec => match text.parse::<i64>() {
 							Ok(num) => num,
-							Err(_) => parse_error!(data, "unable to parse decimal integer"),
+							Err(_) => return Err(error::error(data,
+								"unable to parse decimal integer",
+								self.pos.into())),
 						},
 					};
 					token::Kind::Integer(num)
@@ -277,7 +291,7 @@ impl Lexer {
 
 		data.tok_list.push(kind);
 		data.tok_pos.push(start);
-		true
+		Ok(true)
 	}
 
 	fn skip_whitespace_and_comments(&mut self, data: &mut Data) {
