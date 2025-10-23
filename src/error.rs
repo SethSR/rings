@@ -4,29 +4,26 @@ use std::ops::Range;
 use crate::token;
 use crate::Data;
 
-pub fn error(data: &mut Data, message: &str, token_id: token::Id) {
-	let err = CompilerError::new(get_location(data, token_id), message);
-	data.errors.push(err);
+pub fn error(data: &Data, message: &str, token_id: token::Id) -> CompilerError {
+	CompilerError::new(get_location(data, token_id), message)
 }
 
-pub fn error_with_notes(data: &mut Data, message: &str, token_id: token::Id,
+pub fn error_with_notes(data: &Data, message: &str, token_id: token::Id,
 	notes: &[(&str, token::Id)],
-) {
+) -> CompilerError {
 	let mut err = CompilerError::new(get_location(data, token_id), message);
 	for (note_msg, note_id) in notes {
 		err.with_note_at(get_location(data, *note_id), *note_msg);
 	}
-	data.errors.push(err);
+	err
 }
 
-pub fn expected(data: &mut Data, span: Range<usize>, expected: &str, found: &str) {
+pub fn expected(span: Range<usize>, expected: &str, found: &str) -> CompilerError {
 	let span = Span { start: span.start, end: span.end };
-	let err = CompilerError::new(span,
-		format!("Expected {expected}, found {found}"));
-	data.errors.push(err);
+	CompilerError::new(span, format!("Expected {expected}, found {found}"))
 }
 
-pub fn expected_token(data: &mut Data, expected: &str, token_id: token::Id) {
+pub fn expected_token(data: &Data, expected: &str, token_id: token::Id) -> CompilerError {
 	let found = data.tok_list[token_id];
 	if let token::Kind::Identifier(ident_id) = found {
 		error(data, &format!("Expected {expected}, found '{}'", data.text(ident_id)), token_id)
@@ -58,7 +55,19 @@ const BLUE  : &str = "\x1b[34m";
 const BOLD  : &str = "\x1b[1m";
 const RESET : &str = "\x1b[0m";
 
+#[derive(Debug)]
+pub enum Kind {
+	Lexer,
+	Discovery,
+	Parser,
+	Checker,
+	LoweringTAC,
+	LoweringMachine,
+	Assembler,
+}
+
 pub struct CompilerError {
+	kind: Option<Kind>,
 	location: Span,
 	message: String,
 	notes: Vec<Note>,
@@ -70,6 +79,7 @@ impl CompilerError {
 		message: impl Into<String>,
 	) -> Self {
 		Self {
+			kind: None,
 			location,
 			message: message.into(),
 			notes: Vec::new(),
@@ -102,7 +112,13 @@ impl CompilerError {
 		let (line, col) = data.lookup_position(self.location.start);
 		let line_num_digit_count = line.to_string().len();
 
-		output.push(header(&error_lead(), &self.message));
+		let message = if let Some(kind) = &self.kind {
+			format!("{kind:?} : {}", self.message)
+		} else {
+			self.message.to_string()
+		};
+
+		output.push(header(&error_lead(), &message));
 		output.push(location(line_num_digit_count,
 			file, line, col));
 		output.push(vbar_empty(line_num_digit_count));

@@ -2,7 +2,7 @@
 use std::ops::Range;
 
 use crate::cursor::Cursor;
-use crate::error;
+use crate::error::{self, CompilerError};
 use crate::identifier;
 use crate::token;
 use crate::Data;
@@ -52,89 +52,73 @@ pub struct Table {
 
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
-	let cursor = &mut cursor;
+	if let Err(e) = eval_loop(&mut cursor, data) {
+		data.errors.push(e);
+	}
+}
 
+fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	loop {
 		match cursor.current(data) {
 			token::Kind::Identifier(ident_id) => {
-				let result = if data.text(ident_id) == "main" {
+				if data.text(ident_id) == "main" {
 					discover_main_proc(cursor, data)
 				} else {
-					match cursor.peek(data, 2) {
+					cursor.advance();
+					cursor.expect(data, token::Kind::ColonColon)?;
+					match cursor.peek(data, 0) {
 						token::Kind::Integer(value) => discover_integer(cursor, data, ident_id, value),
 						token::Kind::Decimal(value) => discover_decimal(cursor, data, ident_id, value),
-						_ => {
-							error::expected_token(data, "value statement", cursor.index() + 2);
-							return;
-						}
+						_ => Err(error::expected_token(data, "value statement", cursor.index())),
 					}
-				};
-
-				if result.is_none() {
-					break;
-				}
+				}?;
 			}
-			token::Kind::Proc => if discover_proc(cursor, data).is_none() {
-				error::error(data, "procedure definition", cursor.index());
-				return;
-			}
-			token::Kind::Region => if discover_region(cursor, data).is_none() {
-				error::error(data, "region definition", cursor.index());
-				return;
-			}
-			token::Kind::Record => if discover_record(cursor, data).is_none() {
-				error::error(data, "record definition", cursor.index());
-				return;
-			}
-			token::Kind::Table => if discover_table(cursor, data).is_none() {
-				error::error(data, "table definition", cursor.index());
-				return;
-			}
-			token::Kind::Index => {
-				error::error(data, "indexes not yet implemented", cursor.index());
-				return;
-			}
+			token::Kind::Proc => discover_proc(cursor, data)?,
+			token::Kind::Region => discover_region(cursor, data)?,
+			token::Kind::Record => discover_record(cursor, data)?,
+			token::Kind::Table => discover_table(cursor, data)?,
+			token::Kind::Index => return Err(error::error(data,
+				"indexes not yet implemented",
+				cursor.index())),
 			token::Kind::Eof => break,
-			_ => {
-				error::expected_token(data, "top-level statement", cursor.index());
-				return
-			}
+			_ => return Err(error::expected_token(data,
+				"top-level statement",
+				cursor.index())),
 		}
 	}
+
+	Ok(())
 }
 
-fn check_integer_as_u32(data: &mut Data, expected: &str, found: i64, span: Range<usize>) -> Option<u32> {
+fn check_integer_as_u32(expected: &str, found: i64, span: Range<usize>) -> Result<u32, CompilerError> {
 	if !(0..u32::MAX as i64).contains(&found) {
-		error::expected(data, span, expected, &found.to_string());
-		return None;
+		Err(crate::error::expected(span, expected, &found.to_string()))
+	} else {
+		Ok(found as u32)
 	}
-	Some(found as u32)
 }
 
-fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	let mut brace_count = 1;
 	while brace_count > 0 && cursor.current(data) != token::Kind::Eof {
 		brace_count += match cursor.current(data) {
 			token::Kind::OBrace => 1,
 			token::Kind::CBrace => -1,
 			token::Kind::Eof => {
-				error::expected_token(data, "end of procedure", cursor.index());
-				return None;
+				return Err(crate::error::expected_token(data, "end of procedure", cursor.index()));
 			}
 			_ => 0,
 		};
 		cursor.advance();
 	}
 
-	Some(())
+	Ok(())
 }
 
-fn discover_main_proc(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+fn discover_main_proc(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	let tok_start = cursor.index();
-	let Some(ident_id) = cursor.expect_identifier(data) else {
-		error::expected_token(data, "COMPILER ERROR", cursor.index());
-		return None;
-	};
+	let ident_id = cursor.expect_identifier(data, "")
+		.unwrap_or_else(|_| panic!("should not enter 'discover_main_proc' without the procedure name"));
 	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data)?;
 	data.procedures.insert(ident_id, Procedure {
@@ -142,97 +126,75 @@ fn discover_main_proc(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 		ret_type: crate::Type::Unit, // `main` has no return type
 		tok_start,
 	});
-	Some(())
+	Ok(())
 }
 
-fn discover_proc(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+fn discover_proc(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	let tok_start = cursor.index();
 	cursor.expect(data, token::Kind::Proc)?;
-	let Some(ident_id) = cursor.expect_identifier(data) else {
-		error::expected_token(data, "procedure name", cursor.index());
-		return None;
-	};
+	let ident_id = cursor.expect_identifier(data, "procedure name")?;
 	cursor.expect(data, token::Kind::OParen)?;
 	let params = discover_fields(cursor, data, token::Kind::CParen)?;
 	cursor.expect(data, token::Kind::CParen)?;
 	// TODO - srenshaw - Handle return type declarations
 	cursor.expect(data, token::Kind::OBrace)?;
-	check_braces(cursor, data);
+	check_braces(cursor, data)?;
 	data.procedures.insert(ident_id, Procedure {
 		params,
 		// TODO - srenshaw - Handle return type
 		ret_type: crate::Type::Unit,
 		tok_start,
 	});
-	Some(())
+	Ok(())
 }
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	end_token: token::Kind,
-) -> Option<Vec<Field>> {
+) -> Result<Vec<Field>, CompilerError> {
 	let mut fields = Vec::default();
 	while end_token != cursor.current(data) {
-		let Some(field_id) = cursor.expect_identifier(data) else {
-			error::expected_token(data, "field name", cursor.index());
-			return None;
-		};
+		let field_id = cursor.expect_identifier(data, "field name")?;
 		cursor.expect(data, token::Kind::Colon)?;
-		let Some(field_type) = cursor.expect_type(data) else {
-			error::expected_token(data, "type-specifier", cursor.index());
-			return None;
-		};
+		let field_type = cursor.expect_type(data)?;
 		fields.push((field_id, field_type));
 		if cursor.current(data) != token::Kind::Comma {
 			break;
 		}
 		cursor.advance();
 	}
-	Some(fields)
+	Ok(fields)
 }
 
 fn discover_integer(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, value: i64,
-) -> Option<()> {
-	cursor.advance();
-	cursor.expect(data, token::Kind::ColonColon)?;
+) -> Result<(), CompilerError> {
 	cursor.advance(); // increment past the integer, as we already have it
 	cursor.expect(data, token::Kind::Semicolon)?;
 	data.values.insert(ident_id, Value::Integer(value));
-	Some(())
+	Ok(())
 }
 
 fn discover_decimal(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, value: f64,
-) -> Option<()> {
-	cursor.advance();
-	cursor.expect(data, token::Kind::ColonColon)?;
+) -> Result<(), CompilerError> {
 	cursor.advance(); // increment past the decimal, as we already have it
 	cursor.expect(data, token::Kind::Semicolon)?;
 	data.values.insert(ident_id, Value::Decimal(value));
-	Some(())
+	Ok(())
 }
 
-fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	cursor.expect(data, token::Kind::Region)?;
-	let Some(ident_id) = cursor.expect_identifier(data) else {
-		error::expected_token(data, "region name", cursor.index());
-		return None;
-	};
+	let ident_id = cursor.expect_identifier(data, "region name")?;
 	cursor.expect(data, token::Kind::OBracket)?;
-	let Some(byte_count) = cursor.expect_integer(data) else {
-		error::expected_token(data, "region size", cursor.index());
-		return None;
-	};
-	let byte_count = check_integer_as_u32(data, "valid region size", byte_count,
+	let byte_count = cursor.expect_integer(data, "region size")?;
+	let byte_count = check_integer_as_u32("valid region size", byte_count,
 		(cursor.index() - 1).into()..cursor.index().into(),
 	)?;
 	cursor.expect(data, token::Kind::CBracket)?;
 	cursor.expect(data, token::Kind::At)?;
-	let Some(address) = cursor.expect_integer(data) else {
-		error::expected_token(data, "region address", cursor.index());
-		return None;
-	};
-	let address = check_integer_as_u32(data, "valid region address", address,
+	let address = cursor.expect_integer(data, "region address")?;
+	let address = check_integer_as_u32("valid region address", address,
 		(cursor.index() - 1).into()..cursor.index().into(),
 	)?;
 	cursor.expect(data, token::Kind::Semicolon)?;
@@ -240,15 +202,12 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 		address,
 		byte_count,
 	});
-	Some(())
+	Ok(())
 }
 
-fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	cursor.expect(data, token::Kind::Record)?;
-	let Some(ident_id) = cursor.expect_identifier(data) else {
-		error::expected_token(data, "record name", cursor.index());
-		return None;
-	};
+	let ident_id = cursor.expect_identifier(data, "record name")?;
 	// TODO - srenshaw - Handle region allocation
 	cursor.expect(data, token::Kind::OBrace)?;
 	let fields = discover_fields(cursor, data, token::Kind::CBrace)?;
@@ -257,21 +216,15 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 		.map(|(_, field_type)| data.type_size(*field_type))
 		.sum();
 	data.records.insert(ident_id, 	Record { size, fields });
-	Some(())
+	Ok(())
 }
 
-fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
+fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	cursor.expect(data, token::Kind::Table)?;
-	let Some(ident_id) = cursor.expect_identifier(data) else {
-		error::expected_token(data, "table name", cursor.index());
-		return None;
-	};
+	let ident_id = cursor.expect_identifier(data, "table name")?;
 	cursor.expect(data, token::Kind::OBracket)?;
-	let Some(row_count) = cursor.expect_integer(data) else {
-		error::expected_token(data, "table size", cursor.index());
-		return None;
-	};
-	let row_count = check_integer_as_u32(data, "valid table size", row_count,
+	let row_count = cursor.expect_integer(data, "table size")?;
+	let row_count = check_integer_as_u32("valid table size", row_count,
 		(cursor.index() - 1).into()..cursor.index().into(),
 	)?;
 	cursor.expect(data, token::Kind::CBracket)?;
@@ -286,7 +239,7 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 		column_spec,
 		size: row_count as usize * col_size,
 	});
-	Some(())
+	Ok(())
 }
 
 #[cfg(test)]

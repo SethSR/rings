@@ -1,4 +1,5 @@
 
+use crate::error::{self, CompilerError};
 use crate::identifier;
 use crate::token;
 use crate::Data;
@@ -34,52 +35,56 @@ impl Cursor {
 		self.peek(data, 0)
 	}
 
-	pub fn expect(&mut self, data: &Data, expected: token::Kind) -> Option<()> {
+	pub fn expect(&mut self, data: &Data, expected: token::Kind) -> Result<(), CompilerError> {
 		if self.current(data) == expected {
 			self.advance();
-			Some(())
+			Ok(())
 		} else {
-			None
+			Err(error::expected_token(data, &format!("{expected:?}"), self.index()))
 		}
 	}
 
-	pub fn expect_identifier(&mut self, data: &Data) -> Option<identifier::Id> {
+	pub fn expect_identifier(&mut self, data: &Data,
+		expected: &str,
+	) -> Result<identifier::Id, CompilerError> {
 		if let token::Kind::Identifier(ident_id) = self.current(data) {
 			self.advance();
-			Some(ident_id)
+			Ok(ident_id)
 		} else {
-			None
+			Err(error::expected_token(data, expected, self.index()))
 		}
 	}
 
-	pub fn expect_integer(&mut self, data: &Data) -> Option<i64> {
+	pub fn expect_integer(&mut self, data: &Data,
+		expected: &str,
+	) -> Result<i64, CompilerError> {
 		if let token::Kind::Integer(num) = self.current(data) {
 			self.advance();
-			Some(num)
+			Ok(num)
 		} else {
-			None
+			Err(error::expected_token(data, expected, self.index()))
 		}
 	}
 
-	pub fn expect_type(&mut self, data: &Data) -> Option<crate::Type> {
+	pub fn expect_type(&mut self, data: &Data) -> Result<crate::Type, CompilerError> {
 		let result = match self.current(data) {
 			token::Kind::Identifier(ident_id) => {
 				if data.records.contains_key(&ident_id) {
-					Some(crate::Type::Record(ident_id))
+					Ok(crate::Type::Record(ident_id))
 				} else if data.tables.contains_key(&ident_id) {
-					Some(crate::Type::Table(ident_id))
+					Ok(crate::Type::Table(ident_id))
 				} else {
-					None
+					return Err(error::expected_token(data, "type-specifier", self.index()))
 				}
 			}
-			token::Kind::Bool => Some(crate::Type::Bool),
-			token::Kind::U8 => Some(crate::Type::U8),
-			token::Kind::S8 => Some(crate::Type::S8),
-			token::Kind::U16 => Some(crate::Type::U16),
-			token::Kind::S16 => Some(crate::Type::S16),
-			token::Kind::U32 => Some(crate::Type::U32),
-			token::Kind::S32 => Some(crate::Type::S32),
-			_ => None,
+			token::Kind::Bool => Ok(crate::Type::Bool),
+			token::Kind::U8 => Ok(crate::Type::U8),
+			token::Kind::S8 => Ok(crate::Type::S8),
+			token::Kind::U16 => Ok(crate::Type::U16),
+			token::Kind::S16 => Ok(crate::Type::S16),
+			token::Kind::U32 => Ok(crate::Type::U32),
+			token::Kind::S32 => Ok(crate::Type::S32),
+			_ => return Err(error::expected_token(data, "type-specifier", self.index())),
 		};
 		self.advance();
 		result

@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::ast;
 use crate::cursor::Cursor;
-use crate::error;
+use crate::error::{self, CompilerError};
 use crate::identifier;
 use crate::token;
 use crate::{BinaryOp, Data, Bounds, SrcPos, UnaryOp};
@@ -82,7 +82,10 @@ fn parse(data: &mut Data, task: &mut Task) -> Result<ast::Id, token::Id> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	let mut block = parse_block(cursor, data)
-		.ok_or(cursor.index())?;
+		.map_err(|e| {
+			data.errors.push(e);
+			cursor.index()
+		})?;
 	let src_end = cursor.location(data);
 	let tok_end = cursor.index();
 
@@ -119,7 +122,7 @@ fn new_ast(data: &mut Data, kind: AKind,
 }
 
 fn parse_block(cursor: &mut Cursor, data: &mut Data,
-) -> Option<ast::Block> {
+) -> Result<ast::Block, CompilerError> {
 	cursor.expect(data, TKind::OBrace)?;
 
 	let mut block = vec![];
@@ -139,56 +142,47 @@ fn parse_block(cursor: &mut Cursor, data: &mut Data,
 			TKind::Return => parse_return_statement(cursor, data)?,
 			TKind::If => parse_if_statement(cursor, data)?,
 			TKind::For => parse_for_statement(cursor, data)?,
-			_ => {
-				error::expected_token(data,
-					"definition, assignment, return, if, or for statement", cursor.index());
-				return None;
-			}
+			_ => return Err(error::expected_token(data,
+					"definition, assignment, return, if, or for statement",
+			cursor.index())),
 		});
 	}
 
-	Some(ast::Block(block))
+	Ok(ast::Block(block))
 }
 
 fn parse_ident_statement(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
-) -> Option<ast::Id> {
+) -> Result<ast::Id, CompilerError> {
 	match cursor.peek(data, 1) {
 		TKind::Colon => parse_definition(cursor, data, ident_id),
 		TKind::Equal => parse_assignment(cursor, data, ident_id),
-		TKind::ColonEqual => {
-			error::error(data,
-				"type-inference is not implemented yet, please add a type-specifier",
-				cursor.index());
-			None
-		}
+		TKind::ColonEqual => Err(error::error(data,
+			"type-inference is not implemented yet, please add a type-specifier",
+			cursor.index())),
 		TKind::PlusEqual => parse_op_assignment(cursor, data, ident_id, BinaryOp::Add),
 		TKind::DashEqual => parse_op_assignment(cursor, data, ident_id, BinaryOp::Sub),
 		TKind::StarEqual => parse_op_assignment(cursor, data, ident_id, BinaryOp::Mul),
 		TKind::SlashEqual => parse_op_assignment(cursor, data, ident_id, BinaryOp::Div),
-		_ => {
-			error::expected_token(data, "definition or assignment statement", cursor.index());
-			None
-		}
+		_ => Err(error::expected_token(data,
+			"definition or assignment statement",
+			cursor.index())),
 	}
 }
 
 fn parse_definition(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
-) -> Option<ast::Id> {
+) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.advance();
 	cursor.advance();
-	let Some(var_type) = cursor.expect_type(data) else {
-		error::expected_token(data, "type-specifier", cursor.index());
-		return None;
-	};
+	let var_type = cursor.expect_type(data)?;
 	cursor.expect(data, TKind::Equal)?;
 	let ast_id = parse_expression(cursor, data)?;
 	let src_end = cursor.location(data);
 	let tok_end = cursor.index();
-	Some(new_ast(data, AKind::Define(ident_id, var_type, ast_id),
+	Ok(new_ast(data, AKind::Define(ident_id, var_type, ast_id),
 		src_start..src_end,
 		tok_start..tok_end,
 	))
@@ -196,7 +190,7 @@ fn parse_definition(cursor: &mut Cursor, data: &mut Data,
 
 fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id,
-) -> Option<ast::Id> {
+) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.advance();
@@ -204,7 +198,7 @@ fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
 	let ast_id = parse_expression(cursor, data)?;
 	let src_end = cursor.location(data);
 	let tok_end = cursor.index();
-	Some(new_ast(data, AKind::Assign(ident_id, ast_id),
+	Ok(new_ast(data, AKind::Assign(ident_id, ast_id),
 		src_start..src_end,
 		tok_start..tok_end,
 	))
@@ -212,7 +206,7 @@ fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
 
 fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data,
 	ident_id: identifier::Id, op: BinaryOp,
-) -> Option<ast::Id> {
+) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.advance();
@@ -228,13 +222,13 @@ fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data,
 		src_start..src_end,
 		tok_start..tok_end,
 	);
-	Some(new_ast(data, AKind::Assign(ident_id, op_id),
+	Ok(new_ast(data, AKind::Assign(ident_id, op_id),
 		src_start..src_end,
 		tok_start..tok_end,
 	))
 }
 
-fn parse_return_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
+fn parse_return_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::Return)?;
@@ -245,13 +239,13 @@ fn parse_return_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::I
 	};
 	let src_end = cursor.location(data);
 	let tok_end = cursor.index();
-	Some(new_ast(data, AKind::Return(ast_id),
+	Ok(new_ast(data, AKind::Return(ast_id),
 		src_start..src_end,
 		tok_start..tok_end,
 	))
 }
 
-fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
+fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::If)?;
@@ -265,23 +259,20 @@ fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
 	};
 	let src_end = cursor.location(data);
 	let tok_end = cursor.index();
-	Some(new_ast(data, AKind::If(cond_id, then_block, else_block),
+	Ok(new_ast(data, AKind::If(cond_id, then_block, else_block),
 		src_start..src_end,
 		tok_start..tok_end,
 	))
 }
 
-fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
+fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::For)?;
 
 	let mut vars = vec![];
 	while TKind::In != cursor.current(data) {
-		let TKind::Identifier(ident_id) = cursor.current(data) else {
-			error::expected_token(data, "identifier", cursor.index());
-			return None;
-		};
+		let ident_id = cursor.expect_identifier(data, "identifier")?;
 		cursor.advance();
 		vars.push(ident_id);
 		if TKind::In == cursor.current(data) {
@@ -292,13 +283,13 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> 
 
 	cursor.expect(data, TKind::In)?;
 
-	let table_id = cursor.expect_identifier(data);
+	let table_id = cursor.expect_identifier(data, "COMPILER ERROR").ok();
 
 	let range = if TKind::OBracket == cursor.current(data) {
 		cursor.advance();
-		let range_start = cursor.expect_integer(data);
+		let range_start = cursor.expect_integer(data, "COMPILER ERROR").ok();
 		cursor.expect(data, TKind::DotDot)?;
-		let range_end = cursor.expect_integer(data);
+		let range_end = cursor.expect_integer(data, "COMPILER ERROR").ok();
 		cursor.expect(data, TKind::CBracket)?;
 		match (range_start, range_end) {
 			(Some(start), Some(end)) => Some(Bounds::Full { start, end }),
@@ -314,19 +305,19 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> 
 
 	let src_end = cursor.location(data);
 	let tok_end = cursor.index();
-	Some(new_ast(data, AKind::For(vars, table_id, range, block),
+	Ok(new_ast(data, AKind::For(vars, table_id, range, block),
 		src_start..src_end,
 		tok_start..tok_end,
 	))
 }
 
-fn parse_expression(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
+fn parse_expression(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
 	parse_expr_main(cursor, data, 0)
 }
 
 fn parse_expr_main(cursor: &mut Cursor, data: &mut Data,
 	min_binding_power: usize,
-) -> Option<ast::Id> {
+) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	let left = parse_primary(cursor, data)?;
@@ -335,10 +326,10 @@ fn parse_expr_main(cursor: &mut Cursor, data: &mut Data,
 
 fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 	min_binding_power: usize, src_start: usize, tok_start: token::Id, left: ast::Id,
-) -> Option<ast::Id> {
+) -> Result<ast::Id, CompilerError> {
 	if TKind::Semicolon == cursor.current(data) {
 		cursor.advance();
-		return Some(left);
+		return Ok(left);
 	}
 	let op = parse_bin_op(cursor, data)?;
 	let op_binding_power = binding_power(&op);
@@ -355,13 +346,13 @@ fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 
 	let src_end = cursor.location(data);
 	let tok_end = cursor.index();
-	Some(new_ast(data, AKind::BinOp(op, left, right),
+	Ok(new_ast(data, AKind::BinOp(op, left, right),
 		src_start..src_end,
 		tok_start..tok_end,
 	))
 }
 
-fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
+fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
 	let src_start_op = cursor.location(data);
 	let tok_start_op = cursor.index();
 	let unary_op = match cursor.current(data) {
@@ -378,10 +369,9 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
 		TKind::Identifier(ident_id) => AKind::Ident(ident_id),
 		TKind::Integer(num) => AKind::Int(num),
 		TKind::Decimal(num) => AKind::Dec(num),
-		_ => {
-			error::expected_token(data, "identifier or number", cursor.index());
-			return None;
-		}
+		_ => return Err(error::expected_token(data,
+			"identifier or number",
+			cursor.index())),
 	};
 	cursor.advance();
 	let src_end_expr = cursor.location(data);
@@ -393,41 +383,38 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> {
 	);
 
 	if let Some(op) = unary_op {
-		Some(new_ast(data, AKind::UnOp(op, node),
+		Ok(new_ast(data, AKind::UnOp(op, node),
 			src_start_op..src_end_op,
 			tok_start_op..tok_end_op,
 		))
 	} else {
-		Some(node)
+		Ok(node)
 	}
 }
 
-fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Option<BinaryOp> {
+fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, CompilerError> {
 	match cursor.current(data) {
-		TKind::Plus => Some(BinaryOp::Add),
-		TKind::Dash => Some(BinaryOp::Sub),
-		TKind::Star => Some(BinaryOp::Mul),
-		TKind::Slash => Some(BinaryOp::Div),
-		TKind::Percent => Some(BinaryOp::Mod),
-		TKind::Amp => Some(BinaryOp::BinAnd),
-		TKind::AmpAmp => Some(BinaryOp::LogAnd),
-		TKind::Bar => Some(BinaryOp::BinOr),
-		TKind::BarBar => Some(BinaryOp::LogOr),
-		TKind::Carrot => Some(BinaryOp::BinXor),
-		TKind::CarrotCarrot => Some(BinaryOp::LogXor),
-		TKind::EqualEqual => Some(BinaryOp::CmpEQ),
-		TKind::BangEqual => Some(BinaryOp::CmpNE),
-		TKind::Less => Some(BinaryOp::CmpLT),
-		TKind::LessEqual => Some(BinaryOp::CmpLE),
-		TKind::LessLess => Some(BinaryOp::ShL),
-		TKind::Greater => Some(BinaryOp::CmpGT),
-		TKind::GreaterEqual => Some(BinaryOp::CmpGE),
-		TKind::GreaterGreater => Some(BinaryOp::ShR),
-		TKind::Dot => Some(BinaryOp::Access),
-		_ => {
-			error::expected_token(data, "binary operator", cursor.index());
-			None
-		}
+		TKind::Plus => Ok(BinaryOp::Add),
+		TKind::Dash => Ok(BinaryOp::Sub),
+		TKind::Star => Ok(BinaryOp::Mul),
+		TKind::Slash => Ok(BinaryOp::Div),
+		TKind::Percent => Ok(BinaryOp::Mod),
+		TKind::Amp => Ok(BinaryOp::BinAnd),
+		TKind::AmpAmp => Ok(BinaryOp::LogAnd),
+		TKind::Bar => Ok(BinaryOp::BinOr),
+		TKind::BarBar => Ok(BinaryOp::LogOr),
+		TKind::Carrot => Ok(BinaryOp::BinXor),
+		TKind::CarrotCarrot => Ok(BinaryOp::LogXor),
+		TKind::EqualEqual => Ok(BinaryOp::CmpEQ),
+		TKind::BangEqual => Ok(BinaryOp::CmpNE),
+		TKind::Less => Ok(BinaryOp::CmpLT),
+		TKind::LessEqual => Ok(BinaryOp::CmpLE),
+		TKind::LessLess => Ok(BinaryOp::ShL),
+		TKind::Greater => Ok(BinaryOp::CmpGT),
+		TKind::GreaterEqual => Ok(BinaryOp::CmpGE),
+		TKind::GreaterGreater => Ok(BinaryOp::ShR),
+		TKind::Dot => Ok(BinaryOp::Access),
+		_ => Err(error::expected_token(data, "binary operator", cursor.index())),
 	}
 }
 
