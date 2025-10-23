@@ -41,6 +41,7 @@ pub struct Procedure {
 pub struct Record {
 	pub fields: Vec<Field>,
 	pub size: usize,
+	pub address: Option<i64>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -209,14 +210,19 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerE
 fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	cursor.expect(data, token::Kind::Record)?;
 	let ident_id = cursor.expect_identifier(data, "record name")?;
-	// TODO - srenshaw - Handle region allocation
+	let address = if cursor.expect(data, token::Kind::At).is_ok() {
+		// TODO - srenshaw - Handle named region allocation
+		cursor.expect_integer(data, "record address").ok()
+	} else {
+		None
+	};
 	cursor.expect(data, token::Kind::OBrace)?;
 	let fields = discover_fields(cursor, data, token::Kind::CBrace)?;
 	cursor.expect(data, token::Kind::CBrace)?;
 	let size = fields.iter()
 		.map(|(_, field_type)| data.type_size(*field_type))
 		.sum();
-	data.records.insert(ident_id, 	Record { size, fields });
+	data.records.insert(ident_id, 	Record { size, address, fields });
 	Ok(())
 }
 
@@ -305,6 +311,7 @@ mod can_parse {
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 0,
+			address: None,
 			fields: vec![],
 		});
 	}
@@ -315,6 +322,7 @@ mod can_parse {
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 1,
+			address: None,
 			fields: vec![("b".id(), crate::Type::U8)],
 		});
 	}
@@ -325,6 +333,7 @@ mod can_parse {
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 1,
+			address: None,
 			fields: vec![("b".id(), crate::Type::U8)],
 		});
 	}
@@ -335,6 +344,7 @@ mod can_parse {
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 3,
+			address: None,
 			fields: vec![
 				("b".id(), crate::Type::U8),
 				("c".id(), crate::Type::S16),
@@ -348,9 +358,21 @@ mod can_parse {
 		assert_eq!(data.records.len(), 2);
 		assert_eq!(data.records[&"b".id()], Record {
 			size: 0,
+			address: None,
 			fields: vec![
 				("c".id(), crate::Type::Record("a".id())),
 			],
+		});
+	}
+
+	#[test]
+	fn record_with_address() {
+		let data = setup("record a @ 32 {}");
+		assert_eq!(data.records.len(), 1);
+		assert_eq!(data.records[&"a".id()], Record {
+			size: 0,
+			address: Some(32),
+			fields: vec![],
 		});
 	}
 
