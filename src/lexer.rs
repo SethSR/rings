@@ -58,7 +58,6 @@ impl Lexer {
 					"bool" => token::Kind::Bool,
 					"true" => token::Kind::True,
 					"false" => token::Kind::False,
-					"at" => token::Kind::At,
 					"in" => token::Kind::In,
 					"if" => token::Kind::If,
 					"else" => token::Kind::Else,
@@ -270,6 +269,8 @@ impl Lexer {
 			Some(';') => { self.advance(data); token::Kind::Semicolon }
 
 			Some(',') => { self.advance(data); token::Kind::Comma }
+
+			Some('@') => { self.advance(data); token::Kind::At }
 
 			Some(_) => { self.advance(data); token::Kind::Eof }
 		};
