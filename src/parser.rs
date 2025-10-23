@@ -443,6 +443,7 @@ mod can_parse_proc {
 	fn setup(source: &str) -> crate::Data {
 		let source_file = "parser".to_string();
 		let mut db = crate::Data::new(source_file, source.into());
+		db.DEBUG_show_tokens = true;
 		lexer::eval(&mut db);
 		discovery::eval(&mut db);
 		super::eval(&mut db);

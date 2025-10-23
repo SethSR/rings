@@ -260,6 +260,7 @@ mod can_parse {
 
 	fn setup(source: &str) -> Data {
 		let mut data = Data::new(file!().to_string(), source.into());
+		data.DEBUG_show_tokens = true;
 		crate::lexer::eval(&mut data);
 		eval(&mut data);
 		data

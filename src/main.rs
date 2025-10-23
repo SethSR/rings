@@ -73,8 +73,11 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 
 // TODO - srenshaw - Need to add Table location calculations.
 
+#[allow(non_snake_case)]
 #[derive(Default)]
 pub struct Data {
+	DEBUG_show_tokens: bool,
+
 	source_file: String,
 	source: Box<str>,
 	// stores the position of each newline (\n) character in the source
@@ -213,23 +216,30 @@ impl fmt::Display for Data {
 				.join(" , ")
 		}
 
-		write!(f, "Tokens:\n ")?;
-		for (token, start) in self.tok_list.iter().zip(self.tok_pos.iter()) {
-			match token {
-				token::Kind::Identifier(ident_id) => {
-					write!(f, " Identifier({})[{start}]", self.text(*ident_id))?;
+		if self.DEBUG_show_tokens {
+			write!(f, "Tokens:\n ")?;
+			for (token, start) in self.tok_list.iter().zip(self.tok_pos.iter()) {
+				match token {
+					token::Kind::Identifier(ident_id) => {
+						write!(f, " Identifier({})[{start}]", self.text(*ident_id))?;
+					}
+					_ => write!(f, " {token:?}[{start}]")?,
 				}
-				_ => write!(f, " {token:?}[{start}]")?,
 			}
+			writeln!(f)?;
+			writeln!(f)?;
 		}
-		writeln!(f)?;
-		writeln!(f)?;
+
+		let mut identifiers = self.identifiers.keys()
+			.map(|id| (id, self.text(*id)))
+			.collect::<Vec<_>>();
+		identifiers.sort_by(|(_,a),(_,b)| a.cmp(b));
 
 		writeln!(f, "{:<16} | HASH-VALUE",
 			"IDENTIFIER")?;
 		writeln!(f, "{:-<16} | {:-<16}", "", "")?;
-		for ident_id in self.identifiers.keys() {
-			writeln!(f, "{:<16} | {ident_id}", self.text(*ident_id))?;
+		for (ident_id, ident) in identifiers {
+			writeln!(f, "{ident:<16} | {ident_id}")?;
 		}
 		writeln!(f)?;
 
