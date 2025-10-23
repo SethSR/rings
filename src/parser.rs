@@ -180,7 +180,10 @@ fn parse_definition(cursor: &mut Cursor, data: &mut Data,
 	let tok_start = cursor.index();
 	cursor.advance();
 	cursor.advance();
-	let var_type = cursor.expect_type(data, "type-specifier")?;
+	let Some(var_type) = cursor.expect_type(data) else {
+		error::expected_token(data, "type-specifier", cursor.index());
+		return None;
+	};
 	cursor.expect(data, TKind::Equal)?;
 	let ast_id = parse_expression(cursor, data)?;
 	let src_end = cursor.location(data);
@@ -289,16 +292,13 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Option<ast::Id> 
 
 	cursor.expect(data, TKind::In)?;
 
-	let table_id = cursor.expect_identifier(data,
-		"ERROR: expect-table");
+	let table_id = cursor.expect_identifier(data);
 
 	let range = if TKind::OBracket == cursor.current(data) {
 		cursor.advance();
-		let range_start = cursor.expect_integer(data,
-			"ERROR: expect-range-start");
+		let range_start = cursor.expect_integer(data);
 		cursor.expect(data, TKind::DotDot)?;
-		let range_end = cursor.expect_integer(data,
-			"ERROR: expect-range-end");
+		let range_end = cursor.expect_integer(data);
 		cursor.expect(data, TKind::CBracket)?;
 		match (range_start, range_end) {
 			(Some(start), Some(end)) => Some(Bounds::Full { start, end }),

@@ -1,5 +1,4 @@
 
-use crate::error;
 use crate::identifier;
 use crate::token;
 use crate::Data;
@@ -35,46 +34,34 @@ impl Cursor {
 		self.peek(data, 0)
 	}
 
-	pub fn expect(&mut self, data: &mut Data, expected: token::Kind) -> Option<()> {
-		let found = self.current(data);
-		if found == expected {
+	pub fn expect(&mut self, data: &Data, expected: token::Kind) -> Option<()> {
+		if self.current(data) == expected {
 			self.advance();
 			Some(())
 		} else {
-			error::expected_token(data, &format!("{expected:?}"), self.index());
 			None
 		}
 	}
 
-	pub fn expect_identifier(&mut self, data: &mut Data,
-		expected: &str,
-	) -> Option<identifier::Id> {
-		let kind = self.current(data);
-		if let token::Kind::Identifier(ident_id) = kind {
+	pub fn expect_identifier(&mut self, data: &Data) -> Option<identifier::Id> {
+		if let token::Kind::Identifier(ident_id) = self.current(data) {
 			self.advance();
 			Some(ident_id)
 		} else {
-			error::expected_token(data, expected, self.index());
 			None
 		}
 	}
 
-	pub fn expect_integer(&mut self, data: &mut Data,
-		expected: &str,
-	) -> Option<i64> {
-		let kind = self.current(data);
-		if let token::Kind::Integer(num) = kind {
+	pub fn expect_integer(&mut self, data: &Data) -> Option<i64> {
+		if let token::Kind::Integer(num) = self.current(data) {
 			self.advance();
 			Some(num)
 		} else {
-			error::expected_token(data, expected, self.index());
 			None
 		}
 	}
 
-	pub fn expect_type(&mut self, data: &mut Data,
-		expected: &str,
-	) -> Option<crate::Type> {
+	pub fn expect_type(&mut self, data: &Data) -> Option<crate::Type> {
 		let result = match self.current(data) {
 			token::Kind::Identifier(ident_id) => {
 				if data.records.contains_key(&ident_id) {
@@ -82,7 +69,6 @@ impl Cursor {
 				} else if data.tables.contains_key(&ident_id) {
 					Some(crate::Type::Table(ident_id))
 				} else {
-					error::expected_token(data, expected, self.index());
 					None
 				}
 			}
@@ -93,10 +79,7 @@ impl Cursor {
 			token::Kind::S16 => Some(crate::Type::S16),
 			token::Kind::U32 => Some(crate::Type::U32),
 			token::Kind::S32 => Some(crate::Type::S32),
-			_ => {
-				error::expected_token(data, expected, self.index());
-				None
-			}
+			_ => None,
 		};
 		self.advance();
 		result

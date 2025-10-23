@@ -131,7 +131,10 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 
 fn discover_main_proc(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 	let tok_start = cursor.index();
-	let ident_id = cursor.expect_identifier(data, "COMPILER ERROR")?;
+	let Some(ident_id) = cursor.expect_identifier(data) else {
+		error::expected_token(data, "COMPILER ERROR", cursor.index());
+		return None;
+	};
 	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data)?;
 	data.procedures.insert(ident_id, Procedure {
@@ -145,7 +148,10 @@ fn discover_main_proc(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 fn discover_proc(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 	let tok_start = cursor.index();
 	cursor.expect(data, token::Kind::Proc)?;
-	let ident_id = cursor.expect_identifier(data, "procedure name")?;
+	let Some(ident_id) = cursor.expect_identifier(data) else {
+		error::expected_token(data, "procedure name", cursor.index());
+		return None;
+	};
 	cursor.expect(data, token::Kind::OParen)?;
 	let params = discover_fields(cursor, data, token::Kind::CParen)?;
 	cursor.expect(data, token::Kind::CParen)?;
@@ -166,9 +172,15 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 ) -> Option<Vec<Field>> {
 	let mut fields = Vec::default();
 	while end_token != cursor.current(data) {
-		let field_id = cursor.expect_identifier(data, "field name")?;
+		let Some(field_id) = cursor.expect_identifier(data) else {
+			error::expected_token(data, "field name", cursor.index());
+			return None;
+		};
 		cursor.expect(data, token::Kind::Colon)?;
-		let field_type = cursor.expect_type(data, "type-specifier")?;
+		let Some(field_type) = cursor.expect_type(data) else {
+			error::expected_token(data, "type-specifier", cursor.index());
+			return None;
+		};
 		fields.push((field_id, field_type));
 		if cursor.current(data) != token::Kind::Comma {
 			break;
@@ -202,15 +214,24 @@ fn discover_decimal(cursor: &mut Cursor, data: &mut Data,
 
 fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 	cursor.expect(data, token::Kind::Region)?;
-	let ident_id = cursor.expect_identifier(data, "region name")?;
+	let Some(ident_id) = cursor.expect_identifier(data) else {
+		error::expected_token(data, "region name", cursor.index());
+		return None;
+	};
 	cursor.expect(data, token::Kind::OBracket)?;
-	let byte_count = cursor.expect_integer(data, "region size")?;
+	let Some(byte_count) = cursor.expect_integer(data) else {
+		error::expected_token(data, "region size", cursor.index());
+		return None;
+	};
 	let byte_count = check_integer_as_u32(data, "valid region size", byte_count,
 		(cursor.index() - 1).into()..cursor.index().into(),
 	)?;
 	cursor.expect(data, token::Kind::CBracket)?;
 	cursor.expect(data, token::Kind::At)?;
-	let address = cursor.expect_integer(data, "region address")?;
+	let Some(address) = cursor.expect_integer(data) else {
+		error::expected_token(data, "region address", cursor.index());
+		return None;
+	};
 	let address = check_integer_as_u32(data, "valid region address", address,
 		(cursor.index() - 1).into()..cursor.index().into(),
 	)?;
@@ -224,7 +245,10 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 
 fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 	cursor.expect(data, token::Kind::Record)?;
-	let ident_id = cursor.expect_identifier(data, "record name")?;
+	let Some(ident_id) = cursor.expect_identifier(data) else {
+		error::expected_token(data, "record name", cursor.index());
+		return None;
+	};
 	// TODO - srenshaw - Handle region allocation
 	cursor.expect(data, token::Kind::OBrace)?;
 	let fields = discover_fields(cursor, data, token::Kind::CBrace)?;
@@ -238,9 +262,15 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 
 fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Option<()> {
 	cursor.expect(data, token::Kind::Table)?;
-	let ident_id = cursor.expect_identifier(data, "table name")?;
+	let Some(ident_id) = cursor.expect_identifier(data) else {
+		error::expected_token(data, "table name", cursor.index());
+		return None;
+	};
 	cursor.expect(data, token::Kind::OBracket)?;
-	let row_count = cursor.expect_integer(data, "table size")?;
+	let Some(row_count) = cursor.expect_integer(data) else {
+		error::expected_token(data, "table size", cursor.index());
+		return None;
+	};
 	let row_count = check_integer_as_u32(data, "valid table size", row_count,
 		(cursor.index() - 1).into()..cursor.index().into(),
 	)?;
@@ -307,7 +337,7 @@ mod can_parse {
 
 	#[test]
 	fn region() {
-		let data = setup("region a[1024] at 0x0020_0000;");
+		let data = setup("region a[1024] @ 0x0020_0000;");
 		assert_eq!(data.regions.len(), 1);
 		assert_eq!(data.regions[&"a".id()], Region {
 			byte_count: 1024,

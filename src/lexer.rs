@@ -355,7 +355,7 @@ mod can_lex {
 
 	#[test]
 	fn a_region_declaration() {
-		let data = setup("wram_high :: region[2*1024^3] at 0x0020_0000;");
+		let data = setup("wram_high :: region[2*1024^3] @ 0x0020_0000;");
 		assert_eq!(data.tok_list, [
 			Kind::Identifier("wram_high".id()),
 			Kind::ColonColon,
