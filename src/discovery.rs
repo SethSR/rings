@@ -138,13 +138,16 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerErr
 	cursor.expect(data, token::Kind::OParen)?;
 	let params = discover_fields(cursor, data, token::Kind::CParen)?;
 	cursor.expect(data, token::Kind::CParen)?;
-	// TODO - srenshaw - Handle return type declarations
+	let ret_type = if cursor.expect(data, token::Kind::Arrow).is_ok() {
+		cursor.expect_type(data)?
+	} else {
+		crate::Type::Unit
+	};
 	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data)?;
 	data.procedures.insert(ident_id, Procedure {
 		params,
-		// TODO - srenshaw - Handle return type
-		ret_type: crate::Type::Unit,
+		ret_type,
 		tok_start,
 	});
 	Ok(())
@@ -271,7 +274,7 @@ mod can_parse {
 	}
 
 	#[test]
-	fn procedure_locations() {
+	fn procedures() {
 		let data = setup("a :: 5; proc b() {}");
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"b".id()], Procedure {
@@ -291,6 +294,17 @@ mod can_parse {
 				("c".id(), crate::Type::S32),
 			],
 			ret_type: crate::Type::Unit,
+			tok_start: token::Id::new(0),
+		});
+	}
+
+	#[test]
+	fn procedure_with_return() {
+		let data = setup("proc a() -> s32 {}");
+		assert_eq!(data.procedures.len(), 1);
+		assert_eq!(data.procedures[&"a".id()], Procedure {
+			params: vec![],
+			ret_type: crate::Type::S32,
 			tok_start: token::Id::new(0),
 		});
 	}

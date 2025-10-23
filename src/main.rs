@@ -31,7 +31,7 @@ fn main() {
 
 type SrcPos = usize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum Type {
 	Bool,
 	U8, S8,
@@ -40,6 +40,7 @@ enum Type {
 	// F16, F32
 	Record(identifier::Id),
 	Table(identifier::Id),
+	#[default]
 	Unit,
 }
 
