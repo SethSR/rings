@@ -64,24 +64,51 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 		match cursor.current(data) {
 			token::Kind::Identifier(ident_id) => {
 				if data.text(ident_id) == "main" {
-					discover_main_proc(cursor, data)
+					cursor.advance();
+					let tok_start = cursor.index();
+					check_braces(cursor, data)?;
+					data.procedures.insert(ident_id, Procedure {
+						params: vec![],
+						ret_type: crate::Type::Unit,
+						tok_start,
+					});
 				} else {
 					cursor.advance();
 					cursor.expect(data, token::Kind::ColonColon)?;
 					match cursor.peek(data, 0) {
-						token::Kind::Integer(value) => discover_integer(cursor, data, ident_id, value),
-						token::Kind::Decimal(value) => discover_decimal(cursor, data, ident_id, value),
-						_ => Err(error::expected_token(data, "value statement", cursor.index())),
+						token::Kind::Integer(value) => {
+							cursor.advance(); // increment past the integer, as we already have it
+							cursor.expect(data, token::Kind::Semicolon)?;
+							data.values.insert(ident_id, Value::Integer(value));
+						}
+						token::Kind::Decimal(value) => {
+							cursor.advance(); // increment past the decimal, as we already have it
+							cursor.expect(data, token::Kind::Semicolon)?;
+							data.values.insert(ident_id, Value::Decimal(value));
+						}
+						token::Kind::Proc => {
+							let procedure = discover_proc(cursor, data)?;
+							data.procedures.insert(ident_id, procedure);
+						}
+						token::Kind::Region => {
+							let region = discover_region(cursor, data)?;
+							data.regions.insert(ident_id, region);
+						}
+						token::Kind::Record => {
+							let record = discover_record(cursor, data)?;
+							data.records.insert(ident_id, record);
+						}
+						token::Kind::Table => {
+							let table = discover_table(cursor, data)?;
+							data.tables.insert(ident_id, table);
+						}
+						token::Kind::Index => return Err(error::error(data,
+							"indexes not yet implemented",
+							cursor.index())),
+						_ => return Err(error::expected_token(data, "value statement", cursor.index())),
 					}
-				}?;
+				};
 			}
-			token::Kind::Proc => discover_proc(cursor, data)?,
-			token::Kind::Region => discover_region(cursor, data)?,
-			token::Kind::Record => discover_record(cursor, data)?,
-			token::Kind::Table => discover_table(cursor, data)?,
-			token::Kind::Index => return Err(error::error(data,
-				"indexes not yet implemented",
-				cursor.index())),
 			token::Kind::Eof => break,
 			_ => return Err(error::expected_token(data,
 				"top-level statement",
@@ -101,6 +128,7 @@ fn check_integer_as_u32(expected: &str, found: i64, span: Range<usize>) -> Resul
 }
 
 fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
+	cursor.expect(data, token::Kind::OBrace)?;
 	let mut brace_count = 1;
 	while brace_count > 0 && cursor.current(data) != token::Kind::Eof {
 		brace_count += match cursor.current(data) {
@@ -117,24 +145,10 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerErro
 	Ok(())
 }
 
-fn discover_main_proc(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
-	let tok_start = cursor.index();
-	let ident_id = cursor.expect_identifier(data, "")
-		.unwrap_or_else(|_| panic!("should not enter 'discover_main_proc' without the procedure name"));
-	cursor.expect(data, token::Kind::OBrace)?;
-	check_braces(cursor, data)?;
-	data.procedures.insert(ident_id, Procedure {
-		params: vec![], // `main` has no parameters 
-		ret_type: crate::Type::Unit, // `main` has no return type
-		tok_start,
-	});
-	Ok(())
-}
-
-fn discover_proc(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
+fn discover_proc(cursor: &mut Cursor, data: &mut Data,
+) -> Result<Procedure, CompilerError> {
 	let tok_start = cursor.index();
 	cursor.expect(data, token::Kind::Proc)?;
-	let ident_id = cursor.expect_identifier(data, "procedure name")?;
 	cursor.expect(data, token::Kind::OParen)?;
 	let params = discover_fields(cursor, data, token::Kind::CParen)?;
 	cursor.expect(data, token::Kind::CParen)?;
@@ -143,14 +157,12 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerErr
 	} else {
 		crate::Type::Unit
 	};
-	cursor.expect(data, token::Kind::OBrace)?;
 	check_braces(cursor, data)?;
-	data.procedures.insert(ident_id, Procedure {
+	Ok(Procedure {
 		params,
 		ret_type,
 		tok_start,
-	});
-	Ok(())
+	})
 }
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data,
@@ -170,27 +182,8 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	Ok(fields)
 }
 
-fn discover_integer(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id, value: i64,
-) -> Result<(), CompilerError> {
-	cursor.advance(); // increment past the integer, as we already have it
-	cursor.expect(data, token::Kind::Semicolon)?;
-	data.values.insert(ident_id, Value::Integer(value));
-	Ok(())
-}
-
-fn discover_decimal(cursor: &mut Cursor, data: &mut Data,
-	ident_id: identifier::Id, value: f64,
-) -> Result<(), CompilerError> {
-	cursor.advance(); // increment past the decimal, as we already have it
-	cursor.expect(data, token::Kind::Semicolon)?;
-	data.values.insert(ident_id, Value::Decimal(value));
-	Ok(())
-}
-
-fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
+fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<Region, CompilerError> {
 	cursor.expect(data, token::Kind::Region)?;
-	let ident_id = cursor.expect_identifier(data, "region name")?;
 	cursor.expect(data, token::Kind::OBracket)?;
 	let byte_count = cursor.expect_integer(data, "region size")?;
 	let byte_count = check_integer_as_u32("valid region size", byte_count,
@@ -203,16 +196,11 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerE
 		(cursor.index() - 1).into()..cursor.index().into(),
 	)?;
 	cursor.expect(data, token::Kind::Semicolon)?;
-	data.regions.insert(ident_id, Region {
-		address,
-		byte_count,
-	});
-	Ok(())
+	Ok(Region { byte_count, address })
 }
 
-fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
+fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, CompilerError> {
 	cursor.expect(data, token::Kind::Record)?;
-	let ident_id = cursor.expect_identifier(data, "record name")?;
 	let address = if cursor.expect(data, token::Kind::At).is_ok() {
 		// TODO - srenshaw - Handle named region allocation
 		cursor.expect_integer(data, "record address").ok()
@@ -225,13 +213,11 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerE
 	let size = fields.iter()
 		.map(|(_, field_type)| data.type_size(*field_type))
 		.sum();
-	data.records.insert(ident_id, 	Record { size, address, fields });
-	Ok(())
+	Ok(Record { size, address, fields })
 }
 
-fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
+fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, CompilerError> {
 	cursor.expect(data, token::Kind::Table)?;
-	let ident_id = cursor.expect_identifier(data, "table name")?;
 	cursor.expect(data, token::Kind::OBracket)?;
 	let row_count = cursor.expect_integer(data, "table size")?;
 	let row_count = check_integer_as_u32("valid table size", row_count,
@@ -244,12 +230,11 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerEr
 	let col_size: usize = column_spec.iter()
 		.map(|(_, col_type)| data.type_size(*col_type))
 		.sum();
-	data.tables.insert(ident_id, Table {
+	Ok(Table {
 		row_count,
 		column_spec,
 		size: row_count as usize * col_size,
-	});
-	Ok(())
+	})
 }
 
 #[cfg(test)]
@@ -276,18 +261,18 @@ mod can_parse {
 
 	#[test]
 	fn procedures() {
-		let data = setup("a :: 5; proc b() {}");
+		let data = setup("a :: 5; b :: proc() {}");
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"b".id()], Procedure {
 			params: vec![],
 			ret_type: crate::Type::Unit,
-			tok_start: token::Id::new(4),
+			tok_start: token::Id::new(6),
 		});
 	}
 
 	#[test]
 	fn procedure_with_params() {
-		let data = setup("proc a(b: u8, c: s32) {}");
+		let data = setup("a :: proc(b: u8, c: s32) {}");
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], Procedure {
 			params: vec![
@@ -295,24 +280,24 @@ mod can_parse {
 				("c".id(), crate::Type::S32),
 			],
 			ret_type: crate::Type::Unit,
-			tok_start: token::Id::new(0),
+			tok_start: token::Id::new(2),
 		});
 	}
 
 	#[test]
 	fn procedure_with_return() {
-		let data = setup("proc a() -> s32 {}");
+		let data = setup("a :: proc() -> s32 {}");
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], Procedure {
 			params: vec![],
 			ret_type: crate::Type::S32,
-			tok_start: token::Id::new(0),
+			tok_start: token::Id::new(2),
 		});
 	}
 
 	#[test]
 	fn region() {
-		let data = setup("region a[1024] @ 0x0020_0000;");
+		let data = setup("a :: region[1024] @ 0x0020_0000;");
 		assert_eq!(data.regions.len(), 1);
 		assert_eq!(data.regions[&"a".id()], Region {
 			byte_count: 1024,
@@ -322,7 +307,7 @@ mod can_parse {
 
 	#[test]
 	fn empty_record() {
-		let data = setup("record a {}");
+		let data = setup("a :: record {}");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 0,
@@ -333,7 +318,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_one_field_no_trailing_comma() {
-		let data = setup("record a { b: u8 }");
+		let data = setup("a :: record { b: u8 }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 1,
@@ -344,7 +329,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_one_field_and_trailing_comma() {
-		let data = setup("record a { b: u8, }");
+		let data = setup("a :: record { b: u8, }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 1,
@@ -355,7 +340,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_multiple_fields() {
-		let data = setup("record a { b: u8, c: s16 }");
+		let data = setup("a :: record { b: u8, c: s16 }");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 3,
@@ -369,7 +354,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_user_defined_field() {
-		let data = setup("record a {} record b { c: a }");
+		let data = setup("a :: record {} b :: record { c: a }");
 		assert_eq!(data.records.len(), 2);
 		assert_eq!(data.records[&"b".id()], Record {
 			size: 0,
@@ -382,7 +367,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_address() {
-		let data = setup("record a @ 32 {}");
+		let data = setup("a :: record @ 32 {}");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 0,
@@ -393,7 +378,7 @@ mod can_parse {
 
 	#[test]
 	fn empty_table() {
-		let data = setup("table a[10] {}");
+		let data = setup("a :: table[10] {}");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"a".id()], Table {
 			row_count: 10,
@@ -404,7 +389,7 @@ mod can_parse {
 
 	#[test]
 	fn table_with_one_field() {
-		let data = setup("table a[10] { b: u32 }");
+		let data = setup("a :: table[10] { b: u32 }");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"a".id()], Table {
 			row_count: 10,
@@ -415,7 +400,7 @@ mod can_parse {
 
 	#[test]
 	fn table_with_multiple_field() {
-		let data = setup("table a[10] { b: u32, c: s16 }");
+		let data = setup("a :: table[10] { b: u32, c: s16 }");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"a".id()], Table {
 			row_count: 10,
@@ -429,7 +414,7 @@ mod can_parse {
 
 	#[test]
 	fn table_with_user_defined_field() {
-		let data = setup("record a { a1: s16 } table b[10] { b1: a }");
+		let data = setup("a :: record { a1: s16 } b :: table[10] { b1: a }");
 		assert_eq!(data.tables.len(), 1);
 		assert_eq!(data.tables[&"b".id()], Table {
 			row_count: 10,
