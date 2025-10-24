@@ -176,7 +176,7 @@ impl Data {
 
 		let line_pos = self.line_pos.get(line)
 			.unwrap_or_else(|| panic!("missing position for line number {line}"));
-		assert!(tok_pos > *line_pos, "tok({tok_pos}) line({line_pos})");
+		assert!(tok_pos >= *line_pos, "tok({tok_pos}) line({line_pos})");
 		let column = tok_pos - line_pos;
 		let line_text = self.get_line_text(line.index() + 1);
 		let tab_count = line_text.chars()
