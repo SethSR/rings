@@ -136,11 +136,9 @@ fn parse_block(cursor: &mut Cursor, data: &mut Data,
 				let src_start = cursor.location(data);
 				let tok_start = cursor.index();
 				let b = parse_block(cursor, data)?;
-				let src_end = cursor.location(data);
-				let tok_end = cursor.index();
-				new_ast(data, AKind::Block(b),
-					src_start..src_end,
-					tok_start..tok_end)
+				let src_range = src_start..cursor.location(data);
+				let tok_range = tok_start..cursor.index();
+				new_ast(data, AKind::Block(b), src_range, tok_range)
 			}
 			TKind::Return => parse_return_statement(cursor, data)?,
 			TKind::If => parse_if_statement(cursor, data)?,
@@ -182,13 +180,11 @@ fn parse_definition(cursor: &mut Cursor, data: &mut Data,
 	cursor.advance();
 	let var_type = cursor.expect_type(data)?;
 	cursor.expect(data, TKind::Equal)?;
-	let ast_id = parse_expression(cursor, data)?;
-	let src_end = cursor.location(data);
-	let tok_end = cursor.index();
-	Ok(new_ast(data, AKind::Define(ident_id, var_type, ast_id),
-		src_start..src_end,
-		tok_start..tok_end,
-	))
+	let ast_id = parse_expression(cursor, data, TKind::Semicolon)?;
+	cursor.expect(data, TKind::Semicolon)?;
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::Define(ident_id, var_type, ast_id), src_range, tok_range))
 }
 
 fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
@@ -198,13 +194,11 @@ fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
 	let tok_start = cursor.index();
 	cursor.advance();
 	cursor.advance();
-	let ast_id = parse_expression(cursor, data)?;
-	let src_end = cursor.location(data);
-	let tok_end = cursor.index();
-	Ok(new_ast(data, AKind::Assign(ident_id, ast_id),
-		src_start..src_end,
-		tok_start..tok_end,
-	))
+	let ast_id = parse_expression(cursor, data, TKind::Semicolon)?;
+	cursor.expect(data, TKind::Semicolon)?;
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::Assign(ident_id, ast_id), src_range, tok_range))
 }
 
 fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data,
@@ -218,17 +212,14 @@ fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data,
 		src_start..cursor.location(data),
 		tok_start..cursor.index(),
 	);
-	let ast_id = parse_expression(cursor, data)?;
-	let src_end = cursor.location(data);
-	let tok_end = cursor.index();
+	let ast_id = parse_expression(cursor, data, TKind::Semicolon)?;
+	cursor.expect(data, TKind::Semicolon)?;
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
 	let op_id = new_ast(data, AKind::BinOp(op, var_id, ast_id),
-		src_start..src_end,
-		tok_start..tok_end,
-	);
-	Ok(new_ast(data, AKind::Assign(ident_id, op_id),
-		src_start..src_end,
-		tok_start..tok_end,
-	))
+		src_range.clone(),
+		tok_range.clone());
+	Ok(new_ast(data, AKind::Assign(ident_id, op_id), src_range, tok_range))
 }
 
 fn parse_return_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
@@ -236,23 +227,23 @@ fn parse_return_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::I
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::Return)?;
 	let ast_id = if TKind::Semicolon != cursor.current(data) {
-		Some(parse_expression(cursor, data)?)
+		let id = parse_expression(cursor, data, TKind::Semicolon)?;
+		cursor.expect(data, TKind::Semicolon)?;
+		Some(id)
 	} else {
 		None
 	};
-	let src_end = cursor.location(data);
-	let tok_end = cursor.index();
-	Ok(new_ast(data, AKind::Return(ast_id),
-		src_start..src_end,
-		tok_start..tok_end,
-	))
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::Return(ast_id), src_range, tok_range))
 }
 
 fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::If)?;
-	let cond_id = parse_expression(cursor, data)?;
+	let cond_id = parse_expression(cursor, data, TKind::Semicolon)?;
+	cursor.expect(data, TKind::Semicolon)?;
 	let then_block = parse_block(cursor, data)?;
 	let else_block = if TKind::Else == cursor.current(data) {
 		cursor.advance();
@@ -260,12 +251,9 @@ fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, C
 	} else {
 		ast::Block(vec![])
 	};
-	let src_end = cursor.location(data);
-	let tok_end = cursor.index();
-	Ok(new_ast(data, AKind::If(cond_id, then_block, else_block),
-		src_start..src_end,
-		tok_start..tok_end,
-	))
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::If(cond_id, then_block, else_block), src_range, tok_range))
 }
 
 fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
@@ -306,32 +294,31 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, 
 
 	let block = parse_block(cursor, data)?;
 
-	let src_end = cursor.location(data);
-	let tok_end = cursor.index();
-	Ok(new_ast(data, AKind::For(vars, table_id, range, block),
-		src_start..src_end,
-		tok_start..tok_end,
-	))
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::For(vars, table_id, range, block), src_range, tok_range))
 }
 
-fn parse_expression(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
-	parse_expr_main(cursor, data, 0)
+fn parse_expression(cursor: &mut Cursor, data: &mut Data,
+	end_token: TKind,
+) -> Result<ast::Id, CompilerError> {
+	parse_expr_main(cursor, data, 0, end_token)
 }
 
 fn parse_expr_main(cursor: &mut Cursor, data: &mut Data,
-	min_binding_power: usize,
+	min_binding_power: usize, end_token: TKind,
 ) -> Result<ast::Id, CompilerError> {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	let left = parse_primary(cursor, data)?;
-	parse_expr_sub(cursor, data, min_binding_power, src_start, tok_start, left)
+	parse_expr_sub(cursor, data, min_binding_power, src_start, tok_start, left, end_token)
 }
 
 fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 	min_binding_power: usize, src_start: usize, tok_start: token::Id, left: ast::Id,
+	end_token: TKind,
 ) -> Result<ast::Id, CompilerError> {
-	if TKind::Semicolon == cursor.current(data) {
-		cursor.advance();
+	if end_token == cursor.current(data) {
 		return Ok(left);
 	}
 	let op = parse_bin_op(cursor, data)?;
@@ -342,17 +329,14 @@ fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 	let right = parse_primary(cursor, data)?;
 	let right = if min_binding_power < op_binding_power {
 		parse_expr_sub(cursor, data, op_binding_power,
-			src_start_inner, tok_start_inner, right)?
+			src_start_inner, tok_start_inner, right, end_token)?
 	} else {
 		right
 	};
 
-	let src_end = cursor.location(data);
-	let tok_end = cursor.index();
-	Ok(new_ast(data, AKind::BinOp(op, left, right),
-		src_start..src_end,
-		tok_start..tok_end,
-	))
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::BinOp(op, left, right), src_range, tok_range))
 }
 
 fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, CompilerError> {
@@ -366,30 +350,34 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> Result<ast::Id, Compil
 	let src_end_op = cursor.location(data);
 	let tok_end_op = cursor.index();
 
-	let src_start_expr = cursor.location(data);
-	let tok_start_expr = cursor.index();
-	let kind = match cursor.current(data) {
-		TKind::Identifier(ident_id) => AKind::Ident(ident_id),
-		TKind::Integer(num) => AKind::Int(num),
-		TKind::Decimal(num) => AKind::Dec(num),
+	fn primary_node(cursor: &mut Cursor, data: &mut Data, kind: AKind) -> ast::Id {
+		let src_start_expr = cursor.location(data);
+		let tok_start_expr = cursor.index();
+		cursor.advance();
+		let src_range = src_start_expr..cursor.location(data);
+		let tok_range = tok_start_expr..cursor.index();
+		new_ast(data, kind, src_range, tok_range)
+	}
+
+	let node = match cursor.current(data) {
+		TKind::Identifier(ident_id) => primary_node(cursor, data, AKind::Ident(ident_id)),
+		TKind::Integer(num) => primary_node(cursor, data, AKind::Int(num)),
+		TKind::Decimal(num) => primary_node(cursor, data, AKind::Dec(num)),
+		TKind::OParen => {
+			cursor.advance();
+			let expr = parse_expression(cursor, data, TKind::CParen)?;
+			cursor.expect(data, TKind::CParen)?;
+			expr
+		}
 		_ => return Err(error::expected_token(data,
 			"identifier or number",
 			cursor.index())),
 	};
-	cursor.advance();
-	let src_end_expr = cursor.location(data);
-	let tok_end_expr = cursor.index();
-
-	let node = new_ast(data, kind,
-		src_start_expr..src_end_expr,
-		tok_start_expr..tok_end_expr,
-	);
 
 	if let Some(op) = unary_op {
-		Ok(new_ast(data, AKind::UnOp(op, node),
-			src_start_op..src_end_op,
-			tok_start_op..tok_end_op,
-		))
+		let src_range = src_start_op..src_end_op;
+		let tok_range = tok_start_op..tok_end_op;
+		Ok(new_ast(data, AKind::UnOp(op, node), src_range, tok_range))
 	} else {
 		Ok(node)
 	}
@@ -470,9 +458,23 @@ mod can_parse_proc {
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
-	// TODO - srenshaw - We still need to get return values working on procedure discovery.
-	// #[test]
-	// fn with_return() { todo!() }
+	#[test]
+	fn with_internal_expressions() {
+		let db = setup("main { a: u8 = 2 + 3; }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_sub_expressions() {
+		let db = setup("main { a: s8 = (2 + 3) * (4 - 5); }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_return() {
+		let db = setup("main{} proc a() -> u16 {}");
+		assert!(db.completed_procs.contains_key(&"a".id()));
+	}
 
 	#[test]
 	fn with_single_param() {
