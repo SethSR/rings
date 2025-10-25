@@ -63,7 +63,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 	loop {
 		match cursor.current(data) {
 			token::Kind::Identifier(ident_id) => {
-				if data.text(ident_id) == "main" {
+				if data.text(&ident_id) == "main" {
 					cursor.advance();
 					let tok_start = cursor.index();
 					check_braces(cursor, data)?;

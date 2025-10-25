@@ -59,18 +59,18 @@ impl Checker {
 			}
 
 			Kind::Ident(ident_id) => {
-				println!("AST-Ident({})", data.text(*ident_id));
+				println!("AST-Ident({})", data.text(ident_id));
 				self.check_ident(ident_id, ast_id);
 				None
 			}
 
 			Kind::Define(ident_id, var_type, expr_id) => {
-				println!("AST-Define({} : {var_type:?} = {})", data.text(*ident_id), ast_id.index());
+				println!("AST-Define({} : {var_type:?} = {})", data.text(ident_id), ast_id.index());
 				self.check_define(data, ident_id, *expr_id, *var_type)
 			}
 
 			Kind::Assign(ident_id, expr_id) => {
-				println!("AST-Assign({} = {})", data.text(*ident_id), ast_id.index());
+				println!("AST-Assign({} = {})", data.text(ident_id), ast_id.index());
 				self.check_assign(data, ident_id, *expr_id)
 			}
 
@@ -111,12 +111,12 @@ impl Checker {
 			}
 
 			Kind::For(vars, Some(table_id), Some(range), block) => {
-				println!("AST-For({vars:?} in {}[{}] -> {})", data.text(*table_id), range, block.0.len());
+				println!("AST-For({vars:?} in {}[{}] -> {})", data.text(table_id), range, block.0.len());
 				todo!()
 			}
 
 			Kind::For(vars, Some(table_id), None, block) => {
-				println!("AST-For({vars:?} in {} -> {})", data.text(*table_id), block.0.len());
+				println!("AST-For({vars:?} in {} -> {})", data.text(table_id), block.0.len());
 				todo!()
 			}
 
@@ -146,7 +146,7 @@ impl Checker {
 	) -> Option<String> {
 		match self.ident_to_type.entry(*ident_id) {
 			Entry::Occupied(_) => {
-				Some(format!("TC - '{}' has already been defined", data.text(*ident_id)))
+				Some(format!("TC - '{}' has already been defined", data.text(ident_id)))
 			}
 			Entry::Vacant(e) => {
 				let Some(expr_type) = self.ast_to_type.get(&ast_id) else {
@@ -172,7 +172,7 @@ impl Checker {
 		ident_id: &identifier::Id, ast_id: ast::Id,
 	) -> Option<String> {
 		let Some(var_type) = self.ident_to_type.get(ident_id) else {
-			return Some(format!("TC - found unknown identifier '{}'", data.text(*ident_id)));
+			return Some(format!("TC - found unknown identifier '{}'", data.text(ident_id)));
 		};
 		let Some(expr_type) = self.ast_to_type.get(&ast_id) else {
 			return Some(format!("CE - expression has no type: {ast_id:?}"));

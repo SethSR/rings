@@ -59,7 +59,7 @@ pub fn eval(data: &mut Data) {
 		.collect::<Vec<_>>();
 
 	for tac_function in &mut tac_functions {
-		let name = data.text(tac_function.name).to_string();
+		let name = data.text(&tac_function.name).to_string();
 
 		if !tac_function.lower_procedure(data) {
 			eprintln!("failed to lower '{name}'");

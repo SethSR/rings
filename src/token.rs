@@ -71,7 +71,7 @@ pub enum Kind {
 impl Kind {
 	pub fn size(&self, data: &Data) -> usize {
 		match self {
-			Self::Identifier(ident_id) => data.text(*ident_id).len(),
+			Self::Identifier(ident_id) => data.text(ident_id).len(),
 			Self::Integer(num) => num.to_string().len(),
 			Self::Decimal(num) => num.to_string().len(),
 

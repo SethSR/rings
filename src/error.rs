@@ -26,7 +26,7 @@ pub fn expected(span: Range<usize>, expected: &str, found: &str) -> CompilerErro
 pub fn expected_token(data: &Data, expected: &str, token_id: token::Id) -> CompilerError {
 	let found = data.tok_list[token_id];
 	if let token::Kind::Identifier(ident_id) = found {
-		error(data, &format!("Expected {expected}, found '{}'", data.text(ident_id)), token_id)
+		error(data, &format!("Expected {expected}, found '{}'", data.text(&ident_id)), token_id)
 	} else {
 		error(data, &format!("Expected {expected}, found {found:?}"), token_id)
 	}

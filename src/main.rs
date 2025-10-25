@@ -54,8 +54,8 @@ impl Type {
 			Self::U16 => "u16",
 			Self::S32 => "s32",
 			Self::U32 => "u32",
-			Self::Record(ident_id) => data.text(*ident_id),
-			Self::Table(ident_id) => data.text(*ident_id),
+			Self::Record(ident_id) => data.text(ident_id),
+			Self::Table(ident_id) => data.text(ident_id),
 			Self::Unit => "_",
 		}
 	}
@@ -135,14 +135,14 @@ impl Data {
 		}
 	}
 
-	pub fn text(&self, ident_id: identifier::Id) -> &str {
-		&self.source[self.identifiers[&ident_id].clone()]
+	pub fn text(&self, ident_id: &identifier::Id) -> &str {
+		&self.source[self.identifiers[ident_id].clone()]
 	}
 
 	fn type_text(&self, ring_type: Type) -> String {
 		match ring_type {
-			Type::Record(ident_id) => self.text(ident_id).to_string(),
-			Type::Table(ident_id) => self.text(ident_id).to_string(),
+			Type::Record(ident_id) => self.text(&ident_id).to_string(),
+			Type::Table(ident_id) => self.text(&ident_id).to_string(),
 			_ => format!("{ring_type:?}"),
 		}
 	}
@@ -210,10 +210,10 @@ impl fmt::Display for Data {
 		fn fields_to_str(data: &Data, fields: &[(identifier::Id, Type)]) -> String {
 			fields.iter()
 				.map(|(field_id, field_type)| {
-					format!("{} : {}", data.text(*field_id), data.type_text(*field_type))
+					format!("{}:{}", data.text(field_id), data.type_text(*field_type))
 				})
 				.collect::<Vec<_>>()
-				.join(" , ")
+				.join(", ")
 		}
 
 		if self.DEBUG_show_tokens {
@@ -221,7 +221,7 @@ impl fmt::Display for Data {
 			for (token, start) in self.tok_list.iter().zip(self.tok_pos.iter()) {
 				match token {
 					token::Kind::Identifier(ident_id) => {
-						write!(f, " Identifier({})[{start}]", self.text(*ident_id))?;
+						write!(f, " Identifier({})[{start}]", self.text(ident_id))?;
 					}
 					_ => write!(f, " {token:?}[{start}]")?,
 				}
@@ -231,25 +231,25 @@ impl fmt::Display for Data {
 		}
 
 		let mut identifiers = self.identifiers.keys()
-			.map(|id| (id, self.text(*id)))
+			.map(|id| (id, self.text(id)))
 			.collect::<Vec<_>>();
 		identifiers.sort_by(|(_,a),(_,b)| a.cmp(b));
 
-		writeln!(f, "{:<16} | HASH-VALUE",
+		writeln!(f, "{:<32} | HASH-VALUE",
 			"IDENTIFIER")?;
-		writeln!(f, "{:-<16} | {:-<16}", "", "")?;
+		writeln!(f, "{:-<32} | {:-<16}", "", "")?;
 		for (ident_id, ident) in identifiers {
-			writeln!(f, "{ident:<16} | {ident_id}")?;
+			writeln!(f, "{ident:<32} | {ident_id}")?;
 		}
 		writeln!(f)?;
 
 		writeln!(f, "{:<16} | {:<9} | {:<9}", "REGION", "ADDRESS", "SIZE")?;
 		writeln!(f, "{:-<16} | {:-<9} | {:-<9}", "", "", "")?;
 		for (ident_id, data) in self.regions.iter() {
-			let name = self.text(*ident_id);
+			let name = self.text(ident_id);
 			let address = data.address;
 			let size = fmt_size(data.byte_count as usize);
-			writeln!(f, "{name:<16} | #{address:<08X} | {size:<8}")?;
+			writeln!(f, "{name:<16} | #{address:0>8X} | {size:<8}")?;
 		}
 		writeln!(f)?;
 
@@ -257,7 +257,7 @@ impl fmt::Display for Data {
 			"RECORD", "SIZE")?;
 		writeln!(f, "{:-<16} | {:-<8} | {:-<16}", "", "", "")?;
 		for (ident_id, record) in self.records.iter() {
-			let name = self.text(*ident_id);
+			let name = self.text(ident_id);
 			let size = record.size;
 			let field_str = fields_to_str(self, &record.fields);
 			writeln!(f, "{name:<16} | {size:<8} | {field_str}")?;
@@ -268,7 +268,7 @@ impl fmt::Display for Data {
 			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT")?;
 		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "", "")?;
 		for (ident_id, table) in self.tables.iter() {
-			let name = self.text(*ident_id);
+			let name = self.text(ident_id);
 			let size = table.size;
 			let row_size = size / table.row_count as usize;
 			let field_str = fields_to_str(self, &table.column_spec);
@@ -276,24 +276,24 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
-		writeln!(f, "{:<16} | {:<16} | PARAMETERS",
+		writeln!(f, "{:<32} | {:<16} | PARAMETERS",
 			"PROC-TYPE", "RETURN-TYPE")?;
-		writeln!(f, "{:-<16} | {:-<16} | {:-<16}", "", "", "")?;
+		writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
 		for ident_id in self.procedures.keys() {
-			let name = self.text(*ident_id);
+			let name = self.text(ident_id);
 			let data = &self.procedures[ident_id];
 			let ret_type = format!("{:?}", data.ret_type);
 			let param_str = fields_to_str(self, &data.params);
-			writeln!(f, "{name:<16} | {ret_type:<16} | {param_str}")?;
+			writeln!(f, "{name:<32} | {ret_type:<16} | {param_str}")?;
 		}
 		writeln!(f)?;
 
-		writeln!(f, "{:<16} | {:<11} | {:<10} | PREV READY COUNT",
+		writeln!(f, "{:<32} | {:<11} | {:<10} | PREV READY COUNT",
 			"PROC-TASK", "START TOKEN", "PREV TOKEN")?;
-		writeln!(f, "{:-<16} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "")?;
+		writeln!(f, "{:-<32} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "")?;
 		for task in &self.proc_queue {
-			writeln!(f, "{:<16} | {:<11} | {:<10} | {}",
-				self.text(task.proc_name),
+			writeln!(f, "{:<32} | {:<11} | {:<10} | {}",
+				self.text(&task.proc_name),
 				task.start_token.index(),
 				task.prev_furthest_token.index(),
 				task.prev_ready_proc_count,
@@ -301,21 +301,12 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
-		writeln!(f, "{:<16} | AST-NODES", "PROCEDURE")?;
-		writeln!(f, "{:-<16} | {:-<16}", "", "")?;
+		writeln!(f, "{:<32} | AST-NODE-COUNT",
+			"PROCEDURE")?;
+		writeln!(f, "{:-<32} | {:-<16}", "", "")?;
 		for (ident_id, &proc_start) in &self.completed_procs {
-			write!(f, "{:<16} | ", self.text(*ident_id))?;
-			let nodes = self.ast_nodes[proc_start..].iter();
-			let src_pos = self.ast_pos_src[proc_start..].iter();
-			let tok_pos = self.ast_pos_tok[proc_start..].iter();
-			for ((token, pos), location) in nodes.zip(src_pos).zip(tok_pos) {
-				if let ast::Kind::Ident(ident_id) = token {
-					write!(f, " Ident({})", self.text(*ident_id))?;
-				} else {
-					write!(f, " {token:?}")?;
-				}
-				write!(f, "[{pos:?}]<{location:?}>")?;
-			}
+			let node_count = self.ast_nodes[proc_start..].len();
+			writeln!(f, "{:<32} | {node_count}", self.text(ident_id))?;
 		}
 		writeln!(f)?;
 

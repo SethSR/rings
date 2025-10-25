@@ -50,7 +50,7 @@ pub fn eval(data: &mut Data) {
 					task.prev_ready_proc_count = data.completed_procs.len();
 					data.proc_queue.push_back(task);
 				} else {
-					let name = data.text(task.proc_name).to_string();
+					let name = data.text(&task.proc_name).to_string();
 					let mut err = error::error_with_notes(data,
 						&format!("No progress made since last attempt to parse '{name}'"),
 						task.start_token,
