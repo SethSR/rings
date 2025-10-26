@@ -49,6 +49,7 @@ pub struct Table {
 	pub row_count: u32,
 	pub column_spec: Vec<Field>,
 	pub size: usize,
+	pub address: Option<i64>,
 }
 
 pub fn eval(data: &mut Data) {
@@ -182,31 +183,51 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	Ok(fields)
 }
 
+fn expect_u32(cursor: &mut Cursor, data: &Data, expected: &str) -> Result<u32, CompilerError> {
+	cursor.expect_integer(data, expected)
+		.and_then(|num| {
+			check_integer_as_u32(&format!("valid {expected}"), num,
+				(cursor.index() - 1).into()..cursor.index().into())
+		})
+}
+
 fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<Region, CompilerError> {
 	cursor.expect(data, token::Kind::Region)?;
 	cursor.expect(data, token::Kind::OBracket)?;
-	let byte_count = cursor.expect_integer(data, "region size")?;
-	let byte_count = check_integer_as_u32("valid region size", byte_count,
-		(cursor.index() - 1).into()..cursor.index().into(),
-	)?;
+	let byte_count = expect_u32(cursor, data, "region size")?;
 	cursor.expect(data, token::Kind::CBracket)?;
 	cursor.expect(data, token::Kind::At)?;
-	let address = cursor.expect_integer(data, "region address")?;
-	let address = check_integer_as_u32("valid region address", address,
-		(cursor.index() - 1).into()..cursor.index().into(),
-	)?;
+	let address = expect_u32(cursor, data, "region address")?;
 	cursor.expect(data, token::Kind::Semicolon)?;
 	Ok(Region { byte_count, address })
 }
 
+fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<i64>, CompilerError> {
+	if cursor.expect(data, token::Kind::At).is_ok() {
+		if let Ok(num) = cursor.expect_integer(data, "record address") {
+			for (id, region) in &data.regions {
+				let addr_start = region.address as i64;
+				let addr_end = addr_start + region.byte_count as i64;
+				if (addr_start..addr_end).contains(&num) {
+					return Err(error::error(data,
+						&format!("Address '{num}' overlaps with region {}", data.text(id)),
+						cursor.index()))
+				}
+			}
+			Ok(Some(num))
+		} else if let Ok(id) = cursor.expect_identifier(data, "region name") {
+			Ok(Some(data.regions[&id].address as i64))
+		} else {
+			Err(error::error(data, "address or region ID", cursor.index()))
+		}
+	} else {
+		Ok(None)
+	}
+}
+
 fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, CompilerError> {
 	cursor.expect(data, token::Kind::Record)?;
-	let address = if cursor.expect(data, token::Kind::At).is_ok() {
-		// TODO - srenshaw - Handle named region allocation
-		cursor.expect_integer(data, "record address").ok()
-	} else {
-		None
-	};
+	let address = discover_address(cursor, data)?;
 	cursor.expect(data, token::Kind::OBrace)?;
 	let fields = discover_fields(cursor, data, token::Kind::CBrace)?;
 	cursor.expect(data, token::Kind::CBrace)?;
@@ -219,11 +240,9 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, Compi
 fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, CompilerError> {
 	cursor.expect(data, token::Kind::Table)?;
 	cursor.expect(data, token::Kind::OBracket)?;
-	let row_count = cursor.expect_integer(data, "table size")?;
-	let row_count = check_integer_as_u32("valid table size", row_count,
-		(cursor.index() - 1).into()..cursor.index().into(),
-	)?;
+	let row_count = expect_u32(cursor, data, "table size")?;
 	cursor.expect(data, token::Kind::CBracket)?;
+	let address = discover_address(cursor, data)?;
 	cursor.expect(data, token::Kind::OBrace)?;
 	let column_spec = discover_fields(cursor, data, token::Kind::CBrace)?;
 	cursor.expect(data, token::Kind::CBrace)?;
@@ -231,6 +250,7 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, Compile
 		.map(|(_, col_type)| data.type_size(*col_type))
 		.sum();
 	Ok(Table {
+		address,
 		row_count,
 		column_spec,
 		size: row_count as usize * col_size,
@@ -384,6 +404,7 @@ mod can_parse {
 			row_count: 10,
 			column_spec: vec![],
 			size: 0,
+			address: None,
 		});
 	}
 
@@ -395,6 +416,7 @@ mod can_parse {
 			row_count: 10,
 			column_spec: vec![("b".id(), crate::Type::U32)],
 			size: 40,
+			address: None,
 		});
 	}
 
@@ -409,6 +431,7 @@ mod can_parse {
 				("c".id(), crate::Type::S16),
 			],
 			size: 60,
+			address: None,
 		});
 	}
 
@@ -422,6 +445,7 @@ mod can_parse {
 				("b1".id(), crate::Type::Record("a".id())),
 			],
 			size: 20,
+			address: None,
 		});
 	}
 }

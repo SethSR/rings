@@ -253,26 +253,32 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
-		writeln!(f, "{:<16} | {:<8} | FIELDS",
-			"RECORD", "SIZE")?;
-		writeln!(f, "{:-<16} | {:-<8} | {:-<16}", "", "", "")?;
+		writeln!(f, "{:<16} | {:<8} | {:<9} | FIELDS",
+			"RECORD", "SIZE", "ADDRESS")?;
+		writeln!(f, "{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "")?;
 		for (ident_id, record) in self.records.iter() {
 			let name = self.text(ident_id);
 			let size = record.size;
+			let address = record.address
+				.map(|num| format!("#{num:0>8X}"))
+				.unwrap_or("-".to_string());
 			let field_str = fields_to_str(self, &record.fields);
-			writeln!(f, "{name:<16} | {size:<8} | {field_str}")?;
+			writeln!(f, "{name:<16} | {size:<8} | {address:9} | {field_str}")?;
 		}
 		writeln!(f)?;
 
-		writeln!(f, "{:<16} | {:<10} | {:<8} | {:<9} | COLUMNS",
-			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT")?;
-		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "", "")?;
+		writeln!(f, "{:<16} | {:<10} | {:<8} | {:<9} | {:<9} | COLUMNS",
+			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT", "ADDRESS")?;
+		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<9} | {:-<16}", "", "", "", "", "", "")?;
 		for (ident_id, table) in self.tables.iter() {
 			let name = self.text(ident_id);
 			let size = table.size;
 			let row_size = size / table.row_count as usize;
+			let address = table.address
+				.map(|num| format!("#{num:0>8X}"))
+				.unwrap_or("-".to_string());
 			let field_str = fields_to_str(self, &table.column_spec);
-			writeln!(f, "{name:<16} | {size:<10} | {row_size:<8} | {:<9} | {field_str}", table.row_count)?;
+			writeln!(f, "{name:<16} | {size:<10} | {row_size:<8} | {:<9} | {address:9} | {field_str}", table.row_count)?;
 		}
 		writeln!(f)?;
 
