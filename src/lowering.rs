@@ -266,6 +266,10 @@ impl TacFunction {
 
 				Ok(None)
 			}
+
+			ast::Kind::TableIndex(_table_id, _expr_id) => {
+				todo!()
+			}
 		}
 	}
 

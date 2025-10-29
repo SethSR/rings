@@ -347,6 +347,8 @@ enum BinaryOp {
 	CmpLE,
 	CmpLT,
 	Access,
+	Index,
+	Call,
 }
 
 impl fmt::Display for BinaryOp {
@@ -372,6 +374,8 @@ impl fmt::Display for BinaryOp {
 			Self::CmpLE => write!(f, "<="),
 			Self::CmpLT => write!(f, "<"),
 			Self::Access => write!(f, "."),
+			Self::Index => write!(f, "[]"),
+			Self::Call => write!(f, "()"),
 		}
 	}
 }

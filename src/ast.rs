@@ -4,7 +4,7 @@ use std::ops::Range;
 use index_vec::define_index_type;
 use index_vec::IndexVec;
 
-use crate::identifier;
+use crate::identifier::Id as IdentId;
 use crate::token;
 use crate::{BinaryOp, Bounds, SrcPos, UnaryOp};
 
@@ -20,18 +20,19 @@ pub struct Block(pub Vec<Id>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kind {
-	Ident(identifier::Id),
+	Ident(IdentId),
 	Int(i64),
 	Dec(f64),
-	Define(identifier::Id, crate::Type, Id),
-	Assign(identifier::Id, Id),
+	Define(IdentId, crate::Type, Id),
+	Assign(IdentId, Id),
 	BinOp(BinaryOp, Id, Id),
 	UnOp(UnaryOp, Id),
 	Return(Option<Id>),
 	If(Id, Block, Block),
 	Block(Block),
 	While(Id, Block),
-	For(Vec<identifier::Id>, Option<identifier::Id>, Option<Bounds>, Block),
+	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Block),
+	TableIndex(IdentId, Id),
 }
 
 pub type KindList = IndexVec<Id, Kind>;

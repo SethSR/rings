@@ -129,6 +129,11 @@ impl Checker {
 				println!("AST-For({vars:?} -> {})", block.0.len());
 				todo!()
 			}
+
+			Kind::TableIndex(table_id, expr_id) => {
+				println!("AST-TableIndex({}[{}])", data.text(table_id), expr_id);
+				todo!()
+			}
 		}
 	}
 
