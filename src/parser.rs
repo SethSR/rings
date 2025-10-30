@@ -447,6 +447,8 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 		}
 		TKind::Integer(num) => primary_node(cursor, data, AKind::Int(num)),
 		TKind::Decimal(num) => primary_node(cursor, data, AKind::Dec(num)),
+		TKind::True => primary_node(cursor, data, AKind::Int(1)),
+		TKind::False => primary_node(cursor, data, AKind::Int(0)),
 		TKind::OParen => {
 			cursor.advance();
 			let expr = parse_expression(cursor, data, &[TKind::CParen])?;

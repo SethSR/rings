@@ -111,28 +111,36 @@ impl Checker {
 			}
 
 			Kind::For(vars, Some(table_id), Some(range), block) => {
-				println!("AST-For({vars:?} in {}[{}] -> {})", data.text(table_id), range, block.0.len());
-				todo!()
+				println!("AST-For({} in {}[{}] -> {})",
+					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
+					data.text(table_id), range, block.0.len());
+				todo!("ranged-table for-loop")
 			}
 
 			Kind::For(vars, Some(table_id), None, block) => {
-				println!("AST-For({vars:?} in {} -> {})", data.text(table_id), block.0.len());
-				todo!()
+				println!("AST-For({} in {} -> {})",
+					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
+					data.text(table_id), block.0.len());
+				todo!("indexed-table for-loop")
 			}
 
 			Kind::For(vars, None, Some(range), block) => {
-				println!("AST-For({vars:?} in [{}] -> {})", range, block.0.len());
-				todo!()
+				println!("AST-For({} in {} -> {})",
+					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
+					range, block.0.len());
+				todo!("ranged for-loop")
 			}
 
 			Kind::For(vars, None, None, block) => {
-				println!("AST-For({vars:?} -> {})", block.0.len());
-				todo!()
+				println!("AST-For({} -> {})",
+					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
+					block.0.len());
+				todo!("infinite for-loop")
 			}
 
 			Kind::TableIndex(table_id, expr_id) => {
 				println!("AST-TableIndex({}[{}])", data.text(table_id), expr_id);
-				todo!()
+				todo!("table-index")
 			}
 
 			Kind::Call(proc_id, exprs) => {
@@ -140,7 +148,7 @@ impl Checker {
 					.map(|id| id.to_string())
 					.collect::<Vec<_>>()
 					.join(","));
-				todo!()
+				todo!("procedure-call")
 			}
 		}
 	}
