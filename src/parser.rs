@@ -189,7 +189,7 @@ fn parse_definition(cursor: &mut Cursor, data: &mut Data,
 	cursor.advance();
 	let var_type = cursor.expect_type(data)?;
 	cursor.expect(data, TKind::Equal)?;
-	let ast_id = parse_expression(cursor, data, TKind::Semicolon)?;
+	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
@@ -203,7 +203,7 @@ fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
 	let tok_start = cursor.index();
 	cursor.advance();
 	cursor.advance();
-	let ast_id = parse_expression(cursor, data, TKind::Semicolon)?;
+	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
@@ -217,7 +217,7 @@ fn parse_table_access(cursor: &mut Cursor, data: &mut Data,
 	let tok_start = cursor.index();
 	cursor.advance();
 	cursor.advance();
-	let index = parse_expression(cursor, data, TKind::CBracket)?;
+	let index = parse_expression(cursor, data, &[TKind::CBracket])?;
 	cursor.expect(data, TKind::CBracket)?;
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
@@ -235,7 +235,7 @@ fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data,
 		src_start..cursor.location(data),
 		tok_start..cursor.index(),
 	);
-	let ast_id = parse_expression(cursor, data, TKind::Semicolon)?;
+	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
@@ -250,7 +250,7 @@ fn parse_return_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::Return)?;
 	let ast_id = if TKind::Semicolon != cursor.current(data) {
-		let id = parse_expression(cursor, data, TKind::Semicolon)?;
+		let id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 		cursor.expect(data, TKind::Semicolon)?;
 		Some(id)
 	} else {
@@ -265,7 +265,7 @@ fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::If)?;
-	let cond_id = parse_expression(cursor, data, TKind::Semicolon)?;
+	let cond_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let then_block = parse_block(cursor, data)?;
 	let else_block = if TKind::Else == cursor.current(data) {
@@ -325,36 +325,37 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 }
 
 fn parse_expression(cursor: &mut Cursor, data: &mut Data,
-	end_token: TKind,
+	end_tokens: &[TKind],
 ) -> ParseResult {
-	parse_expr_main(cursor, data, 0, end_token)
+	parse_expr_main(cursor, data, 0, end_tokens)
 }
 
 fn parse_expr_main(cursor: &mut Cursor, data: &mut Data,
-	min_binding_power: usize, end_token: TKind,
+	min_binding_power: usize, end_tokens: &[TKind],
 ) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	let left = parse_primary(cursor, data)?;
-	parse_expr_sub(cursor, data, min_binding_power, src_start, tok_start, left, end_token)
+	parse_expr_sub(cursor, data, min_binding_power, src_start, tok_start, left, end_tokens)
 }
 
 fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 	min_binding_power: usize, src_start: usize, tok_start: TokenId, left: AstId,
-	end_token: TKind,
+	end_tokens: &[TKind],
 ) -> ParseResult {
-	if end_token == cursor.current(data) {
+	if end_tokens.contains(&cursor.current(data)) {
 		return Ok(left);
 	}
-	let op = parse_bin_op(cursor, data)?;
+	let Ok(op) = parse_bin_op(cursor, data) else {
+		return Ok(left);
+	};
 	let op_binding_power = binding_power(&op);
-	cursor.advance();
 	let src_start_inner = cursor.location(data);
 	let tok_start_inner = cursor.index();
 	let right = parse_primary(cursor, data)?;
 	let right = if min_binding_power < op_binding_power {
 		parse_expr_sub(cursor, data, op_binding_power,
-			src_start_inner, tok_start_inner, right, end_token)?
+			src_start_inner, tok_start_inner, right, end_tokens)?
 	} else {
 		right
 	};
@@ -390,7 +391,7 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 		TKind::Decimal(num) => primary_node(cursor, data, AKind::Dec(num)),
 		TKind::OParen => {
 			cursor.advance();
-			let expr = parse_expression(cursor, data, TKind::CParen)?;
+			let expr = parse_expression(cursor, data, &[TKind::CParen])?;
 			cursor.expect(data, TKind::CParen)?;
 			expr
 		}
@@ -409,31 +410,33 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 }
 
 fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, CompilerError> {
-	match cursor.current(data) {
-		TKind::Plus => Ok(BinaryOp::Add),
-		TKind::Dash => Ok(BinaryOp::Sub),
-		TKind::Star => Ok(BinaryOp::Mul),
-		TKind::Slash => Ok(BinaryOp::Div),
-		TKind::Percent => Ok(BinaryOp::Mod),
-		TKind::Amp => Ok(BinaryOp::BinAnd),
-		TKind::AmpAmp => Ok(BinaryOp::LogAnd),
-		TKind::Bar => Ok(BinaryOp::BinOr),
-		TKind::BarBar => Ok(BinaryOp::LogOr),
-		TKind::Carrot => Ok(BinaryOp::BinXor),
-		TKind::CarrotCarrot => Ok(BinaryOp::LogXor),
-		TKind::EqualEqual => Ok(BinaryOp::CmpEQ),
-		TKind::BangEqual => Ok(BinaryOp::CmpNE),
-		TKind::Less => Ok(BinaryOp::CmpLT),
-		TKind::LessEqual => Ok(BinaryOp::CmpLE),
-		TKind::LessLess => Ok(BinaryOp::ShL),
-		TKind::Greater => Ok(BinaryOp::CmpGT),
-		TKind::GreaterEqual => Ok(BinaryOp::CmpGE),
-		TKind::GreaterGreater => Ok(BinaryOp::ShR),
-		TKind::OBracket => Ok(BinaryOp::Index),
-		TKind::OParen => Ok(BinaryOp::Call),
-		TKind::Dot => Ok(BinaryOp::Access),
-		_ => Err(error::expected_token(data, "binary operator", cursor.index())),
-	}
+	let op = match cursor.current(data) {
+		TKind::Plus => BinaryOp::Add,
+		TKind::Dash => BinaryOp::Sub,
+		TKind::Star => BinaryOp::Mul,
+		TKind::Slash => BinaryOp::Div,
+		TKind::Percent => BinaryOp::Mod,
+		TKind::Amp => BinaryOp::BinAnd,
+		TKind::AmpAmp => BinaryOp::LogAnd,
+		TKind::Bar => BinaryOp::BinOr,
+		TKind::BarBar => BinaryOp::LogOr,
+		TKind::Carrot => BinaryOp::BinXor,
+		TKind::CarrotCarrot => BinaryOp::LogXor,
+		TKind::EqualEqual => BinaryOp::CmpEQ,
+		TKind::BangEqual => BinaryOp::CmpNE,
+		TKind::Less => BinaryOp::CmpLT,
+		TKind::LessEqual => BinaryOp::CmpLE,
+		TKind::LessLess => BinaryOp::ShL,
+		TKind::Greater => BinaryOp::CmpGT,
+		TKind::GreaterEqual => BinaryOp::CmpGE,
+		TKind::GreaterGreater => BinaryOp::ShR,
+		TKind::OBracket => BinaryOp::Index,
+		TKind::OParen => BinaryOp::Call,
+		TKind::Dot => BinaryOp::Access,
+		_ => return Err(error::expected_token(data, "binary operator", cursor.index())),
+	};
+	cursor.advance();
+	Ok(op)
 }
 
 fn binding_power(op: &BinaryOp) -> usize {
