@@ -113,7 +113,8 @@ impl Lexer {
 					self.advance(data);
 				}
 				let mut is_fractional = false;
-				if self.peek(data, 0) == Some('.') {
+				if self.peek(data, 0) == Some('.') && self.peek(data, 1) != Some('.') {
+
 					is_fractional = true;
 					self.advance(data);
 					while let Some(c) = self.peek(data, 0) {
