@@ -45,6 +45,19 @@ pub enum Location {
 	},
 }
 
+impl Location {
+	fn to_text(&self, data: &Data) -> String {
+		match self {
+			Self::Temp(temp_id) => format!("?{temp_id}"),
+			Self::Variable(ident_id) => data.text(ident_id).to_string(),
+			Self::Constant(num) => num.to_string(),
+			Self::TableElement { table, index } => {
+				format!("{}[{}]", data.text(table), index.to_text(data))
+			}
+		}
+	}
+}
+
 pub type LabelId = u32;
 
 pub fn eval(data: &mut Data) {
@@ -67,7 +80,53 @@ pub fn eval(data: &mut Data) {
 
 		println!("{name}:");
 		for tac in &tac_function.instructions {
-			println!("{tac:?}");
+			match tac {
+				Tac::Copy { src, dst } => {
+					println!("  {} <- {}", dst.to_text(data), src.to_text(data));
+				}
+				Tac::BinOp { op, left, right, dst } => {
+					println!("  {} <- {} {op} {}",
+						dst.to_text(data), left.to_text(data), right.to_text(data));
+				}
+				Tac::UnOp { op, src, dst } => {
+					println!("  {} <- {op}{}", dst.to_text(data), src.to_text(data));
+				}
+				Tac::Load { address, offset, dst } => {
+					println!("  ?{dst} <- ({} + {offset})", address.to_text(data));
+				}
+				Tac::Store { src, address, offset } => {
+					println!("  ({} + {offset}) <- {}", address.to_text(data), src.to_text(data));
+				}
+				Tac::Label(label_id) => {
+					println!("label_{label_id}:");
+				}
+				Tac::Jump(label_id) => {
+					println!("  jump label_{label_id}");
+				}
+				Tac::JumpIf { cond, target } => {
+					println!("  jump if {} => ?{target}", cond.to_text(data));
+				}
+				Tac::JumpIfNot { cond, target } => {
+					println!("  jump if !{} => ?{target}", cond.to_text(data));
+				}
+				Tac::Call { name, args, dst: Some(dst) } => {
+					println!("  {dst} <- call {}({})", data.text(name),
+						args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","));
+				}
+				Tac::Call { name, args, dst: None } => {
+					println!("  call {}({})", data.text(name),
+						args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","));
+				}
+				Tac::Return(Some(address)) => {
+					println!("  return {}", address.to_text(data));
+				}
+				Tac::Return(None) => {
+					println!("  return");
+				}
+				Tac::Comment(msg) => {
+					println!("; {msg}");
+				}
+			}
 		}
 	}
 }
@@ -267,8 +326,12 @@ impl TacFunction {
 				Ok(None)
 			}
 
-			ast::Kind::TableIndex(_table_id, _expr_id) => {
-				todo!("lower table-indexing")
+			ast::Kind::TableIndex(table_id, expr_id) => {
+				let Some(expr) = self.lower_node(&data.ast_nodes[*expr_id], data)? else {
+					return Ok(None);
+				};
+				self.emit(Tac::Comment(format!("{}[{}]", data.text(table_id), expr.to_text(data))));
+				Ok(None)
 			}
 
 			ast::Kind::Call(_proc_id, _exprs) => {
