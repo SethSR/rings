@@ -268,7 +268,11 @@ impl TacFunction {
 			}
 
 			ast::Kind::TableIndex(_table_id, _expr_id) => {
-				todo!()
+				todo!("lower table-indexing")
+			}
+
+			ast::Kind::Call(_proc_id, _exprs) => {
+				todo!("lower proc-call")
 			}
 		}
 	}

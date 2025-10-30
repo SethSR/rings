@@ -324,6 +324,36 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	Ok(new_ast(data, AKind::For(vars, table_id, range, block), src_range, tok_range))
 }
 
+fn parse_call(cursor: &mut Cursor, data: &mut Data,
+	ident_id: IdentId,
+) -> ParseResult {
+	let src_start = cursor.location(data);
+	let tok_start = cursor.index();
+	cursor.advance();
+	cursor.expect(data, TKind::OParen)?;
+	let end_tokens = &[TKind::CParen, TKind::Comma];
+
+	let mut exprs = vec![];
+	while TKind::CParen != cursor.current(data) {
+		let expr = parse_expression(cursor, data, end_tokens)?;
+		exprs.push(expr);
+
+		if TKind::Comma == cursor.current(data) {
+			cursor.advance();
+			if TKind::CParen == cursor.current(data) {
+				break;
+			}
+		} else if TKind::CParen != cursor.current(data) {
+			break;
+		}
+	}
+
+	cursor.expect(data, TKind::CParen)?;
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::Call(ident_id, exprs), src_range, tok_range))
+}
+
 fn parse_expression(cursor: &mut Cursor, data: &mut Data,
 	end_tokens: &[TKind],
 ) -> ParseResult {
@@ -386,7 +416,13 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	}
 
 	let node = match cursor.current(data) {
-		TKind::Identifier(ident_id) => primary_node(cursor, data, AKind::Ident(ident_id)),
+		TKind::Identifier(ident_id) => {
+			match cursor.peek(data, 1) {
+				TKind::OParen => parse_call(cursor, data, ident_id)?,
+				TKind::OBracket => parse_table_access(cursor, data, ident_id)?,
+				_ => primary_node(cursor, data, AKind::Ident(ident_id)),
+			}
+		}
 		TKind::Integer(num) => primary_node(cursor, data, AKind::Int(num)),
 		TKind::Decimal(num) => primary_node(cursor, data, AKind::Dec(num)),
 		TKind::OParen => {
@@ -536,6 +572,42 @@ mod can_parse_proc {
 	fn with_table_param() {
 		let db = setup("main{} a :: table[0]{} b :: proc(c:a){}");
 		assert!(db.completed_procs.contains_key(&"b".id()));
+	}
+
+	#[test]
+	fn with_internal_table_index() {
+		let db = setup("main { return a[10]; }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_table_expression_indexing() {
+		let db = setup("main { return a[2 + 4]; }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_proc_call() {
+		let db = setup("main { return a(3); }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_proc_call_in_subexpression() {
+		let db = setup("main { return 3 * a(3); }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_proc_call_with_expression_argument() {
+		let db = setup("main { return a(b + 4); }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_proc_call_with_multiple_arguments() {
+		let db = setup("main { return a(2, 4 / b, b + 4); }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 }
 

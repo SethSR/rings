@@ -134,6 +134,14 @@ impl Checker {
 				println!("AST-TableIndex({}[{}])", data.text(table_id), expr_id);
 				todo!()
 			}
+
+			Kind::Call(proc_id, exprs) => {
+				println!("AST-Call({}({}))", data.text(proc_id), exprs.iter()
+					.map(|id| id.to_string())
+					.collect::<Vec<_>>()
+					.join(","));
+				todo!()
+			}
 		}
 	}
 

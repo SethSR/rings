@@ -33,6 +33,7 @@ pub enum Kind {
 	While(Id, Block),
 	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Block),
 	TableIndex(IdentId, Id),
+	Call(IdentId, Vec<Id>),
 }
 
 pub type KindList = IndexVec<Id, Kind>;
