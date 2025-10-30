@@ -288,6 +288,12 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	let ident_id = cursor.expect_identifier(data, "identifier")?;
 	vars.push(ident_id);
 
+	while TKind::Comma == cursor.current(data) {
+		cursor.advance();
+		let ident_id = cursor.expect_identifier(data, "identifier")?;
+		vars.push(ident_id);
+	}
+
 	while TKind::In != cursor.current(data) {
 		let ident_id = cursor.expect_identifier(data, "identifier")?;
 		vars.push(ident_id);
