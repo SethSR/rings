@@ -305,22 +305,38 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 
 	cursor.expect(data, TKind::In)?;
 
-	let table_id = cursor.expect_identifier(data, "COMPILER ERROR").ok();
-
-	let range = if TKind::OBracket == cursor.current(data) {
+	// for x in Table {}
+	// for x in Table[..] {}
+	// for x in [0..10] {}
+	let (table_id, range) = if let Ok(table_id) = cursor.expect_identifier(data, "COMPILER ERROR") {
+		// Table loop
+		let range = if TKind::OBracket == cursor.current(data) {
+			cursor.advance();
+			let range_start = cursor.expect_integer(data, "COMPILER ERROR").ok();
+			cursor.expect(data, TKind::DotDot)?;
+			let range_end = cursor.expect_integer(data, "COMPILER ERROR").ok();
+			cursor.expect(data, TKind::CBracket)?;
+			match (range_start, range_end) {
+				(Some(start), Some(end)) => Some(Bounds::Full { start, end }),
+				(Some(start), None) => Some(Bounds::From { start }),
+				(None, Some(end)) => Some(Bounds::To { end }),
+				(None, None) => None,
+			}
+		} else {
+			None
+		};
+		(Some(table_id), range)
+	} else if TKind::OBracket == cursor.current(data) {
 		cursor.advance();
-		let range_start = cursor.expect_integer(data, "COMPILER ERROR").ok();
+		let start = cursor.expect_integer(data, "start (inclusive) value")?;
 		cursor.expect(data, TKind::DotDot)?;
-		let range_end = cursor.expect_integer(data, "COMPILER ERROR").ok();
+		let end = cursor.expect_integer(data, "end (exclusive) value")?;
 		cursor.expect(data, TKind::CBracket)?;
-		match (range_start, range_end) {
-			(Some(start), Some(end)) => Some(Bounds::Full { start, end }),
-			(Some(start), None) => Some(Bounds::From { start }),
-			(None, Some(end)) => Some(Bounds::To { end }),
-			(None, None) => None,
-		}
+		(None, Some(Bounds::Full { start, end }))
 	} else {
-		None
+		return Err(error::expected_token(data,
+			"table name or bracketed range",
+			cursor.index()));
 	};
 
 	let block = parse_block(cursor, data)?;
@@ -578,6 +594,48 @@ mod can_parse_proc {
 	fn with_table_param() {
 		let db = setup("main{} a :: table[0]{} b :: proc(c:a){}");
 		assert!(db.completed_procs.contains_key(&"b".id()));
+	}
+
+	#[test]
+	fn with_basic_for_loop() {
+		let db = setup("main { for i in [0..10] {} }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_multi_element_for_loop() {
+		let db = setup("main { for i,j in [0..10] {} }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_table_for_loop() {
+		let db = setup("main { for i in a {} }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_table_index_for_loop() {
+		let db = setup("main { for i in a[0..10] {} }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_table_from_for_loop() {
+		let db = setup("main { for i in a[0..] {} }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_table_to_for_loop() {
+		let db = setup("main { for i in a[..10] {} }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_table_full_for_loop() {
+		let db = setup("main { for i in a[..] {} }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
