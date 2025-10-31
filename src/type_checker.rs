@@ -94,14 +94,28 @@ impl Checker {
 			Kind::Block(block) => {
 				println!("AST-Block({})", block.0.len());
 				for stmt_id in &block.0 {
-					let node = &data.ast_nodes[*stmt_id];
-					self.check_stmt(data, node, *stmt_id, ret_type)?;
+					let stmt = &data.ast_nodes[*stmt_id];
+					self.check_stmt(data, stmt, *stmt_id, ret_type)?;
 				}
 				None
 			}
 
 			Kind::If(cond, then_block, else_block) => {
 				println!("AST-If({} -> {} <> {})", cond.index(), then_block.0.len(), else_block.0.len());
+				let cond_type = self.ast_to_type[cond];
+				if cond_type.meet(Type::Rings(crate::Type::S32)) == Type::Bot
+				&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
+				{
+					todo!("TC - cond node must have integer type");
+				}
+				for stmt_id in &then_block.0 {
+					let stmt = &data.ast_nodes[*stmt_id];
+					self.check_stmt(data, stmt, *stmt_id, ret_type)?;
+				}
+				for stmt_id in &else_block.0 {
+					let stmt = &data.ast_nodes[*stmt_id];
+					self.check_stmt(data, stmt, *stmt_id, ret_type)?;
+				}
 				todo!()
 			}
 
@@ -128,7 +142,25 @@ impl Checker {
 				println!("AST-For({} in {} -> {})",
 					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
 					range, block.0.len());
-				todo!("ranged for-loop")
+				if vars.len() != 1 {
+					return Some("simple for-loops require a single loop variable".to_string());
+				}
+				match range {
+					crate::Bounds::Full { start, end } => {
+						debug_assert!(start <= end);
+						if start > end {
+							return Some("start value must be less than or equal to end value".to_string());
+						}
+					}
+					crate::Bounds::From {..} | crate::Bounds::To {..} => {
+						return Some("simple for-loops require a fully specified range (start..end)".to_string());
+					}
+				}
+				for stmt_id in &block.0 {
+					let stmt = &data.ast_nodes[*stmt_id];
+					self.check_stmt(data, stmt, *stmt_id, ret_type);
+				}
+				None
 			}
 
 			Kind::For(vars, None, None, block) => {
