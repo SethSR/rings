@@ -148,6 +148,7 @@ fn parse_block(cursor: &mut Cursor, data: &mut Data,
 			TKind::Return => parse_return_statement(cursor, data)?,
 			TKind::If => parse_if_statement(cursor, data)?,
 			TKind::For => parse_for_statement(cursor, data)?,
+			TKind::While => parse_while_statement(cursor, data)?,
 			_ => return Err(error::expected_token(data,
 					"definition, assignment, return, if, or for statement",
 			cursor.index())),
@@ -277,6 +278,17 @@ fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
 	Ok(new_ast(data, AKind::If(cond_id, then_block, else_block), src_range, tok_range))
+}
+
+fn parse_while_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
+	let src_start = cursor.location(data);
+	let tok_start = cursor.index();
+	cursor.expect(data, TKind::While)?;
+	let cond = parse_expression(cursor, data, &[TKind::OBrace])?;
+	let block = parse_block(cursor, data)?;
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::While(cond, block), src_range, tok_range))
 }
 
 fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
@@ -673,6 +685,12 @@ mod can_parse_proc {
 	#[test]
 	fn with_internal_proc_call_with_multiple_arguments() {
 		let db = setup("main { return a(2, 4 / b, b + 4); }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_while_loop() {
+		let db = setup("main { while true { } }");
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 }

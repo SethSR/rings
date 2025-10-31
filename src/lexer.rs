@@ -67,6 +67,7 @@ impl Lexer {
 					"else" => token::Kind::Else,
 					"for" => token::Kind::For,
 					"where" => token::Kind::Where,
+					"while" => token::Kind::While,
 					"u8" => token::Kind::U8,
 					"s8" => token::Kind::S8,
 					"u16" => token::Kind::U16,

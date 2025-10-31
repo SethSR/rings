@@ -21,6 +21,8 @@ struct Checker {
 
 pub fn eval(data: &mut Data) {
 	for (proc_id, &proc_start) in &data.completed_procs {
+		let proc_name = data.text(proc_id);
+		println!("{proc_name} AST:");
 		let proc_type = &data.procedures[proc_id];
 
 		let mut checker = Checker::default();
@@ -32,7 +34,7 @@ pub fn eval(data: &mut Data) {
 		let range = &data.ast_pos_tok[proc_start];
 		let ret_type = proc_type.ret_type;
 		if let Some(err_msg) = checker.check_stmt(data, node, proc_start, ret_type) {
-			println!("{checker:?}");
+			println!("-| {checker:?}");
 			let mut err =error::error(data, &err_msg, range.start);
 			err.set_kind(error::Kind::Checker);
 			data.errors.push(err);
@@ -47,99 +49,82 @@ impl Checker {
 	) -> Option<String> {
 		match node {
 			Kind::Int(num) => {
-				println!("AST-Int({num})");
+				println!("  Int({num})");
 				self.ast_to_type.insert(ast_id, Type::Top);
 				None
 			}
 
 			Kind::Dec(num) => {
-				println!("AST-Dec({num})");
+				println!("  Dec({num})");
 				self.ast_to_type.insert(ast_id, Type::Top);
 				None
 			}
 
 			Kind::Ident(ident_id) => {
-				println!("AST-Ident({})", data.text(ident_id));
+				println!("  Ident({})", data.text(ident_id));
 				self.check_ident(ident_id, ast_id);
 				None
 			}
 
 			Kind::Define(ident_id, var_type, expr_id) => {
-				println!("AST-Define({} : {var_type:?} = {})", data.text(ident_id), ast_id.index());
+				println!("  Define({} : {var_type:?} = {})", data.text(ident_id), ast_id.index());
 				self.check_define(data, ident_id, *expr_id, *var_type)
 			}
 
 			Kind::Assign(ident_id, expr_id) => {
-				println!("AST-Assign({} = {})", data.text(ident_id), ast_id.index());
+				println!("  Assign({} = {})", data.text(ident_id), ast_id.index());
 				self.check_assign(data, ident_id, *expr_id)
 			}
 
 			Kind::BinOp(op, left, right) => {
-				println!("AST-BinOp({} {op} {})", left.index(), right.index());
+				println!("  BinOp({} {op} {})", left.index(), right.index());
 				self.check_binop(data, ast_id, *op, left, right)
 			}
 
 			Kind::UnOp(op, right) => {
-				println!("AST-UnOp({op}{})", right.index());
+				println!("  UnOp({op}{})", right.index());
 				self.check_unop(data, ast_id, *op, right)
 			}
 
 			Kind::Return(expr_id) => {
-				println!("AST-Return({})", expr_id
+				println!("  Return({})", expr_id
 					.map(|id| id.index().to_string())
 					.unwrap_or("-".to_string()));
 				self.check_return(*expr_id, ret_type)
 			}
 
 			Kind::Block(block) => {
-				println!("AST-Block({})", block.0.len());
-				for stmt_id in &block.0 {
-					let stmt = &data.ast_nodes[*stmt_id];
-					self.check_stmt(data, stmt, *stmt_id, ret_type)?;
-				}
-				None
+				println!("  Block({} nodes)", block.0.len());
+				self.check_block(data, block, ret_type)
 			}
 
-			Kind::If(cond, then_block, else_block) => {
-				println!("AST-If({} -> {} <> {})", cond.index(), then_block.0.len(), else_block.0.len());
-				let cond_type = self.ast_to_type[cond];
-				if cond_type.meet(Type::Rings(crate::Type::S32)) == Type::Bot
-				&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
-				{
-					todo!("TC - cond node must have integer type");
-				}
-				for stmt_id in &then_block.0 {
-					let stmt = &data.ast_nodes[*stmt_id];
-					self.check_stmt(data, stmt, *stmt_id, ret_type)?;
-				}
-				for stmt_id in &else_block.0 {
-					let stmt = &data.ast_nodes[*stmt_id];
-					self.check_stmt(data, stmt, *stmt_id, ret_type)?;
-				}
-				todo!()
+			Kind::If(cond_id, then_block, else_block) => {
+				println!("  If({} -> {} nodes <> {} nodes)", cond_id.index(), then_block.0.len(), else_block.0.len());
+				self.check_if(data, *cond_id, then_block, else_block, ret_type)
 			}
 
-			Kind::While(cond, block) => {
-				println!("AST-While({} -> {})", cond.index(), block.0.len());
-				todo!()
+			Kind::While(cond_id, block) => {
+				println!("  While({} -> {} nodes)", cond_id.index(), block.0.len());
+				self.check_condition(data, *cond_id, ret_type)?;
+				self.check_block(data, block, ret_type)
 			}
 
 			Kind::For(vars, Some(table_id), Some(range), block) => {
-				println!("AST-For({} in {}[{}] -> {})",
+				println!("  For({} in {}[{}] -> {} nodes)",
 					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
 					data.text(table_id), range, block.0.len());
 				todo!("ranged-table for-loop")
 			}
 
 			Kind::For(vars, Some(table_id), None, block) => {
-				println!("AST-For({} in {} -> {})",
+				println!("  For({} in {} -> {} nodes)",
 					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
 					data.text(table_id), block.0.len());
 				todo!("indexed-table for-loop")
 			}
 
 			Kind::For(vars, None, Some(range), block) => {
-				println!("AST-For({} in {} -> {})",
+				println!("  For({} in {} -> {} nodes)",
 					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
 					range, block.0.len());
 				if vars.len() != 1 {
@@ -156,27 +141,23 @@ impl Checker {
 						return Some("simple for-loops require a fully specified range (start..end)".to_string());
 					}
 				}
-				for stmt_id in &block.0 {
-					let stmt = &data.ast_nodes[*stmt_id];
-					self.check_stmt(data, stmt, *stmt_id, ret_type);
-				}
-				None
+				self.check_block(data, block, ret_type)
 			}
 
 			Kind::For(vars, None, None, block) => {
-				println!("AST-For({} -> {})",
+				println!("  For({} -> {} nodes)",
 					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
 					block.0.len());
 				todo!("infinite for-loop")
 			}
 
 			Kind::TableIndex(table_id, expr_id) => {
-				println!("AST-TableIndex({}[{}])", data.text(table_id), expr_id);
+				println!("  TableIndex({}[{}])", data.text(table_id), expr_id);
 				todo!("table-index")
 			}
 
 			Kind::Call(proc_id, exprs) => {
-				println!("AST-Call({}({}))", data.text(proc_id), exprs.iter()
+				println!("  Call({}({}))", data.text(proc_id), exprs.iter()
 					.map(|id| id.to_string())
 					.collect::<Vec<_>>()
 					.join(","));
@@ -295,6 +276,38 @@ impl Checker {
 			return Some(format!("TC - Expected return type {proc_type:?}, found '{ret_type:?}'"));
 		}
 		None
+	}
+
+	fn check_block(&mut self, data: &Data,
+		block: &ast::Block, proc_type: crate::Type,
+	) -> Option<String> {
+		for stmt_id in &block.0 {
+			let stmt = &data.ast_nodes[*stmt_id];
+			self.check_stmt(data, stmt, *stmt_id, proc_type)?;
+		}
+		None
+	}
+
+	fn check_condition(&mut self, data: &Data,
+		cond_id: ast::Id, proc_type: crate::Type,
+	) -> Option<String> {
+		let cond = &data.ast_nodes[cond_id];
+		self.check_stmt(data, cond, cond_id, proc_type)?;
+		let cond_type = self.ast_to_type[&cond_id];
+		if cond_type.meet(Type::Rings(crate::Type::S32)) == Type::Bot
+		&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
+		{
+			todo!("TC - cond node must have integer type");
+		}
+		None
+	}
+
+	fn check_if(&mut self, data: &Data,
+		cond_id: ast::Id, then_block: &ast::Block, else_block: &ast::Block, proc_type: crate::Type,
+	) -> Option<String> {
+		self.check_condition(data, cond_id, proc_type)?;
+		self.check_block(data, then_block, proc_type)?;
+		self.check_block(data, else_block, proc_type)
 	}
 }
 

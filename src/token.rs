@@ -43,6 +43,7 @@ pub enum Kind {
 	Else,
 	For,
 	Where,
+	While,
 	Arrow,
 	At,
 	Semicolon,
@@ -85,7 +86,8 @@ impl Kind {
 			Self::False |
 			Self::Index |
 			Self::Table |
-			Self::Where => 5,
+			Self::Where |
+			Self::While => 5,
 			Self::Bool |
 			Self::Else |
 			Self::Proc |
