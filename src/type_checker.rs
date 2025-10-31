@@ -78,7 +78,7 @@ impl Checker {
 
 			Kind::BinOp(op, left, right) => {
 				println!("  BinOp({} {op} {})", left.index(), right.index());
-				self.check_binop(data, ast_id, *op, left, right)
+				self.check_binop(data, ast_id, *op, left, right, ret_type)
 			}
 
 			Kind::UnOp(op, right) => {
@@ -224,24 +224,47 @@ impl Checker {
 
 	fn check_binop(&mut self, data: &Data,
 		ast_id: ast::Id,
-		op: crate::BinaryOp, left: &ast::Id, right: &ast::Id,
+		op: crate::BinaryOp, left_id: &ast::Id, right_id: &ast::Id, proc_type: crate::Type,
 	) -> Option<String> {
-		if op == crate::BinaryOp::Add {
-			let left_type = self.ast_to_type[left];
-			let right_type = self.ast_to_type[right];
-			match left_type.meet(right_type) {
-				Type::Bot => Some(format!("TC - unable to apply '{op}' to types '{}' and '{}'",
-					left_type.display(data),
-					right_type.display(data),
-				)),
-				new_type => {
-					// Types are able to meet
-					self.ast_to_type.insert(ast_id, new_type);
-					None
+		let left = &data.ast_nodes[*left_id];
+		self.check_stmt(data, left, *left_id, proc_type)?;
+		let right = &data.ast_nodes[*right_id];
+		self.check_stmt(data, right, *right_id, proc_type)?;
+		match op {
+			crate::BinaryOp::Add |
+			crate::BinaryOp::Sub |
+			crate::BinaryOp::Mul |
+			crate::BinaryOp::Div |
+			crate::BinaryOp::Mod |
+			crate::BinaryOp::ShL |
+			crate::BinaryOp::ShR |
+			crate::BinaryOp::BinAnd |
+			crate::BinaryOp::BinOr |
+			crate::BinaryOp::BinXor |
+			crate::BinaryOp::LogAnd |
+			crate::BinaryOp::LogOr |
+			crate::BinaryOp::LogXor |
+			crate::BinaryOp::CmpEQ |
+			crate::BinaryOp::CmpNE |
+			crate::BinaryOp::CmpGE |
+			crate::BinaryOp::CmpGT |
+			crate::BinaryOp::CmpLE |
+			crate::BinaryOp::CmpLT => {
+				let left_type = self.ast_to_type[left_id];
+				let right_type = self.ast_to_type[right_id];
+				match left_type.meet(right_type) {
+					Type::Bot => Some(format!("TC - unable to apply '{op}' to types '{}' and '{}'",
+						left_type.display(data),
+						right_type.display(data),
+					)),
+					new_type => {
+						// Types are able to meet
+						self.ast_to_type.insert(ast_id, new_type);
+						None
+					}
 				}
 			}
-		} else {
-			todo!("add the rest of the binary operators")
+			_ => todo!("add the rest of the binary operators"),
 		}
 	}
 
