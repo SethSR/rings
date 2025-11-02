@@ -169,31 +169,39 @@ impl TacFunction {
 			}
 
 			ast::Kind::Define(var_id, type_kind, expr_id) => {
+				let ast::Kind::Ident(ident_id) = &data.ast_nodes[*var_id] else {
+					return Err(format!("cannot initialize internal variables, assign instead"));
+				};
+
 				// Get initializer value
 				let Some(init_value) = self.lower_node(&data.ast_nodes[*expr_id], data)? else {
 					return Ok(None);
 				};
 
 				// Add to locals
-				self.locals.push((*var_id, *type_kind));
+				self.locals.push((*ident_id, *type_kind));
 
 				// Emit assignment
 				self.emit(Tac::Copy {
 					src: init_value,
-					dst: Location::Variable(*var_id),
+					dst: Location::Variable(*ident_id),
 				});
 
 				Ok(None)
 			}
 
 			ast::Kind::Assign(var_id, expr_id) => {
-				let Some(value) = self.lower_node(&data.ast_nodes[*expr_id], data)? else {
+				let Some(lvalue) = self.lower_node(&data.ast_nodes[*var_id], data)? else {
+					todo!("expected value lvalue");
+				};
+
+				let Some(rvalue) = self.lower_node(&data.ast_nodes[*expr_id], data)? else {
 					return Ok(None);
 				};
 
 				self.emit(Tac::Copy {
-					src: value,
-					dst: Location::Variable(*var_id),
+					src: rvalue,
+					dst: lvalue,
 				});
 
 				Ok(None)
@@ -336,6 +344,10 @@ impl TacFunction {
 
 			ast::Kind::Call(_proc_id, _exprs) => {
 				todo!("lower proc-call")
+			}
+
+			ast::Kind::Access(_base_id, _segments) => {
+				todo!("lower access")
 			}
 		}
 	}

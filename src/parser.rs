@@ -1,18 +1,12 @@
 
 use std::ops::Range;
 
-use crate::ast;
+use crate::ast::{ Block as AstBlock, Id as AstId, Kind as AKind, PathSegment };
 use crate::cursor::Cursor;
-use crate::error::{self, CompilerError};
-use crate::identifier;
-use crate::token;
-use crate::{BinaryOp, Data, Bounds, SrcPos, UnaryOp};
-
-use identifier::Id as IdentId;
-use ast::Kind as AKind;
-use ast::Id as AstId;
-use token::Kind as TKind;
-use token::Id as TokenId;
+use crate::error::{ self, CompilerError };
+use crate::identifier::Id as IdentId;
+use crate::token::{ Id as TokenId, Kind as TKind };
+use crate::{ BinaryOp, Data, Bounds, SrcPos, UnaryOp };
 
 type ParseResult = Result<AstId, CompilerError>;
 
@@ -55,14 +49,6 @@ pub fn eval(data: &mut Data) {
 					task.prev_ready_proc_count = data.completed_procs.len();
 					data.proc_queue.push_back(task);
 				} else {
-					let name = data.text(&task.proc_name).to_string();
-					let mut err = error::error_with_notes(data,
-						&format!("No progress made since last attempt to parse '{name}'"),
-						task.start_token,
-						&[("reached this point before failing", task.prev_furthest_token)]
-					);
-					err.set_kind(error::Kind::Parser);
-					data.errors.push(err);
 					data.proc_queue.push_back(task);
 					return;
 				}
@@ -130,7 +116,7 @@ fn new_ast(data: &mut Data, kind: AKind,
 }
 
 fn parse_block(cursor: &mut Cursor, data: &mut Data,
-) -> Result<ast::Block, CompilerError> {
+) -> Result<AstBlock, CompilerError> {
 	cursor.expect(data, TKind::OBrace)?;
 
 	let mut block = vec![];
@@ -155,60 +141,92 @@ fn parse_block(cursor: &mut Cursor, data: &mut Data,
 		});
 	}
 
-	Ok(ast::Block(block))
+	Ok(AstBlock(block))
 }
 
+// ident       := expr
+// ident       = expr
+// ident.ident = expr
+// ident[expr] = expr
+// ident = expr
 fn parse_ident_statement(cursor: &mut Cursor, data: &mut Data,
 	ident_id: IdentId,
 ) -> ParseResult {
-	match cursor.peek(data, 1) {
-		TKind::Colon => parse_definition(cursor, data, ident_id),
-		TKind::Equal => parse_assignment(cursor, data, ident_id),
-		TKind::Dot => Err(error::error(data,
-			"field access is not implemented yet",
-			cursor.index())),
-		TKind::OBracket => parse_table_access(cursor, data, ident_id),
+	// parse left-value
+	// check "op" (Define, Assign, OpAssign)
+	// parse right-value
+
+	let left_id = parse_access(cursor, data, ident_id)?;
+
+	match cursor.current(data) {
+		TKind::Colon => parse_definition(cursor, data, left_id),
+		TKind::Equal => parse_assignment(cursor, data, left_id),
 		TKind::ColonEqual => Err(error::error(data,
 			"type-inference is not implemented yet, please add a type-specifier",
 			cursor.index())),
-		TKind::PlusEqual => parse_op_assignment(cursor, data, ident_id, BinaryOp::Add),
-		TKind::DashEqual => parse_op_assignment(cursor, data, ident_id, BinaryOp::Sub),
-		TKind::StarEqual => parse_op_assignment(cursor, data, ident_id, BinaryOp::Mul),
-		TKind::SlashEqual => parse_op_assignment(cursor, data, ident_id, BinaryOp::Div),
+		TKind::PlusEqual => parse_op_assignment(cursor, data, left_id, BinaryOp::Add),
+		TKind::DashEqual => parse_op_assignment(cursor, data, left_id, BinaryOp::Sub),
+		TKind::StarEqual => parse_op_assignment(cursor, data, left_id, BinaryOp::Mul),
+		TKind::SlashEqual => parse_op_assignment(cursor, data, left_id, BinaryOp::Div),
 		_ => Err(error::expected_token(data,
 			"definition or assignment statement",
 			cursor.index())),
 	}
 }
 
-fn parse_definition(cursor: &mut Cursor, data: &mut Data,
+fn parse_access(cursor: &mut Cursor, data: &mut Data,
 	ident_id: IdentId,
 ) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.advance();
-	cursor.advance();
+	let mut accesses = vec![];
+	while [TKind::Dot, TKind::OBracket, TKind::OParen].contains(&cursor.current(data)) {
+		match cursor.current(data) {
+			TKind::Dot => {
+				cursor.expect(data, TKind::Dot)?;
+				let id = cursor.expect_identifier(data, "field name")?;
+				accesses.push(PathSegment::Field(id));
+			}
+			TKind::OBracket => {
+				let index = parse_table_access_internal(cursor, data, ident_id,
+					cursor.location(data), cursor.index())?;
+				accesses.push(PathSegment::Index(index));
+			}
+			_ => break,
+		}
+	}
+	let src_range = src_start..cursor.location(data);
+	let tok_range = tok_start..cursor.index();
+	Ok(new_ast(data, AKind::Access(ident_id, accesses), src_range, tok_range))
+}
+
+fn parse_definition(cursor: &mut Cursor, data: &mut Data,
+	lvalue_id: AstId,
+) -> ParseResult {
+	let src_start = cursor.location(data);
+	let tok_start = cursor.index();
+	cursor.expect(data, TKind::Colon)?;
 	let var_type = cursor.expect_type(data)?;
 	cursor.expect(data, TKind::Equal)?;
 	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(data, AKind::Define(ident_id, var_type, ast_id), src_range, tok_range))
+	Ok(new_ast(data, AKind::Define(lvalue_id, var_type, ast_id), src_range, tok_range))
 }
 
 fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
-	ident_id: IdentId,
+	lvalue_id: AstId,
 ) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
-	cursor.advance();
-	cursor.advance();
+	cursor.expect(data, TKind::Equal)?;
 	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(data, AKind::Assign(ident_id, ast_id), src_range, tok_range))
+	Ok(new_ast(data, AKind::Assign(lvalue_id, ast_id), src_range, tok_range))
 }
 
 fn parse_table_access(cursor: &mut Cursor, data: &mut Data,
@@ -217,7 +235,13 @@ fn parse_table_access(cursor: &mut Cursor, data: &mut Data,
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.advance();
-	cursor.advance();
+	parse_table_access_internal(cursor, data, ident_id, src_start, tok_start)
+}
+
+fn parse_table_access_internal(cursor: &mut Cursor, data: &mut Data,
+	ident_id: IdentId, src_start: SrcPos, tok_start: TokenId,
+) -> ParseResult {
+	cursor.expect(data, TKind::OBracket)?;
 	let index = parse_expression(cursor, data, &[TKind::CBracket])?;
 	cursor.expect(data, TKind::CBracket)?;
 	let src_range = src_start..cursor.location(data);
@@ -226,24 +250,20 @@ fn parse_table_access(cursor: &mut Cursor, data: &mut Data,
 }
 
 fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data,
-	ident_id: IdentId, op: BinaryOp,
+	lvalue_id: AstId, op: BinaryOp,
 ) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.advance();
 	cursor.advance();
-	let var_id = new_ast(data, AKind::Ident(ident_id),
-		src_start..cursor.location(data),
-		tok_start..cursor.index(),
-	);
 	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
-	let op_id = new_ast(data, AKind::BinOp(op, var_id, ast_id),
+	let op_id = new_ast(data, AKind::BinOp(op, lvalue_id, ast_id),
 		src_range.clone(),
 		tok_range.clone());
-	Ok(new_ast(data, AKind::Assign(ident_id, op_id), src_range, tok_range))
+	Ok(new_ast(data, AKind::Assign(lvalue_id, op_id), src_range, tok_range))
 }
 
 fn parse_return_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
@@ -266,14 +286,13 @@ fn parse_if_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::If)?;
-	let cond_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
-	cursor.expect(data, TKind::Semicolon)?;
+	let cond_id = parse_expression(cursor, data, &[TKind::OBrace])?;
 	let then_block = parse_block(cursor, data)?;
 	let else_block = if TKind::Else == cursor.current(data) {
 		cursor.advance();
 		parse_block(cursor, data)?
 	} else {
-		ast::Block(vec![])
+		AstBlock(vec![])
 	};
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
@@ -691,6 +710,18 @@ mod can_parse_proc {
 	#[test]
 	fn with_internal_while_loop() {
 		let db = setup("main { while true { } }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_field_assign() {
+		let db = setup("main { a.b = 2; }");
+		assert!(db.completed_procs.contains_key(&"main".id()));
+	}
+
+	#[test]
+	fn with_internal_table_assign() {
+		let db = setup("main { a[3].b = 2; }");
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 }

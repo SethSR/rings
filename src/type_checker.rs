@@ -2,12 +2,15 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use crate::ast;
+use crate::ast::{
+	Block as AstBlock,
+	Id as AstId,
+	Kind,
+	PathSegment,
+};
 use crate::identifier;
 use crate::error;
 use crate::Data;
-
-use ast::Kind;
 
 // NOTE - srenshaw - CE <== Compiler Error: This shouldn't happen and needs to be fixed
 
@@ -15,7 +18,7 @@ use ast::Kind;
 
 #[derive(Debug, Default)]
 struct Checker {
-	ast_to_type: HashMap<ast::Id, Type>,
+	ast_to_type: HashMap<AstId, Type>,
 	ident_to_type: HashMap<identifier::Id, Type>,
 }
 
@@ -45,7 +48,7 @@ pub fn eval(data: &mut Data) {
 
 impl Checker {
 	fn check_stmt(&mut self, data: &Data,
-		node: &ast::Kind, ast_id: ast::Id, ret_type: crate::Type,
+		node: &Kind, ast_id: AstId, ret_type: crate::Type,
 	) -> Option<String> {
 		match node {
 			Kind::Int(num) => {
@@ -66,14 +69,14 @@ impl Checker {
 				None
 			}
 
-			Kind::Define(ident_id, var_type, expr_id) => {
-				println!("  Define({} : {var_type:?} = {})", data.text(ident_id), ast_id.index());
-				self.check_define(data, ident_id, *expr_id, *var_type)
+			Kind::Define(lvalue_id, var_type, expr_id) => {
+				println!("  Define({} : {var_type:?} = {})", lvalue_id.index(), ast_id.index());
+				self.check_define(data, *lvalue_id, *expr_id, *var_type)
 			}
 
-			Kind::Assign(ident_id, expr_id) => {
-				println!("  Assign({} = {})", data.text(ident_id), ast_id.index());
-				self.check_assign(data, ident_id, *expr_id)
+			Kind::Assign(lvalue_id, expr_id) => {
+				println!("  Assign({} = {})", lvalue_id.index(), ast_id.index());
+				self.check_assign(data, *lvalue_id, *expr_id)
 			}
 
 			Kind::BinOp(op, left, right) => {
@@ -163,11 +166,47 @@ impl Checker {
 					.join(","));
 				todo!("procedure-call")
 			}
+
+			Kind::Access(base_id, segments) => {
+				println!("  Access({}{})", data.text(base_id), segments.iter()
+					.map(|segment| match segment {
+						PathSegment::Field(field_id) => format!(".{}", data.text(field_id)),
+						PathSegment::Index(expr_id) => format!("[{expr_id}]"),
+						PathSegment::Call(call_id) => format!("({call_id})"),
+					})
+					.collect::<Vec<_>>()
+					.join(""));
+
+				let mut curr_id = base_id;
+				for segment in segments {
+					match segment {
+						PathSegment::Field(field_id) => {
+							let Some(record) = data.records.get(curr_id) else {
+								return Some(format!("no record named '{}' found", data.text(curr_id)));
+							};
+							if !record.fields.iter().any(|(f_id,_)| field_id == f_id) {
+								return Some(format!("no field '{}' in record '{}'",
+									data.text(field_id), data.text(curr_id),
+								));
+							}
+							curr_id = field_id;
+						}
+						PathSegment::Index(_expr_id) => {
+							todo!("table-index-2")
+						}
+						PathSegment::Call(call_id) => {
+							let call_kind = &data.ast_nodes[*call_id];
+							self.check_stmt(data, call_kind, *call_id, ret_type)?;
+						}
+					}
+				}
+				None
+			}
 		}
 	}
 
 	fn check_ident(&mut self,
-		ident_id: &identifier::Id, ast_id: ast::Id,
+		ident_id: &identifier::Id, ast_id: AstId,
 	) {
 		let new_type = self.ident_to_type.get(ident_id)
 			.unwrap_or(&Type::Top);
@@ -175,12 +214,16 @@ impl Checker {
 	}
 
 	fn check_define(&mut self, data: &Data,
-		ident_id: &identifier::Id, ast_id: ast::Id,
+		lvalue_id: AstId, ast_id: AstId,
 		var_type: crate::Type,
 	) -> Option<String> {
-		match self.ident_to_type.entry(*ident_id) {
+		let Kind::Ident(ident_id) = data.ast_nodes[lvalue_id] else {
+			return Some("TC - Cannot define internal values, assign instead".to_string());
+		};
+
+		match self.ident_to_type.entry(ident_id) {
 			Entry::Occupied(_) => {
-				Some(format!("TC - '{}' has already been defined", data.text(ident_id)))
+				Some(format!("TC - '{}' has already been defined", data.text(&ident_id)))
 			}
 			Entry::Vacant(e) => {
 				let Some(expr_type) = self.ast_to_type.get(&ast_id) else {
@@ -203,17 +246,17 @@ impl Checker {
 	}
 
 	fn check_assign(&mut self, data: &Data,
-		ident_id: &identifier::Id, ast_id: ast::Id,
+		lvalue_id: AstId, ast_id: AstId,
 	) -> Option<String> {
-		let Some(var_type) = self.ident_to_type.get(ident_id) else {
-			return Some(format!("TC - found unknown identifier '{}'", data.text(ident_id)));
+		let Some(lvalue_type) = self.ast_to_type.get(&lvalue_id) else {
+			return Some(format!("CE - lvalue has no type: {lvalue_id:?}"));
 		};
 		let Some(expr_type) = self.ast_to_type.get(&ast_id) else {
 			return Some(format!("CE - expression has no type: {ast_id:?}"));
 		};
-		if &expr_type.meet(*var_type) != var_type {
+		if &expr_type.meet(*lvalue_type) != lvalue_type {
 			Some(format!("TC - variable has type '{}', but expression has type '{}'",
-				var_type.display(data),
+				lvalue_type.display(data),
 				expr_type.display(data),
 			))
 		} else {
@@ -223,8 +266,8 @@ impl Checker {
 	}
 
 	fn check_binop(&mut self, data: &Data,
-		ast_id: ast::Id,
-		op: crate::BinaryOp, left_id: &ast::Id, right_id: &ast::Id, proc_type: crate::Type,
+		ast_id: AstId,
+		op: crate::BinaryOp, left_id: &AstId, right_id: &AstId, proc_type: crate::Type,
 	) -> Option<String> {
 		let left = &data.ast_nodes[*left_id];
 		self.check_stmt(data, left, *left_id, proc_type)?;
@@ -269,8 +312,8 @@ impl Checker {
 	}
 
 	fn check_unop(&mut self, data: &Data,
-		ast_id: ast::Id,
-		op: crate::UnaryOp, right: &ast::Id,
+		ast_id: AstId,
+		op: crate::UnaryOp, right: &AstId,
 	) -> Option<String> {
 		let right_type = self.ast_to_type[right];
 		let Type::Rings(rtype) = right_type else {
@@ -286,7 +329,7 @@ impl Checker {
 	}
 
 	fn check_return(&mut self,
-		ast_id: Option<ast::Id>, proc_type: crate::Type,
+		ast_id: Option<AstId>, proc_type: crate::Type,
 	) -> Option<String> {
 		let ret_type = match ast_id {
 			Some(ast_id) => match self.ast_to_type.get(&ast_id) {
@@ -302,7 +345,7 @@ impl Checker {
 	}
 
 	fn check_block(&mut self, data: &Data,
-		block: &ast::Block, proc_type: crate::Type,
+		block: &AstBlock, proc_type: crate::Type,
 	) -> Option<String> {
 		for stmt_id in &block.0 {
 			let stmt = &data.ast_nodes[*stmt_id];
@@ -312,7 +355,7 @@ impl Checker {
 	}
 
 	fn check_condition(&mut self, data: &Data,
-		cond_id: ast::Id, proc_type: crate::Type,
+		cond_id: AstId, proc_type: crate::Type,
 	) -> Option<String> {
 		let cond = &data.ast_nodes[cond_id];
 		self.check_stmt(data, cond, cond_id, proc_type)?;
@@ -326,7 +369,7 @@ impl Checker {
 	}
 
 	fn check_if(&mut self, data: &Data,
-		cond_id: ast::Id, then_block: &ast::Block, else_block: &ast::Block, proc_type: crate::Type,
+		cond_id: AstId, then_block: &AstBlock, else_block: &AstBlock, proc_type: crate::Type,
 	) -> Option<String> {
 		self.check_condition(data, cond_id, proc_type)?;
 		self.check_block(data, then_block, proc_type)?;

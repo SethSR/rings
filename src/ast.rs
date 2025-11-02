@@ -18,13 +18,20 @@ define_index_type! {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block(pub Vec<Id>);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathSegment {
+	Field(IdentId),
+	Index(Id),
+	Call(Id),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kind {
 	Ident(IdentId),
 	Int(i64),
 	Dec(f64),
-	Define(IdentId, crate::Type, Id),
-	Assign(IdentId, Id),
+	Define(Id, crate::Type, Id),
+	Assign(Id, Id),
 	BinOp(BinaryOp, Id, Id),
 	UnOp(UnaryOp, Id),
 	Return(Option<Id>),
@@ -34,6 +41,7 @@ pub enum Kind {
 	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Block),
 	TableIndex(IdentId, Id),
 	Call(IdentId, Vec<Id>),
+	Access(IdentId, Vec<PathSegment>),
 }
 
 pub type KindList = IndexVec<Id, Kind>;
