@@ -181,7 +181,7 @@ fn parse_access(cursor: &mut Cursor, data: &mut Data,
 	let tok_start = cursor.index();
 	cursor.advance();
 	let mut accesses = vec![];
-	while [TKind::Dot, TKind::OBracket, TKind::OParen].contains(&cursor.current(data)) {
+	while [TKind::Dot, TKind::OBracket].contains(&cursor.current(data)) {
 		match cursor.current(data) {
 			TKind::Dot => {
 				cursor.expect(data, TKind::Dot)?;
