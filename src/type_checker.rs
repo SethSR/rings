@@ -116,14 +116,65 @@ impl Checker {
 				println!("  For({} in {}[{}] -> {} nodes)",
 					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
 					data.text(table_id), range, block.0.len());
-				todo!("ranged-table for-loop")
+
+				let table = &data.tables[table_id];
+				debug_assert!(vars.len() <= table.column_spec.len());
+
+				let (start, end) = match range {
+					crate::Bounds::Full { start, end } => (*start, *end),
+					crate::Bounds::From { start } => (*start, table.row_count as i64),
+					crate::Bounds::To { end } => (0, *end),
+				};
+
+				debug_assert!(start >= 0, "'start' value in bounds should never be negative");
+				if start >= (table.row_count as i64) {
+					return Some("'start' value in bounds must be less than table row-count".to_string());
+				}
+				if end > (table.row_count as i64) {
+					return Some("'end' value in bounds must be less than or equal to table row-count".to_string());
+				}
+				if start > end {
+					return Some("start value must be less than or equal to end value".to_string());
+				}
+
+				for var in vars {
+					// TODO - srenshaw - Need to check for duplicate names
+
+					if !table.column_spec.iter().any(|(a,_)| var == a) {
+						return Some(format!("field '{}' not found in table '{}'", data.text(var), data.text(table_id)));
+					}
+				}
+				self.check_block(data, block, ret_type)
 			}
 
 			Kind::For(vars, Some(table_id), None, block) => {
 				println!("  For({} in {} -> {} nodes)",
 					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
 					data.text(table_id), block.0.len());
-				todo!("indexed-table for-loop")
+
+				let table = &data.tables[table_id];
+				debug_assert!(vars.len() <= table.column_spec.len());
+
+				let (start, end) = (0, table.row_count);
+
+				if start >= table.row_count {
+					return Some("'start' value in bounds must be less than table row-count".to_string());
+				}
+				if end > table.row_count {
+					return Some("'end' value in bounds must be less than or equal to table row-count".to_string());
+				}
+				if start > end {
+					return Some("start value must be less than or equal to end value".to_string());
+				}
+
+				for var in vars {
+					// TODO - srenshaw - Need to check for duplicate names
+
+					if !table.column_spec.iter().any(|(a,_)| var == a) {
+						return Some(format!("field '{}' not found in table '{}'", data.text(var), data.text(table_id)));
+					}
+				}
+				self.check_block(data, block, ret_type)
 			}
 
 			Kind::For(vars, None, Some(range), block) => {
