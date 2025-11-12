@@ -377,7 +377,14 @@ impl TacSection {
 							let Some(field_offset) = record.field_offset(data, field_id) else {
 								panic!("no field '{}' in record '{}'", data.text(&field_id), data.text(&curr_ident));
 							};
-							curr_ident = field_id;
+							curr_ident = *match record.fields.iter().find(|(id,_)| field_id == *id) {
+								Some((_, field_type)) => match field_type {
+									crate::Type::Record(id) => Ok(id),
+									crate::Type::Table(id) => Ok(id),
+									_ => Err(format!("expected a record or table type, found '{}'", data.type_text(*field_type))),
+								}
+								None => unreachable!(),
+							}?;
 
 							self.emit(Tac::BinOp {
 								op: BinaryOp::Add,
@@ -389,55 +396,55 @@ impl TacSection {
 							i += 1;
 						}
 
-						ast::PathSegment::Index(expr_id) => {
+						ast::PathSegment::Index(expr_id, field_id) => {
 							let Some(expr) = self.lower_node(&data.ast_nodes[expr_id], data)? else {
 								return Ok(None);
 							};
 
-							match segments.get(i + 1) {
-								Some(ast::PathSegment::Index(_)) => return Err("cannot double index into a table".to_string()),
-								Some(ast::PathSegment::Field(field_id)) => {
-									let table = &data.tables[&curr_ident];
-									let column_offset = table.column_offset(data, *field_id)
-										.unwrap_or_else(|| panic!("no field '{}' in table '{}'", data.text(field_id), data.text(&curr_ident)));
-									curr_ident = *field_id;
-
-									self.emit(Tac::BinOp {
-										op: BinaryOp::Add,
-										left: temp.clone(),
-										right: Location::Constant(column_offset as i64),
-										dst: temp.clone(),
-									});
-
-									// NOTE - srenshaw - We can unwrap here because we already checked for field
-									// existence to get the column-offset.
-									let field_size = table.column_spec.iter()
-										.find(|(id,_)| field_id == id)
-										.map(|(_, field_type)| data.type_size(*field_type))
-										.unwrap();
-
-									// t0 = expr * field_size
-									let t0 = self.alloc_temp();
-									self.emit(Tac::BinOp {
-										op: BinaryOp::Mul,
-										left: expr,
-										right: Location::Constant(field_size as i64),
-										dst: Location::Temp(t0),
-									});
-
-									// temp = temp + t0
-									self.emit(Tac::BinOp {
-										op: BinaryOp::Add,
-										left: temp.clone(),
-										right: Location::Temp(t0),
-										dst: temp.clone(),
-									});
-
-									i += 2;
+							let table = &data.tables[&curr_ident];
+							let column_offset = table.column_offset(data, field_id)
+								.unwrap_or_else(|| panic!("no field '{}' in table '{}'", data.text(&field_id), data.text(&curr_ident)));
+							curr_ident = *match table.column_spec.iter().find(|(id,_)| field_id == *id) {
+								Some((_, field_type)) => match field_type {
+									crate::Type::Record(id) => Ok(id),
+									crate::Type::Table(id) => Ok(id),
+									_ => Err(format!("expected a record or table type, found '{}'", data.type_text(*field_type))),
 								}
+								None => unreachable!(),
+							}?;
 
-								None => return Err("no field specified for table access".to_string()),
-							}
+							self.emit(Tac::BinOp {
+								op: BinaryOp::Add,
+								left: temp.clone(),
+								right: Location::Constant(column_offset as i64),
+								dst: temp.clone(),
+							});
+
+							// NOTE - srenshaw - We can unwrap here because we already checked for field
+							// existence to get the column-offset.
+							let field_size = table.column_spec.iter()
+								.find(|(id,_)| field_id == *id)
+								.map(|(_, field_type)| data.type_size(*field_type))
+								.unwrap();
+
+							// t0 = expr * field_size
+							let t0 = self.alloc_temp();
+							self.emit(Tac::BinOp {
+								op: BinaryOp::Mul,
+								left: expr,
+								right: Location::Constant(field_size as i64),
+								dst: Location::Temp(t0),
+							});
+
+							// temp = temp + t0
+							self.emit(Tac::BinOp {
+								op: BinaryOp::Add,
+								left: temp.clone(),
+								right: Location::Temp(t0),
+								dst: temp.clone(),
+							});
+
+							i += 2;
 						}
 					};
 				}
@@ -530,6 +537,28 @@ impl TacSection {
 	fn alloc_label(&mut self) -> LabelId {
 		self.next_label += 1;
 		self.next_label - 1
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::{lexer, parser, type_checker};
+	use crate::identifier::Identifier;
+	use crate::Data;
+
+	#[test]
+	fn stuff() {
+		let source = "test_return_void :: proc() {
+			x: u8 = 10;
+			return;
+		}";
+		let mut data = Data::new("lowering".into(), source.into());
+		lexer::eval(&mut data);
+		parser::eval(&mut data);
+		type_checker::eval(&mut data);
+		super::eval(&mut data);
+		assert!(data.errors.is_empty());
+		panic!("{data}");
 	}
 }
 

@@ -217,7 +217,7 @@ impl Checker {
 				println!("  Access({}{})", data.text(base_id), segments.iter()
 					.map(|segment| match segment {
 						PathSegment::Field(field_id) => format!(".{}", data.text(field_id)),
-						PathSegment::Index(expr_id) => format!("[{expr_id}]"),
+						PathSegment::Index(expr_id, field_id) => format!("[{expr_id}].{}", data.text(field_id)),
 					})
 					.collect::<Vec<_>>()
 					.join(""));
@@ -236,8 +236,8 @@ impl Checker {
 							}
 							curr_id = field_id;
 						}
-						PathSegment::Index(_expr_id) => {
-							todo!("table-index-2")
+						PathSegment::Index(expr_id, field_id) => {
+							todo!("table-index-2: [{expr_id}].{field_id}")
 						}
 					}
 				}

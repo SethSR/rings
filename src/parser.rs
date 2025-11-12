@@ -179,20 +179,24 @@ fn parse_access(cursor: &mut Cursor, data: &mut Data,
 ) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
-	cursor.advance();
+	cursor.advance(); // skip the identifier
 	let mut accesses = vec![];
 	while [TKind::Dot, TKind::OBracket].contains(&cursor.current(data)) {
 		match cursor.current(data) {
+			// a.b -> location of 'a' + offset of 'b'
 			TKind::Dot => {
 				cursor.expect(data, TKind::Dot)?;
 				let id = cursor.expect_identifier(data, "field name")?;
 				accesses.push(PathSegment::Field(id));
 			}
+			// a[b].c -> location of 'a' + 'b' * size of 'c'
 			TKind::OBracket => {
 				cursor.expect(data, TKind::OBracket)?;
 				let index = parse_expression(cursor, data, &[TKind::CBracket])?;
 				cursor.expect(data, TKind::CBracket)?;
-				accesses.push(PathSegment::Index(index));
+				cursor.expect(data, TKind::Dot)?;
+				let id = cursor.expect_identifier(data, "field name")?;
+				accesses.push(PathSegment::Index(index, id));
 			}
 			_ => break,
 		}

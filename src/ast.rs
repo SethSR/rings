@@ -21,7 +21,7 @@ pub struct Block(pub Vec<Id>);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathSegment {
 	Field(IdentId),
-	Index(Id),
+	Index(Id, IdentId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
