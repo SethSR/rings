@@ -1,0 +1,15 @@
+
+Vec2 :: record {
+    x: s16,
+    y: s16,
+}
+
+Players :: table[4] @ 0x0020_0000 {
+		position: Vec2,
+		velocity: Vec2,
+}
+
+test_table_access :: proc() {
+    Players[0].position.x += Players[0].velocity.x;
+    Players[0].position.y += Players[0].velocity.y;
+}

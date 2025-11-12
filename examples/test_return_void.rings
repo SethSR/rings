@@ -1,0 +1,4 @@
+test_return_void :: proc() {
+    x: u8 = 10;
+    return;
+}

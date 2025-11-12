@@ -1,0 +1,445 @@
+-- ============================================
+-- RINGS LANGUAGE - PHASE 1 TEST SUITE
+-- ============================================
+-- This file tests all baseline features expected
+-- in the first working version of the compiler.
+
+-- --------------------------------------------
+-- VALUES (Constants)
+-- --------------------------------------------
+
+MAX_ENEMIES   :: 100;
+SCREEN_WIDTH  :: 320;
+SCREEN_HEIGHT :: 224;
+TILE_SIZE     ::  16;
+
+-- Arithmetic in value definitions
+-- GRID_WIDTH  :: SCREEN_WIDTH  / TILE_SIZE;
+-- GRID_HEIGHT :: SCREEN_HEIGHT / TILE_SIZE;
+-- TOTAL_TILES :: GRID_WIDTH * GRID_HEIGHT;
+
+-- --------------------------------------------
+-- REGIONS (Memory layout)
+-- --------------------------------------------
+
+wram_low :: region[1024] @ 0x0020_0000;
+wram_high :: region[4096] @ 0x0020_0000;
+
+-- --------------------------------------------
+-- RECORDS (Struct-like types)
+-- --------------------------------------------
+
+Vec2 :: record {
+    x: s16,
+    y: s16,
+}
+
+Player :: record @ wram_low {
+    position: Vec2,
+    velocity: Vec2,
+    health: u16,
+    score: u32,
+}
+
+-- --------------------------------------------
+-- TABLES (Static allocation)
+-- --------------------------------------------
+
+Enemies :: table[20] @ wram_high {
+    position: Vec2,
+    velocity: Vec2,
+    health: u8,
+    active: bool,
+    enemy_type: u8,
+}
+
+Bullets :: table[100] @ wram_high {
+    position: Vec2,
+    velocity: Vec2,
+    damage: u8,
+    active: bool,
+}
+
+-- --------------------------------------------
+-- PROCEDURES - Basic Operations
+-- --------------------------------------------
+
+-- Test: Simple arithmetic
+test_arithmetic :: proc() {
+    x: u8 = 10;
+    y: u8 = 20;
+    z: u8 = x + y;
+}
+
+-- Test: All integer types
+test_types :: proc() {
+    a: u8 = 255;
+    b: u16 = 65000;
+    c: u32 = 1000000;
+    d: s8 = -100;
+    e: s16 = -30000;
+    f: s32 = -1000000;
+}
+
+-- Test: Boolean operations
+test_booleans :: proc() {
+    flag1: bool = true;
+    flag2: bool = false;
+    result: bool = flag1 && flag2;
+}
+
+-- Test: Variable assignment
+test_assignment :: proc() {
+    x: u8 = 10;
+    x = 20;
+    x += 5;
+}
+
+-- --------------------------------------------
+-- CONTROL FLOW - If statements
+-- --------------------------------------------
+test_if_basic :: proc() {
+    x: u8 = 10;
+
+    if x > 5 {
+        x += 1;
+    }
+}
+
+test_if_else :: proc() {
+    x: u8 = 10;
+    result: u8 = 0;
+
+    if x > 20 {
+        result = 1;
+    } else {
+        result = 2;
+    }
+}
+
+test_nested_if :: proc() {
+    x: u8 = 10;
+    y: u8 = 20;
+
+    if x > 5 {
+        if y > 15 {
+            x += y;
+        }
+    }
+}
+
+-- --------------------------------------------
+-- CONTROL FLOW - While loops
+-- --------------------------------------------
+test_while_basic :: proc() {
+    count: u8 = 0;
+
+    while count < 10 {
+        count += 1;
+    }
+}
+
+test_while_with_condition :: proc() {
+    x: u8 = 100;
+
+    while x > 0 {
+        x -= 1;
+    }
+}
+
+-- --------------------------------------------
+-- CONTROL FLOW - For loops (ranges)
+-- --------------------------------------------
+test_for_range :: proc() {
+    sum: u16 = 0;
+
+    for i in [0..10] {
+        sum += i;
+    }
+}
+
+test_for_range_bounds :: proc() {
+    -- Test different bound types
+    for i in [0..100] {
+        x: u8 = i;
+    }
+
+    for j in 10..50 {
+        y: u8 = j;
+    }
+}
+
+-- --------------------------------------------
+-- TABLE ACCESS - Basic indexing
+-- --------------------------------------------
+test_table_access :: proc() {
+    -- Direct index
+    Enemies[0].health = 100;
+    Enemies[0].active = true;
+
+    -- Variable index
+    idx: u8 = 5;
+    Enemies[idx].health = 50;
+}
+
+test_table_read :: proc() {
+    health: u8 = Enemies[0].health;
+    x: s16 = Enemies[0].position.x;
+}
+
+test_table_modify :: proc() {
+    Enemies[0].health -= 10;
+    Enemies[0].position.x += 1;
+}
+
+-- --------------------------------------------
+-- FOR LOOPS - Table iteration
+-- --------------------------------------------
+test_for_table_simple :: proc() {
+    -- Iterate all enemies
+    for enemy in Enemies {
+        enemy.health = 100;
+    }
+}
+
+test_for_table_with_index :: proc() {
+    -- Iterate with index
+    for i, enemy in Enemies {
+        enemy.health = i;
+    }
+}
+
+test_for_table_range :: proc() {
+    -- Iterate subset
+    for enemy in Enemies[0..10] {
+        enemy.active = true;
+    }
+
+    for enemy in Enemies[10..20] {
+        enemy.active = false;
+    }
+}
+
+-- --------------------------------------------
+-- NESTED LOOPS
+-- --------------------------------------------
+test_nested_loops :: proc() {
+    for bullet in Bullets {
+        for enemy in Enemies {
+            -- Collision check would go here
+            dx: s16 = bullet.position.x - enemy.position.x;
+            dy: s16 = bullet.position.y - enemy.position.y;
+        }
+    }
+}
+
+-- --------------------------------------------
+-- COMPLEX EXPRESSIONS
+-- --------------------------------------------
+test_complex_expressions :: proc() {
+    a: u16 = 10;
+    b: u16 = 20;
+    c: u16 = 30;
+
+    -- Multi-operation expression
+    result: u16 = a + b * c;
+
+    -- Nested arithmetic
+    x: u16 = (a + b) * (c - a);
+
+    -- Complex conditions
+    flag: bool = (a > b) && (c < 100);
+}
+
+-- --------------------------------------------
+-- COMPARISON OPERATORS
+-- --------------------------------------------
+test_comparisons :: proc() {
+    x: u8 = 10;
+    y: u8 = 20;
+
+    eq: bool = x == y;
+    neq: bool = x != y;
+    lt: bool = x < y;
+    gt: bool = x > y;
+    lte: bool = x <= y;
+    gte: bool = x >= y;
+}
+
+-- --------------------------------------------
+-- LOGICAL OPERATORS
+-- --------------------------------------------
+test_logical_ops :: proc() {
+    a: bool = true;
+    b: bool = false;
+
+    and_result: bool = a && b;
+    or_result: bool = a || b;
+    not_result: bool = !a;
+}
+
+-- --------------------------------------------
+-- RETURN STATEMENTS
+-- --------------------------------------------
+test_return_void :: proc() {
+    x: u8 = 10;
+    return;
+}
+
+test_return_value :: proc() -> u8 {
+    x: u8 = 42;
+    return x;
+}
+
+test_return_expression :: proc() -> u16 {
+    return 100 + 200;
+}
+
+-- --------------------------------------------
+-- COMPREHENSIVE TEST - Game Update Loop
+-- --------------------------------------------
+game_update :: proc() {
+    -- Update player
+    Players[0].position.x += Players[0].velocity.x;
+    Players[0].position.y += Players[0].velocity.y;
+
+    -- Update enemies
+    for i, enemy in Enemies {
+        if enemy.active {
+            enemy.position.x += enemy.velocity.x;
+            enemy.position.y += enemy.velocity.y;
+
+            -- Simple AI: move towards player
+            if enemy.position.x < Players[0].position.x {
+                enemy.velocity.x = 1;
+            } else {
+                enemy.velocity.x = -1;
+            }
+        }
+    }
+
+    -- Update bullets
+    for bullet in Bullets {
+        if bullet.active {
+            bullet.position.x += bullet.velocity.x;
+            bullet.position.y += bullet.velocity.y;
+
+            -- Deactivate if off screen
+            if bullet.position.x < 0 || bullet.position.x > SCREEN_WIDTH {
+                bullet.active = false;
+            }
+            if bullet.position.y < 0 || bullet.position.y > SCREEN_HEIGHT {
+                bullet.active = false;
+            }
+        }
+    }
+
+    -- Collision detection
+    for bullet in Bullets {
+        if bullet.active {
+            for enemy in Enemies {
+                if enemy.active {
+                    dx: s16 = bullet.position.x - enemy.position.x;
+                    dy: s16 = bullet.position.y - enemy.position.y;
+
+                    -- Simple bounding box collision
+                    if dx < 8 and dx > -8 {
+                        if dy < 8 and dy > -8 {
+                            enemy.health -= bullet.damage;
+                            bullet.active = false;
+
+                            if enemy.health == 0 {
+                                enemy.active = false;
+                                Players[0].score += 100;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+-- --------------------------------------------
+-- EDGE CASES
+-- --------------------------------------------
+
+-- Empty procedure
+test_empty :: proc() {
+}
+
+-- Single statement
+test_single_statement :: proc() {
+    x: u8 = 1;
+}
+
+-- Deeply nested blocks
+test_deep_nesting :: proc() {
+    if true {
+        if true {
+            if true {
+                x: u8 = 1;
+            }
+        }
+    }
+}
+
+-- Many local variables
+test_many_locals :: proc() {
+    v1: u8 = 1;
+    v2: u8 = 2;
+    v3: u8 = 3;
+    v4: u8 = 4;
+    v5: u8 = 5;
+    v6: u8 = 6;
+    v7: u8 = 7;
+    v8: u8 = 8;
+}
+
+-- --------------------------------------------
+-- BOUNDARY VALUES
+-- --------------------------------------------
+test_boundary_values :: proc() {
+    -- u8 boundaries
+    min_u8: u8 = 0;
+    max_u8: u8 = 255;
+    
+    -- s8 boundaries
+    min_s8: s8 = -128;
+    max_s8: s8 = 127;
+    
+    -- u16 boundaries
+    min_u16: u16 = 0;
+    max_u16: u16 = 65535;
+    
+    -- s16 boundaries
+    min_s16: s16 = -32768;
+    max_s16: s16 = 32767;
+}
+
+-- --------------------------------------------
+-- TEST CHECKLIST
+-- --------------------------------------------
+-- ✓ Value definitions (constants)
+-- ✓ Record definitions
+-- ✓ Table definitions
+-- ✓ Procedure definitions
+-- ✓ Local variable declarations
+-- ✓ Assignment statements
+-- ✓ Binary operators (+, -, *, /, ==, !=, <, >, <=, >=, and, or)
+-- ✓ Unary operators (not, -)
+-- ✓ If statements (with and without else)
+-- ✓ While loops
+-- ✓ For loops (ranges)
+-- ✓ For loops (table iteration)
+-- ✓ For loops (table iteration with index)
+-- ✓ For loops (table range iteration)
+-- ✓ Table element access
+-- ✓ Record field access
+-- ✓ Nested field access (table.record.field)
+-- ✓ Return statements
+-- ✓ Complex expressions
+-- ✓ Nested loops
+-- ✓ All integer types (u8, u16, u32, s8, s16, s32)
+-- ✓ Boolean type
+-- ✓ Boundary values

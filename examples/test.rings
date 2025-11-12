@@ -1,0 +1,35 @@
+
+-- 1MB = 1_048_576
+wram_low  :: region[1_048_576] at 0x0600_0000;
+wram_high :: region[1_048_576] at 0x0600_4000;
+
+vec2 :: record {
+	x: s32,
+	y: s32,
+}
+
+positions :: table[200] {
+	pos: vec2,
+}
+
+enemies :: table[50] {
+	pos_idx: u8, -- positions index
+	hp: u8,
+}
+
+players_alive :: table[4] {
+	pos_idx: u8, -- positions index
+	hp: u8,
+}
+
+players_dead :: table[4] {
+	pos_idx: u8, -- positions index
+}
+
+main {
+	enemy_id : u8 = 0;
+	-- loop-begin
+	enemy_id += 1;
+	-- loop-end
+}
+
