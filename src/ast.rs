@@ -22,7 +22,6 @@ pub struct Block(pub Vec<Id>);
 pub enum PathSegment {
 	Field(IdentId),
 	Index(Id),
-	Call(Id),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,7 +38,6 @@ pub enum Kind {
 	Block(Block),
 	While(Id, Block),
 	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Block),
-	TableIndex(IdentId, Id),
 	Call(IdentId, Vec<Id>),
 	Access(IdentId, Vec<PathSegment>),
 }

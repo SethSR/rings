@@ -39,10 +39,6 @@ pub enum Location {
 	Temp(TempId),      // Temporary variable
 	Variable(IdentId), // Named variable
 	Constant(i64),     // Immediate constant
-	TableElement {     // Table[index] access
-		table: IdentId,
-		index: Box<Location>,
-	},
 }
 
 impl Location {
@@ -51,9 +47,6 @@ impl Location {
 			Self::Temp(temp_id) => format!("?{temp_id}"),
 			Self::Variable(ident_id) => data.text(ident_id).to_string(),
 			Self::Constant(num) => num.to_string(),
-			Self::TableElement { table, index } => {
-				format!("{}[{}]", data.text(table), index.to_text(data))
-			}
 		}
 	}
 }
@@ -331,14 +324,6 @@ impl TacFunction {
 
 				self.lower_for_loop(data, iter_vars, table_id, bounds, body_block)?;
 
-				Ok(None)
-			}
-
-			ast::Kind::TableIndex(table_id, expr_id) => {
-				let Some(expr) = self.lower_node(&data.ast_nodes[*expr_id], data)? else {
-					return Ok(None);
-				};
-				self.emit(Tac::Comment(format!("{}[{}]", data.text(table_id), expr.to_text(data))));
 				Ok(None)
 			}
 

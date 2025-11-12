@@ -205,11 +205,6 @@ impl Checker {
 				todo!("infinite for-loop")
 			}
 
-			Kind::TableIndex(table_id, expr_id) => {
-				println!("  TableIndex({}[{}])", data.text(table_id), expr_id);
-				todo!("table-index")
-			}
-
 			Kind::Call(proc_id, exprs) => {
 				println!("  Call({}({}))", data.text(proc_id), exprs.iter()
 					.map(|id| id.to_string())
@@ -223,7 +218,6 @@ impl Checker {
 					.map(|segment| match segment {
 						PathSegment::Field(field_id) => format!(".{}", data.text(field_id)),
 						PathSegment::Index(expr_id) => format!("[{expr_id}]"),
-						PathSegment::Call(call_id) => format!("({call_id})"),
 					})
 					.collect::<Vec<_>>()
 					.join(""));
@@ -244,10 +238,6 @@ impl Checker {
 						}
 						PathSegment::Index(_expr_id) => {
 							todo!("table-index-2")
-						}
-						PathSegment::Call(call_id) => {
-							let call_kind = &data.ast_nodes[*call_id];
-							self.check_stmt(data, call_kind, *call_id, ret_type)?;
 						}
 					}
 				}
