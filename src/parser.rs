@@ -189,8 +189,9 @@ fn parse_access(cursor: &mut Cursor, data: &mut Data,
 				accesses.push(PathSegment::Field(id));
 			}
 			TKind::OBracket => {
-				let index = parse_table_access_internal(cursor, data, ident_id,
-					cursor.location(data), cursor.index())?;
+				cursor.expect(data, TKind::OBracket)?;
+				let index = parse_expression(cursor, data, &[TKind::CBracket])?;
+				cursor.expect(data, TKind::CBracket)?;
 				accesses.push(PathSegment::Index(index));
 			}
 			_ => break,
@@ -198,7 +199,12 @@ fn parse_access(cursor: &mut Cursor, data: &mut Data,
 	}
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(data, AKind::Access(ident_id, accesses), src_range, tok_range))
+	let kind = if accesses.is_empty() {
+		AKind::Ident(ident_id)
+	} else {
+		AKind::Access(ident_id, accesses)
+	};
+	Ok(new_ast(data, kind, src_range, tok_range))
 }
 
 fn parse_definition(cursor: &mut Cursor, data: &mut Data,
@@ -229,33 +235,12 @@ fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
 	Ok(new_ast(data, AKind::Assign(lvalue_id, ast_id), src_range, tok_range))
 }
 
-fn parse_table_access(cursor: &mut Cursor, data: &mut Data,
-	ident_id: IdentId,
-) -> ParseResult {
-	let src_start = cursor.location(data);
-	let tok_start = cursor.index();
-	cursor.advance();
-	parse_table_access_internal(cursor, data, ident_id, src_start, tok_start)
-}
-
-fn parse_table_access_internal(cursor: &mut Cursor, data: &mut Data,
-	ident_id: IdentId, src_start: SrcPos, tok_start: TokenId,
-) -> ParseResult {
-	cursor.expect(data, TKind::OBracket)?;
-	let index = parse_expression(cursor, data, &[TKind::CBracket])?;
-	cursor.expect(data, TKind::CBracket)?;
-	let src_range = src_start..cursor.location(data);
-	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(data, AKind::TableIndex(ident_id, index), src_range, tok_range))
-}
-
 fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data,
 	lvalue_id: AstId, op: BinaryOp,
 ) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
-	cursor.advance();
-	cursor.advance();
+	cursor.advance(); // skip the operator token
 	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let src_range = src_start..cursor.location(data);
@@ -270,12 +255,13 @@ fn parse_return_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	let src_start = cursor.location(data);
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::Return)?;
-	let ast_id = if TKind::Semicolon != cursor.current(data) {
-		let id = parse_expression(cursor, data, &[TKind::Semicolon])?;
-		cursor.expect(data, TKind::Semicolon)?;
-		Some(id)
-	} else {
-		None
+	let ast_id = match cursor.expect(data, TKind::Semicolon) {
+		Ok(_) => None,
+		Err(_) => {
+			let result = parse_expression(cursor, data, &[TKind::Semicolon])?;
+			cursor.expect(data, TKind::Semicolon)?;
+			Some(result)
+		},
 	};
 	let src_range = src_start..cursor.location(data);
 	let tok_range = tok_start..cursor.index();
@@ -436,7 +422,7 @@ fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data,
 	let src_start_inner = cursor.location(data);
 	let tok_start_inner = cursor.index();
 	let right = parse_primary(cursor, data)?;
-	let right = if min_binding_power < op_binding_power {
+	let right = if min_binding_power <= op_binding_power {
 		parse_expr_sub(cursor, data, op_binding_power,
 			src_start_inner, tok_start_inner, right, end_tokens)?
 	} else {
@@ -472,7 +458,7 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 		TKind::Identifier(ident_id) => {
 			match cursor.peek(data, 1) {
 				TKind::OParen => parse_call(cursor, data, ident_id)?,
-				TKind::OBracket => parse_table_access(cursor, data, ident_id)?,
+				TKind::Dot | TKind::OBracket => parse_access(cursor, data, ident_id)?,
 				_ => primary_node(cursor, data, AKind::Ident(ident_id)),
 			}
 		}

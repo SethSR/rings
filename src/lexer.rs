@@ -59,6 +59,7 @@ impl Lexer {
 					"table" => token::Kind::Table,
 					"index" => token::Kind::Index,
 					"proc" => token::Kind::Proc,
+					"at" => token::Kind::At,
 					"bool" => token::Kind::Bool,
 					"true" => token::Kind::True,
 					"false" => token::Kind::False,
@@ -286,8 +287,6 @@ impl Lexer {
 
 			Some(',') => { self.advance(data); token::Kind::Comma }
 
-			Some('@') => { self.advance(data); token::Kind::At }
-
 			Some(_) => { self.advance(data); token::Kind::Eof }
 		};
 
@@ -372,7 +371,7 @@ mod can_lex {
 
 	#[test]
 	fn a_region_declaration() {
-		let data = setup("wram_high :: region[2*1024^3] @ 0x0020_0000;");
+		let data = setup("wram_high :: region[2*1024^3] at 0x0020_0000;");
 		assert_eq!(data.tok_list, [
 			Kind::Identifier("wram_high".id()),
 			Kind::ColonColon,

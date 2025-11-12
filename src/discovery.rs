@@ -317,7 +317,7 @@ mod can_parse {
 
 	#[test]
 	fn region() {
-		let data = setup("a :: region[1024] @ 0x0020_0000;");
+		let data = setup("a :: region[1024] at 0x0020_0000;");
 		assert_eq!(data.regions.len(), 1);
 		assert_eq!(data.regions[&"a".id()], Region {
 			byte_count: 1024,
@@ -387,7 +387,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_address() {
-		let data = setup("a :: record @ 32 {}");
+		let data = setup("a :: record at 32 {}");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
 			size: 0,
