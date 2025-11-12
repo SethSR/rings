@@ -60,10 +60,10 @@ impl Tac {
 				format!("JUMP  label_{label_id}")
 			}
 			Tac::JumpIf { cond, target } => {
-				format!("JIF   {} => ?{target}", cond.to_text(data))
+				format!("JIF   {} => label_{target}", cond.to_text(data))
 			}
 			Tac::JumpIfNot { cond, target } => {
-				format!("JIF  !{} => ?{target}", cond.to_text(data))
+				format!("JIF  !{} => label_{target}", cond.to_text(data))
 			}
 			Tac::Call { name, args, dst: Some(dst) } => {
 				format!("CALL  {}({}) -> {dst}", data.text(name),
@@ -352,8 +352,6 @@ impl TacSection {
 			}
 
 			ast::Kind::Access(base_id, segments) => {
-				eprintln!("ACCESS({}, {segments:?})", data.text(base_id));
-
 				let temp = Location::Temp(self.alloc_temp());
 				let mut address = if let Some(record) = data.records.get(base_id) {
 					record.address.unwrap_or_else(|| panic!("no address for record '{}'", data.text(base_id)))
@@ -479,7 +477,6 @@ impl TacSection {
 
 			// if i >= end goto end
 			let temp = self.alloc_temp();
-			println!("binop2");
 			self.emit(Tac::BinOp {
 				op: BinaryOp::CmpGE,
 				left: Location::Variable(index_var),
@@ -499,7 +496,6 @@ impl TacSection {
 
 			// i = i + 1
 			let temp2 = self.alloc_temp();
-			println!("binop3");
 			self.emit(Tac::BinOp {
 				op: BinaryOp::Add,
 				left: Location::Variable(index_var),

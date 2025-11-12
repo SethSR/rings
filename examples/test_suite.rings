@@ -300,8 +300,8 @@ test_return_expression :: proc() -> u16 {
 -- --------------------------------------------
 game_update :: proc() {
     -- Update player
-    Players[0].position.x += Players[0].velocity.x;
-    Players[0].position.y += Players[0].velocity.y;
+    Player.position.x += Player.velocity.x;
+    Player.position.y += Player.velocity.y;
 
     -- Update enemies
     for i, enemy in Enemies {
