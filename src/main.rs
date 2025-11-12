@@ -100,6 +100,8 @@ pub struct Data {
 	ast_pos_tok: ast::LocList,
 	// procedures ready to be type-checked
 	completed_procs: identifier::Map<ast::Id>,
+	/* Lowering TAC */
+	tac_sections: identifier::Map<lowering::TacSection>,
 }
 
 fn fmt_size(size: usize) -> String {
@@ -313,6 +315,30 @@ impl fmt::Display for Data {
 		for (ident_id, &proc_start) in &self.completed_procs {
 			let node_count = self.ast_nodes[proc_start..].len();
 			writeln!(f, "{:<32} | {node_count}", self.text(ident_id))?;
+		}
+		writeln!(f)?;
+
+		writeln!(f, "{:<32} | {:<16} | LOCAL-TYPE",
+			"TAC-LOCALS", "LOCAL-NAME")?;
+		writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
+		for (ident_id, section) in &self.tac_sections {
+			for (local_id, ring_type) in &section.locals {
+				writeln!(f, "{:<32} | {:<16} | {:<16}",
+					self.text(ident_id),
+					self.text(&local_id),
+					self.type_text(*ring_type),
+				)?;
+			}
+		}
+		writeln!(f)?;
+
+		writeln!(f, "{:<32} | INSTRUCTIONS",
+			"TAC-SECTIONS")?;
+		writeln!(f, "{:-<32} | {:-<16}", "", "")?;
+		for (ident_id, section) in &self.tac_sections {
+			for tac in &section.instructions {
+				writeln!(f, "{:<32} | {}", self.text(ident_id), tac.to_text(self))?;
+			}
 		}
 		writeln!(f)?;
 
