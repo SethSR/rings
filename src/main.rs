@@ -147,7 +147,7 @@ impl Data {
 		}
 	}
 
-	fn type_size(&self, ring_type: Type) -> usize {
+	fn type_size(&self, ring_type: Type) -> u32 {
 		match ring_type {
 			Type::Bool |
 			Type::U8 |
@@ -273,7 +273,7 @@ impl fmt::Display for Data {
 		for (ident_id, table) in self.tables.iter() {
 			let name = self.text(ident_id);
 			let size = table.size;
-			let row_size = size / table.row_count as usize;
+			let row_size = size / table.row_count;
 			let address = table.address
 				.map(|num| format!("#{num:0>8X}"))
 				.unwrap_or("-".to_string());

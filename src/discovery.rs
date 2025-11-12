@@ -40,7 +40,7 @@ pub struct Procedure {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
 	pub fields: Vec<Field>,
-	pub size: usize,
+	pub size: u32,
 	pub address: Option<i64>,
 }
 
@@ -48,7 +48,7 @@ pub struct Record {
 pub struct Table {
 	pub row_count: u32,
 	pub column_spec: Vec<Field>,
-	pub size: usize,
+	pub size: u32,
 	pub address: Option<i64>,
 }
 
@@ -246,14 +246,14 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, Compile
 	cursor.expect(data, token::Kind::OBrace)?;
 	let column_spec = discover_fields(cursor, data, token::Kind::CBrace)?;
 	cursor.expect(data, token::Kind::CBrace)?;
-	let col_size: usize = column_spec.iter()
+	let col_size: u32 = column_spec.iter()
 		.map(|(_, col_type)| data.type_size(*col_type))
 		.sum();
 	Ok(Table {
 		address,
 		row_count,
 		column_spec,
-		size: row_count as usize * col_size,
+		size: row_count * col_size,
 	})
 }
 
