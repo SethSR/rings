@@ -163,7 +163,7 @@ impl TacFunction {
 
 			ast::Kind::Define(var_id, type_kind, expr_id) => {
 				let ast::Kind::Ident(ident_id) = &data.ast_nodes[*var_id] else {
-					return Err(format!("cannot initialize internal variables, assign instead"));
+					return Err("cannot initialize internal variables, assign instead".to_string());
 				};
 
 				// Get initializer value
@@ -185,10 +185,13 @@ impl TacFunction {
 
 			ast::Kind::Assign(var_id, expr_id) => {
 				let Some(lvalue) = self.lower_node(&data.ast_nodes[*var_id], data)? else {
-					todo!("expected value lvalue");
+					todo!("unknown assign L-Value '{:?}'", data.ast_nodes.get(*var_id));
 				};
 
-				let Some(rvalue) = self.lower_node(&data.ast_nodes[*expr_id], data)? else {
+				let Some(expr_node) = data.ast_nodes.get(*expr_id) else {
+					todo!("no expression AST node {expr_id}");
+				};
+				let Some(rvalue) = self.lower_node(expr_node, data)? else {
 					return Ok(None);
 				};
 
@@ -331,8 +334,100 @@ impl TacFunction {
 				todo!("lower proc-call")
 			}
 
-			ast::Kind::Access(_base_id, _segments) => {
-				todo!("lower access")
+			ast::Kind::Access(base_id, segments) => {
+				eprintln!("ACCESS({}, {segments:?})", data.text(base_id));
+
+				let temp = Location::Temp(self.alloc_temp());
+				let mut address = if let Some(record) = data.records.get(base_id) {
+					record.address.unwrap_or_else(|| panic!("no address for record '{}'", data.text(base_id)))
+				} else if let Some(table) = data.tables.get(base_id) {
+					table.address.unwrap_or_else(|| panic!("no address for table '{}'", data.text(base_id)))
+				} else {
+					panic!("'{}' is not a Record or Table", data.text(base_id));
+				};
+
+				self.emit(Tac::Copy {
+					src: Location::Constant(address),
+					dst: temp.clone(),
+				});
+
+				let mut curr_ident = *base_id;
+				let mut i = 0;
+				while i < segments.len() {
+					match segments[i] {
+						ast::PathSegment::Field(field_id) => {
+							let Some(record) = data.records.get(&curr_ident) else {
+								panic!("no record '{}'", data.text(&curr_ident));
+							};
+							let Some(field_offset) = record.field_offset(data, field_id) else {
+								panic!("no field '{}' in record '{}'", data.text(&field_id), data.text(&curr_ident));
+							};
+							curr_ident = field_id;
+
+							self.emit(Tac::BinOp {
+								op: BinaryOp::Add,
+								left: temp.clone(),
+								right: Location::Constant(field_offset as i64),
+								dst: temp.clone(),
+							});
+
+							i += 1;
+						}
+
+						ast::PathSegment::Index(expr_id) => {
+							let Some(expr) = self.lower_node(&data.ast_nodes[expr_id], data)? else {
+								return Ok(None);
+							};
+
+							match segments.get(i + 1) {
+								Some(ast::PathSegment::Index(_)) => return Err("cannot double index into a table".to_string()),
+								Some(ast::PathSegment::Field(field_id)) => {
+									let table = &data.tables[&curr_ident];
+									let column_offset = table.column_offset(data, *field_id)
+										.unwrap_or_else(|| panic!("no field '{}' in table '{}'", data.text(field_id), data.text(&curr_ident)));
+									curr_ident = *field_id;
+
+									self.emit(Tac::BinOp {
+										op: BinaryOp::Add,
+										left: temp.clone(),
+										right: Location::Constant(column_offset as i64),
+										dst: temp.clone(),
+									});
+
+									// NOTE - srenshaw - We can unwrap here because we already checked for field
+									// existence to get the column-offset.
+									let field_size = table.column_spec.iter()
+										.find(|(id,_)| field_id == id)
+										.map(|(_, field_type)| data.type_size(*field_type))
+										.unwrap();
+
+									// t0 = expr * field_size
+									let t0 = self.alloc_temp();
+									self.emit(Tac::BinOp {
+										op: BinaryOp::Mul,
+										left: expr,
+										right: Location::Constant(field_size as i64),
+										dst: Location::Temp(t0),
+									});
+
+									// temp = temp + t0
+									self.emit(Tac::BinOp {
+										op: BinaryOp::Add,
+										left: temp.clone(),
+										right: Location::Temp(t0),
+										dst: temp.clone(),
+									});
+
+									i += 2;
+								}
+
+								None => return Err("no field specified for table access".to_string()),
+							}
+						}
+					};
+				}
+
+				Ok(Some(temp))
 			}
 		}
 	}

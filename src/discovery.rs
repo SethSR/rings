@@ -44,12 +44,38 @@ pub struct Record {
 	pub address: Option<i64>,
 }
 
+impl Record {
+	pub fn field_offset(&self, data: &Data, field_id: identifier::Id) -> Option<u32> {
+		self.fields.iter()
+			.find(|(id,_)| field_id == *id)
+			.map(|(_, field_type)| data.type_size(*field_type))
+	}
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Table {
 	pub row_count: u32,
 	pub column_spec: Vec<Field>,
 	pub size: u32,
 	pub address: Option<i64>,
+}
+
+impl Table {
+	#[allow(dead_code)]
+	pub fn size(&self, data: &Data) -> u32 {
+		let row_size: u32 = self.column_spec.iter()
+			.map(|(_, field_type)| data.type_size(*field_type) as u32)
+			.sum();
+		self.row_count * row_size
+	}
+
+	pub fn column_offset(&self, data: &Data, field_id: identifier::Id) -> Option<u32> {
+		self.column_spec.iter()
+			.position(|(id,_)| field_id == *id)
+			.map(|idx| self.column_spec[..idx].iter()
+				.map(|(_,field_type)| data.type_size(*field_type) * self.row_count)
+				.sum())
+	}
 }
 
 pub fn eval(data: &mut Data) {
