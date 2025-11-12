@@ -22,8 +22,8 @@ TILE_SIZE     ::  16;
 -- REGIONS (Memory layout)
 -- --------------------------------------------
 
-wram_low :: region[1024] @ 0x0020_0000;
-wram_high :: region[4096] @ 0x0020_0000;
+wram_low :: region[1024] at 0x0020_0000;
+wram_high :: region[4096] at 0x0020_0000;
 
 -- --------------------------------------------
 -- RECORDS (Struct-like types)
@@ -34,7 +34,7 @@ Vec2 :: record {
     y: s16,
 }
 
-Player :: record @ wram_low {
+Player :: record at wram_low {
     position: Vec2,
     velocity: Vec2,
     health: u16,
@@ -45,7 +45,7 @@ Player :: record @ wram_low {
 -- TABLES (Static allocation)
 -- --------------------------------------------
 
-Enemies :: table[20] @ wram_high {
+Enemies :: table[20] at wram_high {
     position: Vec2,
     velocity: Vec2,
     health: u8,
@@ -53,7 +53,7 @@ Enemies :: table[20] @ wram_high {
     enemy_type: u8,
 }
 
-Bullets :: table[100] @ wram_high {
+Bullets :: table[100] at wram_high {
     position: Vec2,
     velocity: Vec2,
     damage: u8,

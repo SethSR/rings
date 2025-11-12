@@ -4,7 +4,7 @@ Vec2 :: record {
     y: s16,
 }
 
-Players :: table[4] @ 0x0020_0000 {
+Players :: table[4] at 0x0020_0000 {
 		position: Vec2,
 		velocity: Vec2,
 }
