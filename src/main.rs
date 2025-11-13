@@ -88,6 +88,7 @@ pub struct Data {
 	tok_pos: token::PosList,
 	identifiers: identifier::Map<Range<SrcPos>>,
 	/* Discovery */
+	parse_queue: VecDeque<discovery::Task>,
 	procedures: discovery::ProcMap,
 	values: discovery::ValueMap,
 	regions: discovery::RegionMap,
@@ -300,8 +301,8 @@ impl fmt::Display for Data {
 		writeln!(f, "{:-<32} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "")?;
 		for task in &self.proc_queue {
 			writeln!(f, "{:<32} | {:<11} | {:<10} | {}",
-				self.text(&task.proc_name),
-				task.start_token.index(),
+				task.name(self),
+				task.tok_start.index(),
 				task.prev_furthest_token.index(),
 				task.prev_ready_proc_count,
 			)?;

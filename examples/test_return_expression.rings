@@ -1,4 +1,4 @@
 
-test_return_expression :: proc() -> u16 {
+proc test_return_expression() -> u16 {
     return 100 + 200;
 }

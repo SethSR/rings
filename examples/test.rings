@@ -1,28 +1,28 @@
 
 -- 1MB = 1_048_576
-wram_low  :: region[1_048_576] at 0x0600_0000;
-wram_high :: region[1_048_576] at 0x0600_4000;
+region wram_low [1_048_576] @ 0x0600_0000;
+region wram_high[1_048_576] @ 0x0600_4000;
 
-vec2 :: record {
+record vec2 {
 	x: s32,
 	y: s32,
 }
 
-positions :: table[200] {
+table positions[200] {
 	pos: vec2,
 }
 
-enemies :: table[50] {
+table enemies[50] {
 	pos_idx: u8, -- positions index
 	hp: u8,
 }
 
-players_alive :: table[4] {
+table players_alive[4] {
 	pos_idx: u8, -- positions index
 	hp: u8,
 }
 
-players_dead :: table[4] {
+table players_dead[4] {
 	pos_idx: u8, -- positions index
 }
 

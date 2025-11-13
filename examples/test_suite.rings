@@ -1,8 +1,6 @@
 -- ============================================
--- RINGS LANGUAGE - PHASE 1 TEST SUITE
+-- RINGS LANGUAGE TEST SUITE
 -- ============================================
--- This file tests all baseline features expected
--- in the first working version of the compiler.
 
 -- --------------------------------------------
 -- VALUES (Constants)
@@ -22,19 +20,19 @@ TILE_SIZE     ::  16;
 -- REGIONS (Memory layout)
 -- --------------------------------------------
 
-wram_low :: region[1024] at 0x0020_0000;
-wram_high :: region[4096] at 0x0020_0000;
+region wram_low [1024] @ 0x0020_0000;
+region wram_high[4096] @ 0x0020_0000;
 
 -- --------------------------------------------
 -- RECORDS (Struct-like types)
 -- --------------------------------------------
 
-Vec2 :: record {
+record Vec2 {
     x: s16,
     y: s16,
 }
 
-Player :: record at wram_low {
+record Player @ wram_low {
     position: Vec2,
     velocity: Vec2,
     health: u16,
@@ -45,7 +43,7 @@ Player :: record at wram_low {
 -- TABLES (Static allocation)
 -- --------------------------------------------
 
-Enemies :: table[20] at wram_high {
+table Enemies[20] @ wram_high {
     position: Vec2,
     velocity: Vec2,
     health: u8,
@@ -53,7 +51,7 @@ Enemies :: table[20] at wram_high {
     enemy_type: u8,
 }
 
-Bullets :: table[100] at wram_high {
+table Bullets[100] @ wram_high {
     position: Vec2,
     velocity: Vec2,
     damage: u8,
@@ -65,14 +63,14 @@ Bullets :: table[100] at wram_high {
 -- --------------------------------------------
 
 -- Test: Simple arithmetic
-test_arithmetic :: proc() {
+proc test_arithmetic() {
     x: u8 = 10;
     y: u8 = 20;
     z: u8 = x + y;
 }
 
 -- Test: All integer types
-test_types :: proc() {
+proc test_types() {
     a: u8 = 255;
     b: u16 = 65000;
     c: u32 = 1000000;
@@ -82,14 +80,14 @@ test_types :: proc() {
 }
 
 -- Test: Boolean operations
-test_booleans :: proc() {
+proc test_booleans() {
     flag1: bool = true;
     flag2: bool = false;
     result: bool = flag1 && flag2;
 }
 
 -- Test: Variable assignment
-test_assignment :: proc() {
+proc test_assignment() {
     x: u8 = 10;
     x = 20;
     x += 5;
@@ -98,7 +96,7 @@ test_assignment :: proc() {
 -- --------------------------------------------
 -- CONTROL FLOW - If statements
 -- --------------------------------------------
-test_if_basic :: proc() {
+proc test_if_basic() {
     x: u8 = 10;
 
     if x > 5 {
@@ -106,7 +104,7 @@ test_if_basic :: proc() {
     }
 }
 
-test_if_else :: proc() {
+proc test_if_else() {
     x: u8 = 10;
     result: u8 = 0;
 
@@ -117,7 +115,7 @@ test_if_else :: proc() {
     }
 }
 
-test_nested_if :: proc() {
+proc test_nested_if() {
     x: u8 = 10;
     y: u8 = 20;
 
@@ -131,7 +129,7 @@ test_nested_if :: proc() {
 -- --------------------------------------------
 -- CONTROL FLOW - While loops
 -- --------------------------------------------
-test_while_basic :: proc() {
+proc test_while_basic() {
     count: u8 = 0;
 
     while count < 10 {
@@ -139,7 +137,7 @@ test_while_basic :: proc() {
     }
 }
 
-test_while_with_condition :: proc() {
+proc test_while_with_condition() {
     x: u8 = 100;
 
     while x > 0 {
@@ -150,7 +148,7 @@ test_while_with_condition :: proc() {
 -- --------------------------------------------
 -- CONTROL FLOW - For loops (ranges)
 -- --------------------------------------------
-test_for_range :: proc() {
+proc test_for_range() {
     sum: u16 = 0;
 
     for i in [0..10] {
@@ -158,7 +156,7 @@ test_for_range :: proc() {
     }
 }
 
-test_for_range_bounds :: proc() {
+proc test_for_range_bounds() {
     -- Test different bound types
     for i in [0..100] {
         x: u8 = i;
@@ -172,7 +170,7 @@ test_for_range_bounds :: proc() {
 -- --------------------------------------------
 -- TABLE ACCESS - Basic indexing
 -- --------------------------------------------
-test_table_access :: proc() {
+proc test_table_access() {
     -- Direct index
     Enemies[0].health = 100;
     Enemies[0].active = true;
@@ -182,12 +180,12 @@ test_table_access :: proc() {
     Enemies[idx].health = 50;
 }
 
-test_table_read :: proc() {
+proc test_table_read() {
     health: u8 = Enemies[0].health;
     x: s16 = Enemies[0].position.x;
 }
 
-test_table_modify :: proc() {
+proc test_table_modify() {
     Enemies[0].health -= 10;
     Enemies[0].position.x += 1;
 }
@@ -195,21 +193,21 @@ test_table_modify :: proc() {
 -- --------------------------------------------
 -- FOR LOOPS - Table iteration
 -- --------------------------------------------
-test_for_table_simple :: proc() {
+proc test_for_table_simple() {
     -- Iterate all enemies
     for enemy in Enemies {
         enemy.health = 100;
     }
 }
 
-test_for_table_with_index :: proc() {
+proc test_for_table_with_index() {
     -- Iterate with index
     for i, enemy in Enemies {
         enemy.health = i;
     }
 }
 
-test_for_table_range :: proc() {
+proc test_for_table_range() {
     -- Iterate subset
     for enemy in Enemies[0..10] {
         enemy.active = true;
@@ -223,7 +221,7 @@ test_for_table_range :: proc() {
 -- --------------------------------------------
 -- NESTED LOOPS
 -- --------------------------------------------
-test_nested_loops :: proc() {
+proc test_nested_loops() {
     for bullet in Bullets {
         for enemy in Enemies {
             -- Collision check would go here
@@ -236,7 +234,7 @@ test_nested_loops :: proc() {
 -- --------------------------------------------
 -- COMPLEX EXPRESSIONS
 -- --------------------------------------------
-test_complex_expressions :: proc() {
+proc test_complex_expressions() {
     a: u16 = 10;
     b: u16 = 20;
     c: u16 = 30;
@@ -254,7 +252,7 @@ test_complex_expressions :: proc() {
 -- --------------------------------------------
 -- COMPARISON OPERATORS
 -- --------------------------------------------
-test_comparisons :: proc() {
+proc test_comparisons() {
     x: u8 = 10;
     y: u8 = 20;
 
@@ -269,7 +267,7 @@ test_comparisons :: proc() {
 -- --------------------------------------------
 -- LOGICAL OPERATORS
 -- --------------------------------------------
-test_logical_ops :: proc() {
+proc test_logical_ops() {
     a: bool = true;
     b: bool = false;
 
@@ -281,24 +279,24 @@ test_logical_ops :: proc() {
 -- --------------------------------------------
 -- RETURN STATEMENTS
 -- --------------------------------------------
-test_return_void :: proc() {
+proc test_return_void() {
     x: u8 = 10;
     return;
 }
 
-test_return_value :: proc() -> u8 {
+proc test_return_value() -> u8 {
     x: u8 = 42;
     return x;
 }
 
-test_return_expression :: proc() -> u16 {
+proc test_return_expression() -> u16 {
     return 100 + 200;
 }
 
 -- --------------------------------------------
 -- COMPREHENSIVE TEST - Game Update Loop
 -- --------------------------------------------
-game_update :: proc() {
+proc game_update() {
     -- Update player
     Player.position.x += Player.velocity.x;
     Player.position.y += Player.velocity.y;
@@ -365,16 +363,16 @@ game_update :: proc() {
 -- --------------------------------------------
 
 -- Empty procedure
-test_empty :: proc() {
+proc test_empty() {
 }
 
 -- Single statement
-test_single_statement :: proc() {
+proc test_single_statement() {
     x: u8 = 1;
 }
 
 -- Deeply nested blocks
-test_deep_nesting :: proc() {
+proc test_deep_nesting() {
     if true {
         if true {
             if true {
@@ -385,7 +383,7 @@ test_deep_nesting :: proc() {
 }
 
 -- Many local variables
-test_many_locals :: proc() {
+proc test_many_locals() {
     v1: u8 = 1;
     v2: u8 = 2;
     v3: u8 = 3;
@@ -399,7 +397,7 @@ test_many_locals :: proc() {
 -- --------------------------------------------
 -- BOUNDARY VALUES
 -- --------------------------------------------
-test_boundary_values :: proc() {
+proc test_boundary_values() {
     -- u8 boundaries
     min_u8: u8 = 0;
     max_u8: u8 = 255;

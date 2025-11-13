@@ -26,6 +26,10 @@ pub enum Kind {
 	// FixedF(u8),
 	// FixedD(u8),
 
+	Main,
+	Sub,
+
+	Value,
 	Region,
 	Record,
 	Table,
@@ -82,6 +86,7 @@ impl Kind {
 			Self::Record |
 			Self::Region |
 			Self::Return => 6,
+			Self::Value |
 			Self::Arrow |
 			Self::False |
 			Self::Index |
@@ -90,9 +95,11 @@ impl Kind {
 			Self::While => 5,
 			Self::Bool |
 			Self::Else |
+			Self::Main |
 			Self::Proc |
 			Self::True => 4,
 			Self::For |
+			Self::Sub |
 			Self::S16 | Self::S32 |
 			Self::U16 | Self::U32 => 3,
 			Self::AmpAmp |

@@ -543,7 +543,6 @@ impl TacSection {
 #[cfg(test)]
 mod tests {
 	use crate::{lexer, parser, type_checker};
-	use crate::identifier::Identifier;
 	use crate::Data;
 
 	#[test]

@@ -11,27 +11,69 @@ use crate::{ BinaryOp, Data, Bounds, UnaryOp };
 type ParseResult = Result<AstId, CompilerError>;
 
 #[derive(Debug)]
+pub enum TaskKind {
+	Main,
+	Sub,
+	// procedure name
+	Proc(IdentId),
+}
+
 pub struct Task {
-	pub proc_name: IdentId,
-	pub start_token: TokenId,
+	pub kind: TaskKind,
+	pub tok_start: TokenId,
 	pub prev_furthest_token: TokenId,
 	pub prev_ready_proc_count: usize,
 }
 
+impl Task {
+	pub fn name<'a>(&self, data: &'a Data) -> &'a str {
+		match self.kind {
+			TaskKind::Main => "main",
+			TaskKind::Sub => "sub",
+			TaskKind::Proc(proc_name) => data.text(&proc_name),
+		}
+	}
+
+	fn name_id(&self) -> IdentId {
+		use crate::identifier::Identifier;
+
+		match self.kind {
+			TaskKind::Main => "main".id(),
+			TaskKind::Sub => "sub".id(),
+			TaskKind::Proc(proc_name) => proc_name,
+		}
+	}
+}
+
 pub fn eval(data: &mut Data) {
-	data.proc_queue = data.procedures.iter()
+	data.proc_queue.extend(data.procedures.iter()
 		.map(|(&proc_name, proc)| Task {
-			proc_name,
-			start_token: proc.tok_start,
+			kind: TaskKind::Proc(proc_name),
+			tok_start: proc.tok_start,
 			prev_furthest_token: TokenId::default(),
 			prev_ready_proc_count: 0,
+		}));
+	data.proc_queue.extend(data.parse_queue.iter()
+		.map(|task| match task {
+			crate::discovery::Task::MainProc { tok_start } => Task {
+				kind: TaskKind::Main,
+				tok_start: *tok_start,
+				prev_furthest_token: TokenId::default(),
+				prev_ready_proc_count: 0,
+			},
+			crate::discovery::Task::SubProc { tok_start } => Task {
+				kind: TaskKind::Sub,
+				tok_start: *tok_start,
+				prev_furthest_token: TokenId::default(),
+				prev_ready_proc_count: 0,
+			},
 		})
-		.collect::<std::collections::VecDeque<_>>();
+	);
 
 	while let Some(mut task) = data.proc_queue.pop_front() {
 		let err_len = data.errors.len();
 
-		match parse(data, &mut task) {
+		match parse(data, task.tok_start) {
 			Err(token_id) => {
 				// We didn't finish. Check if we made progress.
 				if token_id > task.prev_furthest_token {
@@ -56,14 +98,15 @@ pub fn eval(data: &mut Data) {
 
 			Ok(proc_start) => {
 				// We finished. Add us to the 'done' list, so dependent procedures can progress.
-				data.completed_procs.insert(task.proc_name, proc_start);
+				data.completed_procs.insert(task.name_id(), proc_start);
+				//data.variable_tables.insert(task.proc_name, var_table);
 			}
 		}
 	}
 }
 
-fn parse(data: &mut Data, task: &mut Task) -> Result<AstId, TokenId> {
-	let mut cursor = Cursor::new(task.start_token);
+fn parse(data: &mut Data, start_token: TokenId) -> Result<AstId, TokenId> {
+	let mut cursor = Cursor::new(start_token);
 	let cursor = &mut cursor;
 	let start = AstId::new(data.ast_nodes.len());
 
@@ -522,7 +565,6 @@ mod can_parse_proc {
 	#[test]
 	fn main() {
 		let db = setup("main{}");
-		assert!(db.completed_procs.contains_key(&"main".id()));
 		assert_eq!(db.ast_nodes, [
 			ast::Kind::Return(None),
 			ast::Kind::Block(ast::Block(vec![0.into()])),
@@ -531,7 +573,7 @@ mod can_parse_proc {
 
 	#[test]
 	fn with_no_params() {
-		let db = setup("main{} a :: proc() {}");
+		let db = setup("main{} proc a() {}");
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
@@ -549,38 +591,38 @@ mod can_parse_proc {
 
 	#[test]
 	fn with_return() {
-		let db = setup("main{} a :: proc() -> u16 {}");
+		let db = setup("main{} proc a() -> u16 {}");
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_single_param() {
-		let db = setup("main{} a :: proc(b:s8) {}");
+		let db = setup("main{} proc a(b:s8) {}");
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_multi_params() {
-		let db = setup("main{} a :: proc(b:s8,c:u32) {}");
+		let db = setup("main{} proc a(b:s8,c:u32) {}");
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_record_param() {
-		let db = setup("main{} a :: record{} b :: proc(c:a){}");
+		let db = setup("main{} record a {} proc b(c:a) {}");
 		assert!(db.completed_procs.contains_key(&"b".id()));
 	}
 
 	// TODO - srenshaw - Check this once we have out-of-order type resolution.
 	// #[test]
 	// fn with_out_of_order_record_param() {
-	// 	let db = setup("main{} b :: proc(c:a){} a :: record{}");
+	// 	let db = setup("main{} proc b(c:a) {} record a {}");
 	// 	assert!(db.completed_procs.contains_key(&"b".id()));
 	// }
 
 	#[test]
 	fn with_table_param() {
-		let db = setup("main{} a :: table[0]{} b :: proc(c:a){}");
+		let db = setup("main{} table a[0] {} proc b(c:a) {}");
 		assert!(db.completed_procs.contains_key(&"b".id()));
 	}
 
@@ -628,13 +670,13 @@ mod can_parse_proc {
 
 	#[test]
 	fn with_internal_table_index() {
-		let db = setup("main { return a[10]; }");
+		let db = setup("main { return a[10].b; }");
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_table_expression_indexing() {
-		let db = setup("main { return a[2 + 4]; }");
+		let db = setup("main { return a[2 + 4].b; }");
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
