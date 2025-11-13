@@ -20,10 +20,6 @@ impl Cursor {
 		self.0 += 1;
 	}
 
-	pub fn location(&self, data: &Data) -> usize {
-		data.tok_pos[self.0]
-	}
-
 	pub fn peek(&self, data: &Data, offset: usize) -> token::Kind {
 		data.tok_list
 			.get(self.0 + offset)

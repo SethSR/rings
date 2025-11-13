@@ -353,7 +353,7 @@ impl TacSection {
 
 			ast::Kind::Access(base_id, segments) => {
 				let temp = Location::Temp(self.alloc_temp());
-				let mut address = if let Some(record) = data.records.get(base_id) {
+				let address = if let Some(record) = data.records.get(base_id) {
 					record.address.unwrap_or_else(|| panic!("no address for record '{}'", data.text(base_id)))
 				} else if let Some(table) = data.tables.get(base_id) {
 					table.address.unwrap_or_else(|| panic!("no address for table '{}'", data.text(base_id)))

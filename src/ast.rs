@@ -6,7 +6,7 @@ use index_vec::IndexVec;
 
 use crate::identifier::Id as IdentId;
 use crate::token;
-use crate::{BinaryOp, Bounds, SrcPos, UnaryOp};
+use crate::{BinaryOp, Bounds, UnaryOp};
 
 define_index_type! {
 	pub struct Id = usize;
@@ -43,7 +43,6 @@ pub enum Kind {
 }
 
 pub type KindList = IndexVec<Id, Kind>;
-pub type PosList = IndexVec<Id, Range<SrcPos>>;
 pub type LocList = IndexVec<Id, Range<token::Id>>;
 
 #[derive(Debug, Default)]

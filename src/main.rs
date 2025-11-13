@@ -96,7 +96,6 @@ pub struct Data {
 	/* Parsing */
 	proc_queue: VecDeque<parser::Task>,
 	ast_nodes: ast::KindList,
-	ast_pos_src: ast::PosList,
 	ast_pos_tok: ast::LocList,
 	// procedures ready to be type-checked
 	completed_procs: identifier::Map<ast::Id>,
