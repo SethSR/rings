@@ -436,7 +436,7 @@ impl Bounds {
 		}
 	}
 
-	fn get_end(&self, table_size: usize) -> i64 {
+	fn get_end(&self, table_size: u32) -> i64 {
 		match self {
 			Self::Full { end, ..} => *end,
 			Self::From {..} => table_size as i64,

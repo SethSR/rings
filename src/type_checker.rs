@@ -120,11 +120,7 @@ impl Checker {
 				let table = &data.tables[table_id];
 				debug_assert!(vars.len() <= table.column_spec.len());
 
-				let (start, end) = match range {
-					crate::Bounds::Full { start, end } => (*start, *end),
-					crate::Bounds::From { start } => (*start, table.row_count as i64),
-					crate::Bounds::To { end } => (0, *end),
-				};
+				let (start, end) = (range.get_start(), range.get_end(table.row_count));
 
 				debug_assert!(start >= 0, "'start' value in bounds should never be negative");
 				if start >= (table.row_count as i64) {
