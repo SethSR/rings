@@ -352,9 +352,9 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 		// Table loop
 		let range = if TKind::OBracket == cursor.current(data) {
 			cursor.advance();
-			let range_start = cursor.expect_integer(data, "COMPILER ERROR").ok();
+			let range_start = cursor.expect_u32(data, "COMPILER ERROR").ok();
 			cursor.expect(data, TKind::DotDot)?;
-			let range_end = cursor.expect_integer(data, "COMPILER ERROR").ok();
+			let range_end = cursor.expect_u32(data, "COMPILER ERROR").ok();
 			cursor.expect(data, TKind::CBracket)?;
 			match (range_start, range_end) {
 				(Some(start), Some(end)) => Some(Bounds::Full { start, end }),
@@ -368,9 +368,9 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 		(Some(table_id), range)
 	} else if TKind::OBracket == cursor.current(data) {
 		cursor.advance();
-		let start = cursor.expect_integer(data, "start (inclusive) value")?;
+		let start = cursor.expect_u32(data, "start (inclusive) value")?;
 		cursor.expect(data, TKind::DotDot)?;
-		let end = cursor.expect_integer(data, "end (exclusive) value")?;
+		let end = cursor.expect_u32(data, "end (exclusive) value")?;
 		cursor.expect(data, TKind::CBracket)?;
 		(None, Some(Bounds::Full { start, end }))
 	} else {

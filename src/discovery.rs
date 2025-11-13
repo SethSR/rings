@@ -1,6 +1,4 @@
 
-use std::ops::Range;
-
 use crate::cursor::Cursor;
 use crate::error::{self, CompilerError};
 use crate::identifier;
@@ -41,7 +39,7 @@ pub struct Procedure {
 pub struct Record {
 	pub fields: Vec<Param>,
 	pub size: u32,
-	pub address: Option<i64>,
+	pub address: Option<u32>,
 }
 
 impl Record {
@@ -57,14 +55,14 @@ pub struct Table {
 	pub row_count: u32,
 	pub column_spec: Vec<Param>,
 	pub size: u32,
-	pub address: Option<i64>,
+	pub address: Option<u32>,
 }
 
 impl Table {
 	#[allow(dead_code)]
 	pub fn size(&self, data: &Data) -> u32 {
 		let row_size: u32 = self.column_spec.iter()
-			.map(|(_, field_type)| data.type_size(*field_type) as u32)
+			.map(|(_, field_type)| data.type_size(*field_type))
 			.sum();
 		self.row_count * row_size
 	}
@@ -173,14 +171,6 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 	Ok(())
 }
 
-fn check_integer_as_u32(expected: &str, found: i64, span: Range<usize>) -> Result<u32, CompilerError> {
-	if !(0..u32::MAX as i64).contains(&found) {
-		Err(crate::error::expected(span, expected, &found.to_string()))
-	} else {
-		Ok(found as u32)
-	}
-}
-
 fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	cursor.expect(data, token::Kind::OBrace)?;
 	let mut brace_count = 1;
@@ -235,30 +225,22 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	Ok(fields)
 }
 
-fn expect_u32(cursor: &mut Cursor, data: &Data, expected: &str) -> Result<u32, CompilerError> {
-	cursor.expect_integer(data, expected)
-		.and_then(|num| {
-			check_integer_as_u32(&format!("valid {expected}"), num,
-				(cursor.index() - 1).into()..cursor.index().into())
-		})
-}
-
 fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<Region, CompilerError> {
 	cursor.expect(data, token::Kind::OBracket)?;
-	let byte_count = expect_u32(cursor, data, "region size")?;
+	let byte_count = cursor.expect_u32(data, "region size")?;
 	cursor.expect(data, token::Kind::CBracket)?;
 	cursor.expect(data, token::Kind::At)?;
-	let address = expect_u32(cursor, data, "region address")?;
+	let address = cursor.expect_u32(data, "region address")?;
 	cursor.expect(data, token::Kind::Semicolon)?;
 	Ok(Region { byte_count, address })
 }
 
-fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<i64>, CompilerError> {
+fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<u32>, CompilerError> {
 	if cursor.expect(data, token::Kind::At).is_ok() {
-		if let Ok(num) = cursor.expect_integer(data, "record address") {
+		if let Ok(num) = cursor.expect_u32(data, "record address") {
 			for (id, region) in &data.regions {
-				let addr_start = region.address as i64;
-				let addr_end = addr_start + region.byte_count as i64;
+				let addr_start = region.address;
+				let addr_end = addr_start + region.byte_count;
 				if (addr_start..addr_end).contains(&num) {
 					return Err(error::error(data,
 						&format!("Address '{num}' overlaps with region {}", data.text(id)),
@@ -267,7 +249,7 @@ fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<i64>,
 			}
 			Ok(Some(num))
 		} else if let Ok(id) = cursor.expect_identifier(data, "region name") {
-			Ok(Some(data.regions[&id].address as i64))
+			Ok(Some(data.regions[&id].address))
 		} else {
 			Err(error::error(data, "address or region ID", cursor.index()))
 		}
@@ -289,7 +271,7 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, Compi
 
 fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, CompilerError> {
 	cursor.expect(data, token::Kind::OBracket)?;
-	let row_count = expect_u32(cursor, data, "table size")?;
+	let row_count = cursor.expect_u32(data, "table size")?;
 	cursor.expect(data, token::Kind::CBracket)?;
 	let address = discover_address(cursor, data)?;
 	cursor.expect(data, token::Kind::OBrace)?;

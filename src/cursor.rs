@@ -1,4 +1,4 @@
-
+use std::ops::Range;
 use crate::error::{self, CompilerError};
 use crate::identifier;
 use crate::token;
@@ -62,6 +62,14 @@ impl Cursor {
 		}
 	}
 
+	pub fn expect_u32(&mut self, data: &Data, expected: &str) -> Result<u32, CompilerError> {
+		self.expect_integer(data, expected)
+			.and_then(|num| {
+				check_integer_as_u32(&format!("valid {expected}"), num,
+					(self.index() - 1).into()..self.index().into())
+			})
+	}
+
 	pub fn expect_type(&mut self, data: &Data) -> Result<crate::Type, CompilerError> {
 		let result = match self.current(data) {
 			token::Kind::Identifier(ident_id) => {
@@ -84,6 +92,14 @@ impl Cursor {
 		};
 		self.advance();
 		result
+	}
+}
+
+fn check_integer_as_u32(expected: &str, found: i64, span: Range<usize>) -> Result<u32, CompilerError> {
+	if !(0..u32::MAX as i64).contains(&found) {
+		Err(error::expected(span, expected, &found.to_string()))
+	} else {
+		Ok(found as u32)
 	}
 }
 

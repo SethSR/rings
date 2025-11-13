@@ -423,13 +423,13 @@ impl fmt::Display for UnaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bounds {
-	Full { start: i64, end: i64 },
-	From { start: i64 },
-	To { end: i64 },
+	Full { start: u32, end: u32 },
+	From { start: u32 },
+	To { end: u32 },
 }
 
 impl Bounds {
-	fn get_start(&self) -> i64 {
+	fn get_start(&self) -> u32 {
 		match self {
 			Self::Full { start, ..} => *start,
 			Self::From { start } => *start,
@@ -437,10 +437,10 @@ impl Bounds {
 		}
 	}
 
-	fn get_end(&self, table_size: u32) -> i64 {
+	fn get_end(&self, table_size: u32) -> u32 {
 		match self {
 			Self::Full { end, ..} => *end,
-			Self::From {..} => table_size as i64,
+			Self::From {..} => table_size,
 			Self::To { end } => *end,
 		}
 	}

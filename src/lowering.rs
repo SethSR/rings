@@ -90,7 +90,7 @@ impl Tac {
 pub enum Location {
 	Temp(TempId),      // Temporary variable
 	Variable(IdentId), // Named variable
-	Constant(i64),     // Immediate constant
+	Constant(u32),     // Immediate constant
 }
 
 impl Location {
@@ -167,7 +167,8 @@ impl TacSection {
 	fn lower_node(&mut self, kind: &ast::Kind, data: &Data) -> Result<Option<Location>, String> {
 		match kind {
 			ast::Kind::Int(value) => {
-				Ok(Some(Location::Constant(*value)))
+				// TODO - srenshaw - Ensure value is within u32
+				Ok(Some(Location::Constant(*value as u32)))
 			}
 
 			ast::Kind::Dec(_value) => {
@@ -389,7 +390,7 @@ impl TacSection {
 							self.emit(Tac::BinOp {
 								op: BinaryOp::Add,
 								left: temp.clone(),
-								right: Location::Constant(field_offset as i64),
+								right: Location::Constant(field_offset),
 								dst: temp.clone(),
 							});
 
@@ -416,7 +417,7 @@ impl TacSection {
 							self.emit(Tac::BinOp {
 								op: BinaryOp::Add,
 								left: temp.clone(),
-								right: Location::Constant(column_offset as i64),
+								right: Location::Constant(column_offset),
 								dst: temp.clone(),
 							});
 
@@ -432,7 +433,7 @@ impl TacSection {
 							self.emit(Tac::BinOp {
 								op: BinaryOp::Mul,
 								left: expr,
-								right: Location::Constant(field_size as i64),
+								right: Location::Constant(field_size),
 								dst: Location::Temp(t0),
 							});
 

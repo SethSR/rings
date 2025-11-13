@@ -112,46 +112,23 @@ impl Checker {
 				self.check_block(data, block, ret_type)
 			}
 
-			Kind::For(vars, Some(table_id), Some(range), block) => {
-				println!("  For({} in {}[{}] -> {} nodes)",
-					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
-					data.text(table_id), range, block.0.len());
+			Kind::For(vars, Some(table_id), range, block) => {
+				println!("  For({} in {}{} -> {} nodes)",
+					vars.iter()
+						.map(|var| data.text(var))
+						.collect::<Vec<_>>()
+						.join(","),
+					data.text(table_id),
+					range.map(|r| format!("[{r}]")).unwrap_or(String::new()),
+					block.0.len());
 
 				let table = &data.tables[table_id];
 				debug_assert!(vars.len() <= table.column_spec.len());
 
-				let (start, end) = (range.get_start(), range.get_end(table.row_count));
-
-				debug_assert!(start >= 0, "'start' value in bounds should never be negative");
-				if start >= (table.row_count as i64) {
-					return Some("'start' value in bounds must be less than table row-count".to_string());
-				}
-				if end > (table.row_count as i64) {
-					return Some("'end' value in bounds must be less than or equal to table row-count".to_string());
-				}
-				if start > end {
-					return Some("start value must be less than or equal to end value".to_string());
-				}
-
-				for var in vars {
-					// TODO - srenshaw - Need to check for duplicate names
-
-					if !table.column_spec.iter().any(|(a,_)| var == a) {
-						return Some(format!("field '{}' not found in table '{}'", data.text(var), data.text(table_id)));
-					}
-				}
-				self.check_block(data, block, ret_type)
-			}
-
-			Kind::For(vars, Some(table_id), None, block) => {
-				println!("  For({} in {} -> {} nodes)",
-					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
-					data.text(table_id), block.0.len());
-
-				let table = &data.tables[table_id];
-				debug_assert!(vars.len() <= table.column_spec.len());
-
-				let (start, end) = (0, table.row_count);
+				let (start, end) = match range {
+					Some(range) => (range.get_start(), range.get_end(table.row_count)),
+					None => (0, table.row_count),
+				};
 
 				if start >= table.row_count {
 					return Some("'start' value in bounds must be less than table row-count".to_string());
@@ -163,8 +140,11 @@ impl Checker {
 					return Some("start value must be less than or equal to end value".to_string());
 				}
 
-				for var in vars {
-					// TODO - srenshaw - Need to check for duplicate names
+				for i in 0..vars.len() {
+					let var = &vars[i];
+					if vars[i+1..].contains(var) {
+						return Some(format!("duplicate field name '{}' in table", data.text(var)));
+					}
 
 					if !table.column_spec.iter().any(|(a,_)| var == a) {
 						return Some(format!("field '{}' not found in table '{}'", data.text(var), data.text(table_id)));
