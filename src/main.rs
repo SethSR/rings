@@ -325,7 +325,7 @@ impl fmt::Display for Data {
 			for (local_id, ring_type) in &section.locals {
 				writeln!(f, "{:<32} | {:<16} | {:<16}",
 					self.text(ident_id),
-					self.text(&local_id),
+					self.text(local_id),
 					self.type_text(*ring_type),
 				)?;
 			}

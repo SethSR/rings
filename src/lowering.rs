@@ -77,7 +77,7 @@ impl Tac {
 				format!("RET   {}", address.to_text(data))
 			}
 			Tac::Return(None) => {
-				format!("RET")
+				"RET".to_string()
 			}
 			Tac::Comment(msg) => {
 				format!("; {msg}")
