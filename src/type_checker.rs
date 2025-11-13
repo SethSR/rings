@@ -24,8 +24,8 @@ struct Checker {
 
 pub fn eval(data: &mut Data) {
 	for (proc_id, &proc_start) in &data.completed_procs {
-		let proc_name = data.text(proc_id);
-		println!("{proc_name} AST:");
+		//let proc_name = data.text(proc_id);
+		//println!("{proc_name} AST:");
 		let proc_type = &data.procedures[proc_id];
 
 		let mut checker = Checker::default();
@@ -52,75 +52,75 @@ impl Checker {
 	) -> Option<String> {
 		match node {
 			Kind::Int(num) => {
-				println!("  Int({num})");
+				//println!("  Int({num})");
 				self.ast_to_type.insert(ast_id, Type::Top);
 				None
 			}
 
 			Kind::Dec(num) => {
-				println!("  Dec({num})");
+				//println!("  Dec({num})");
 				self.ast_to_type.insert(ast_id, Type::Top);
 				None
 			}
 
 			Kind::Ident(ident_id) => {
-				println!("  Ident({})", data.text(ident_id));
+				//println!("  Ident({})", data.text(ident_id));
 				self.check_ident(ident_id, ast_id);
 				None
 			}
 
 			Kind::Define(lvalue_id, var_type, expr_id) => {
-				println!("  Define({} : {var_type:?} = {})", lvalue_id.index(), ast_id.index());
+				//println!("  Define({} : {var_type:?} = {})", lvalue_id.index(), ast_id.index());
 				self.check_define(data, *lvalue_id, *expr_id, *var_type)
 			}
 
 			Kind::Assign(lvalue_id, expr_id) => {
-				println!("  Assign({} = {})", lvalue_id.index(), ast_id.index());
+				//println!("  Assign({} = {})", lvalue_id.index(), ast_id.index());
 				self.check_assign(data, *lvalue_id, *expr_id)
 			}
 
 			Kind::BinOp(op, left, right) => {
-				println!("  BinOp({} {op} {})", left.index(), right.index());
+				//println!("  BinOp({} {op} {})", left.index(), right.index());
 				self.check_binop(data, ast_id, *op, left, right, ret_type)
 			}
 
 			Kind::UnOp(op, right) => {
-				println!("  UnOp({op}{})", right.index());
+				//println!("  UnOp({op}{})", right.index());
 				self.check_unop(data, ast_id, *op, right)
 			}
 
 			Kind::Return(expr_id) => {
-				println!("  Return({})", expr_id
-					.map(|id| id.index().to_string())
-					.unwrap_or("-".to_string()));
+				//println!("  Return({})", expr_id
+				//	.map(|id| id.index().to_string())
+				//	.unwrap_or("-".to_string()));
 				self.check_return(*expr_id, ret_type)
 			}
 
 			Kind::Block(block) => {
-				println!("  Block({} nodes)", block.0.len());
+				//println!("  Block({} nodes)", block.0.len());
 				self.check_block(data, block, ret_type)
 			}
 
 			Kind::If(cond_id, then_block, else_block) => {
-				println!("  If({} -> {} nodes <> {} nodes)", cond_id.index(), then_block.0.len(), else_block.0.len());
+				//println!("  If({} -> {} nodes <> {} nodes)", cond_id.index(), then_block.0.len(), else_block.0.len());
 				self.check_if(data, *cond_id, then_block, else_block, ret_type)
 			}
 
 			Kind::While(cond_id, block) => {
-				println!("  While({} -> {} nodes)", cond_id.index(), block.0.len());
+				//println!("  While({} -> {} nodes)", cond_id.index(), block.0.len());
 				self.check_condition(data, *cond_id, ret_type)?;
 				self.check_block(data, block, ret_type)
 			}
 
 			Kind::For(vars, Some(table_id), range, block) => {
-				println!("  For({} in {}{} -> {} nodes)",
-					vars.iter()
-						.map(|var| data.text(var))
-						.collect::<Vec<_>>()
-						.join(","),
-					data.text(table_id),
-					range.map(|r| format!("[{r}]")).unwrap_or(String::new()),
-					block.0.len());
+				//println!("  For({} in {}{} -> {} nodes)",
+				//	vars.iter()
+				//		.map(|var| data.text(var))
+				//		.collect::<Vec<_>>()
+				//		.join(","),
+				//	data.text(table_id),
+				//	range.map(|r| format!("[{r}]")).unwrap_or(String::new()),
+				//	block.0.len());
 
 				let table = &data.tables[table_id];
 				debug_assert!(vars.len() <= table.column_spec.len());
@@ -154,9 +154,9 @@ impl Checker {
 			}
 
 			Kind::For(vars, None, Some(range), block) => {
-				println!("  For({} in {} -> {} nodes)",
-					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
-					range, block.0.len());
+				//println!("  For({} in {} -> {} nodes)",
+				//	vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
+				//	range, block.0.len());
 				if vars.len() != 1 {
 					return Some("simple for-loops require a single loop variable".to_string());
 				}
@@ -175,28 +175,28 @@ impl Checker {
 			}
 
 			Kind::For(vars, None, None, block) => {
-				println!("  For({} -> {} nodes)",
-					vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
-					block.0.len());
+				//println!("  For({} -> {} nodes)",
+				//	vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
+				//	block.0.len());
 				todo!("infinite for-loop")
 			}
 
 			Kind::Call(proc_id, exprs) => {
-				println!("  Call({}({}))", data.text(proc_id), exprs.iter()
-					.map(|id| id.to_string())
-					.collect::<Vec<_>>()
-					.join(","));
+				//println!("  Call({}({}))", data.text(proc_id), exprs.iter()
+				//	.map(|id| id.to_string())
+				//	.collect::<Vec<_>>()
+				//	.join(","));
 				todo!("procedure-call")
 			}
 
 			Kind::Access(base_id, segments) => {
-				println!("  Access({}{})", data.text(base_id), segments.iter()
-					.map(|segment| match segment {
-						PathSegment::Field(field_id) => format!(".{}", data.text(field_id)),
-						PathSegment::Index(expr_id, field_id) => format!("[{expr_id}].{}", data.text(field_id)),
-					})
-					.collect::<Vec<_>>()
-					.join(""));
+				//println!("  Access({}{})", data.text(base_id), segments.iter()
+				//	.map(|segment| match segment {
+				//		PathSegment::Field(field_id) => format!(".{}", data.text(field_id)),
+				//		PathSegment::Index(expr_id, field_id) => format!("[{expr_id}].{}", data.text(field_id)),
+				//	})
+				//	.collect::<Vec<_>>()
+				//	.join(""));
 
 				let mut curr_id = base_id;
 				for segment in segments {

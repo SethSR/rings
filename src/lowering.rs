@@ -7,7 +7,7 @@ use crate::{BinaryOp, Data, Bounds, UnaryOp};
 
 type TempId = u32; // Temporary variable ID
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Tac {
 	// Basic operations
 	Copy { src: Location,  dst: Location },
@@ -69,7 +69,7 @@ impl Tac {
 				format!("CALL  {}({}) -> {dst}", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
-			Tac::Call { name, args, dst: None } => {
+			Tac::Call { name, args, ..} => {
 				format!("CALL  {}({})", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
@@ -86,7 +86,7 @@ impl Tac {
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Location {
 	Temp(TempId),      // Temporary variable
 	Variable(IdentId), // Named variable
@@ -119,28 +119,14 @@ pub fn eval(data: &mut Data) {
 	for mut tac_function in tac_functions.drain(..) {
 		let name = data.text(&tac_function.name).to_string();
 
-		/*
-		eprintln!("AST nodes:");
-		for kind in &data.ast_nodes {
-			eprintln!("  {kind:?}");
-		}
-		*/
-
 		if !tac_function.lower(data) {
 			eprintln!("failed to lower '{name}'");
 		}
 		data.tac_sections.insert(tac_function.name, tac_function);
-
-		/*
-		println!("{name}:");
-		for tac in &tac_function.instructions {
-			println!("  {}", tac.to_text(data));
-		}
-		*/
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TacSection {
 	pub name: IdentId,
 	// pub params: Vec<IdentId>,
@@ -543,22 +529,52 @@ impl TacSection {
 
 #[cfg(test)]
 mod tests {
-	use crate::{lexer, parser, type_checker};
+	use crate::{lexer, discovery, parser, type_checker};
+	use crate::identifier::Identifier;
 	use crate::Data;
 
-	#[test]
-	fn stuff() {
-		let source = "test_return_void :: proc() {
-			x: u8 = 10;
-			return;
-		}";
+	use super::*;
+
+	fn setup(source: &str) -> Data {
 		let mut data = Data::new("lowering".into(), source.into());
 		lexer::eval(&mut data);
+		discovery::eval(&mut data);
 		parser::eval(&mut data);
 		type_checker::eval(&mut data);
-		super::eval(&mut data);
-		assert!(data.errors.is_empty());
-		panic!("{data}");
+		eval(&mut data);
+		assert!(data.errors.is_empty(), "{}", data.errors.iter()
+				.map(|e| e.display(&data))
+				.collect::<Vec<_>>()
+				.join("\n"));
+		data
+	}
+
+	#[test]
+	fn return_void() {
+		let data = setup("proc a() {
+			return;
+		}");
+		assert_eq!(data.tac_sections.len(), 1);
+		assert_eq!(data.tac_sections[&"a".id()].instructions, [
+			Tac::Return(None),
+		]);
+	}
+
+	#[test]
+	fn return_expression() {
+		let data = setup("proc a() -> u16 {
+			return 100 + 200;
+		}");
+		assert_eq!(data.tac_sections.len(), 1);
+		assert_eq!(data.tac_sections[&"a".id()].instructions, [
+			Tac::BinOp {
+				op: BinaryOp::Add,
+				left: Location::Constant(100),
+				right: Location::Constant(200),
+				dst: Location::Temp(0),
+			},
+			Tac::Return(Some(Location::Temp(0))),
+		]);
 	}
 }
 
