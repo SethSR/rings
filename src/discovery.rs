@@ -13,7 +13,7 @@ pub type ProcMap = identifier::Map<Procedure>;
 pub type RecordMap = identifier::Map<Record>;
 pub type TableMap = identifier::Map<Table>;
 
-pub type Field = (identifier::Id, crate::Type);
+pub type Param = (identifier::Id, crate::Type);
 
 // TODO - srenshaw - At some point, we'll want the discovery phase to use a work queue to allow
 // out-of-order type recognition.
@@ -32,14 +32,14 @@ pub struct Region {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Procedure {
-	pub params: Vec<(identifier::Id, crate::Type)>,
+	pub params: Vec<Param>,
 	pub ret_type: crate::Type,
 	pub tok_start: token::Id,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-	pub fields: Vec<Field>,
+	pub fields: Vec<Param>,
 	pub size: u32,
 	pub address: Option<i64>,
 }
@@ -55,7 +55,7 @@ impl Record {
 #[derive(Debug, PartialEq)]
 pub struct Table {
 	pub row_count: u32,
-	pub column_spec: Vec<Field>,
+	pub column_spec: Vec<Param>,
 	pub size: u32,
 	pub address: Option<i64>,
 }
@@ -220,7 +220,7 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	end_token: token::Kind,
-) -> Result<Vec<Field>, CompilerError> {
+) -> Result<Vec<Param>, CompilerError> {
 	let mut fields = Vec::default();
 	while end_token != cursor.current(data) {
 		let field_id = cursor.expect_identifier(data, "field name")?;
