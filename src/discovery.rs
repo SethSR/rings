@@ -5,6 +5,8 @@ use crate::identifier;
 use crate::token;
 use crate::Data;
 
+type IdentId = identifier::Id;
+
 pub type ValueMap = identifier::Map<Value>;
 pub type RegionMap = identifier::Map<Region>;
 pub type ProcMap = identifier::Map<Procedure>;
@@ -38,15 +40,27 @@ pub struct Procedure {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
 	pub fields: Vec<Param>,
-	pub size: u32,
 	pub address: Option<u32>,
 }
 
 impl Record {
-	pub fn field_offset(&self, data: &Data, field_id: identifier::Id) -> Option<u32> {
+	pub fn size(&self, db: &Data) -> u32 {
+		self.fields.iter()
+			.map(|(_, field_type)| db.type_size(field_type))
+			.sum()
+	}
+
+	//   1 2 1 4 1
+	// = 2 2 2 4 1
+	// = 0 2 4 6 10 = 11b
+	pub fn field_offset(&self, _data: &Data, _field_id: IdentId) -> Option<u32> {
+		todo!("make an actual record packing algorithm")
+	}
+
+	pub fn field_size(&self, data: &Data, field_id: identifier::Id) -> Option<u32> {
 		self.fields.iter()
 			.find(|(id,_)| field_id == *id)
-			.map(|(_, field_type)| data.type_size(*field_type))
+			.map(|(_, field_type)| data.type_size(field_type))
 	}
 }
 
@@ -54,15 +68,13 @@ impl Record {
 pub struct Table {
 	pub row_count: u32,
 	pub column_spec: Vec<Param>,
-	pub size: u32,
 	pub address: Option<u32>,
 }
 
 impl Table {
-	#[allow(dead_code)]
 	pub fn size(&self, data: &Data) -> u32 {
 		let row_size: u32 = self.column_spec.iter()
-			.map(|(_, field_type)| data.type_size(*field_type))
+			.map(|(_, field_type)| data.type_size(field_type))
 			.sum();
 		self.row_count * row_size
 	}
@@ -71,7 +83,7 @@ impl Table {
 		self.column_spec.iter()
 			.position(|(id,_)| field_id == *id)
 			.map(|idx| self.column_spec[..idx].iter()
-				.map(|(_,field_type)| data.type_size(*field_type) * self.row_count)
+				.map(|(_,field_type)| data.type_size(field_type) * self.row_count)
 				.sum())
 	}
 }
@@ -263,10 +275,7 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, Compi
 	cursor.expect(data, token::Kind::OBrace)?;
 	let fields = discover_fields(cursor, data, token::Kind::CBrace)?;
 	cursor.expect(data, token::Kind::CBrace)?;
-	let size = fields.iter()
-		.map(|(_, field_type)| data.type_size(*field_type))
-		.sum();
-	Ok(Record { size, address, fields })
+	Ok(Record { address, fields })
 }
 
 fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, CompilerError> {
@@ -277,14 +286,10 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, Compile
 	cursor.expect(data, token::Kind::OBrace)?;
 	let column_spec = discover_fields(cursor, data, token::Kind::CBrace)?;
 	cursor.expect(data, token::Kind::CBrace)?;
-	let col_size: u32 = column_spec.iter()
-		.map(|(_, col_type)| data.type_size(*col_type))
-		.sum();
 	Ok(Table {
 		address,
 		row_count,
 		column_spec,
-		size: row_count * col_size,
 	})
 }
 
@@ -365,7 +370,6 @@ mod can_parse {
 		let data = setup("record a {}");
 		assert_eq!(data.records.len(), 1);
 		assert_eq!(data.records[&"a".id()], Record {
-			size: 0,
 			address: None,
 			fields: vec![],
 		});
@@ -375,113 +379,104 @@ mod can_parse {
 	fn record_with_one_field_no_trailing_comma() {
 		let data = setup("record a { b: u8 }");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], Record {
-			size: 1,
-			address: None,
-			fields: vec![("b".id(), crate::Type::U8)],
-		});
+		let record = &data.records[&"a".id()];
+		assert_eq!(record.size(&data), 1);
+		assert_eq!(record.address, None);
+		assert_eq!(record.fields, [("b".id(), crate::Type::U8)]);
 	}
 
 	#[test]
 	fn record_with_one_field_and_trailing_comma() {
 		let data = setup("record a { b: u8, }");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], Record {
-			size: 1,
-			address: None,
-			fields: vec![("b".id(), crate::Type::U8)],
-		});
+		let record = &data.records[&"a".id()];
+		assert_eq!(record.size(&data), 1);
+		assert_eq!(record.address, None);
+		assert_eq!(record.fields, [("b".id(), crate::Type::U8)]);
 	}
 
 	#[test]
 	fn record_with_multiple_fields() {
 		let data = setup("record a { b: u8, c: s16 }");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], Record {
-			size: 3,
-			address: None,
-			fields: vec![
-				("b".id(), crate::Type::U8),
-				("c".id(), crate::Type::S16),
-			],
-		});
+		let record = &data.records[&"a".id()];
+		assert_eq!(record.size(&data), 3);
+		assert_eq!(record.address, None);
+		assert_eq!(record.fields, [
+			("b".id(), crate::Type::U8),
+			("c".id(), crate::Type::S16),
+		]);
 	}
 
 	#[test]
 	fn record_with_user_defined_field() {
 		let data = setup("record a {} record b { c: a }");
 		assert_eq!(data.records.len(), 2);
-		assert_eq!(data.records[&"b".id()], Record {
-			size: 0,
-			address: None,
-			fields: vec![
-				("c".id(), crate::Type::Record("a".id())),
-			],
-		});
+		let record = &data.records[&"b".id()];
+		assert_eq!(record.size(&data), 0);
+		assert_eq!(record.address, None);
+		assert_eq!(record.fields, [
+			("c".id(), crate::Type::Record("a".id())),
+		]);
 	}
 
 	#[test]
 	fn record_with_address() {
 		let data = setup("record a @ 32 {}");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], Record {
-			size: 0,
-			address: Some(32),
-			fields: vec![],
-		});
+		let record = &data.records[&"a".id()];
+		assert_eq!(record.size(&data), 0);
+		assert_eq!(record.address, Some(32));
+		assert!(record.fields.is_empty());
 	}
 
 	#[test]
 	fn empty_table() {
 		let data = setup("table a[10] {}");
 		assert_eq!(data.tables.len(), 1);
-		assert_eq!(data.tables[&"a".id()], Table {
-			row_count: 10,
-			column_spec: vec![],
-			size: 0,
-			address: None,
-		});
+		let table = &data.tables[&"a".id()];
+		assert_eq!(table.row_count, 10);
+		assert_eq!(table.column_spec, []);
+		assert_eq!(table.size(&data), 0);
+		assert_eq!(table.address, None);
 	}
 
 	#[test]
 	fn table_with_one_field() {
 		let data = setup("table a[10] { b: u32 }");
 		assert_eq!(data.tables.len(), 1);
-		assert_eq!(data.tables[&"a".id()], Table {
-			row_count: 10,
-			column_spec: vec![("b".id(), crate::Type::U32)],
-			size: 40,
-			address: None,
-		});
+		let table = &data.tables[&"a".id()];
+		assert_eq!(table.row_count, 10);
+		assert_eq!(table.column_spec, [("b".id(), crate::Type::U32)]);
+		assert_eq!(table.size(&data), 40);
+		assert_eq!(table.address, None);
 	}
 
 	#[test]
 	fn table_with_multiple_field() {
 		let data = setup("table a[10] { b: u32, c: s16 }");
 		assert_eq!(data.tables.len(), 1);
-		assert_eq!(data.tables[&"a".id()], Table {
-			row_count: 10,
-			column_spec: vec![
-				("b".id(), crate::Type::U32),
-				("c".id(), crate::Type::S16),
-			],
-			size: 60,
-			address: None,
-		});
+		let table = &data.tables[&"a".id()];
+		assert_eq!(table.row_count, 10);
+		assert_eq!(table.column_spec, [
+			("b".id(), crate::Type::U32),
+			("c".id(), crate::Type::S16),
+		]);
+		assert_eq!(table.size(&data), 60);
+		assert_eq!(table.address, None);
 	}
 
 	#[test]
 	fn table_with_user_defined_field() {
 		let data = setup("record a { a1: s16 } table b[10] { b1: a }");
 		assert_eq!(data.tables.len(), 1);
-		assert_eq!(data.tables[&"b".id()], Table {
-			row_count: 10,
-			column_spec: vec![
-				("b1".id(), crate::Type::Record("a".id())),
-			],
-			size: 20,
-			address: None,
-		});
+		let table = &data.tables[&"b".id()];
+		assert_eq!(table.row_count, 10);
+		assert_eq!(table.column_spec, [
+			("b1".id(), crate::Type::Record("a".id())),
+		]);
+		assert_eq!(table.size(&data), 20);
+		assert_eq!(table.address, None);
 	}
 }
 

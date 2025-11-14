@@ -149,7 +149,7 @@ impl Data {
 		}
 	}
 
-	fn type_size(&self, ring_type: Type) -> u32 {
+	fn type_size(&self, ring_type: &Type) -> u32 {
 		match ring_type {
 			Type::Bool |
 			Type::U8 |
@@ -158,8 +158,8 @@ impl Data {
 			Type::S16 => 2,
 			Type::U32 |
 			Type::S32 => 4,
-			Type::Record(ident_id) => self.records[&ident_id].size,
-			Type::Table(ident_id) => self.tables[&ident_id].size,
+			Type::Record(ident_id) => self.records[&ident_id].size(self),
+			Type::Table(ident_id) => self.tables[&ident_id].size(self),
 			Type::Unit => 0,
 		}
 	}
@@ -260,7 +260,7 @@ impl fmt::Display for Data {
 		writeln!(f, "{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "")?;
 		for (ident_id, record) in self.records.iter() {
 			let name = self.text(ident_id);
-			let size = record.size;
+			let size = record.size(self);
 			let address = record.address
 				.map(|num| format!("#{num:0>8X}"))
 				.unwrap_or("-".to_string());
@@ -274,7 +274,7 @@ impl fmt::Display for Data {
 		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<9} | {:-<16}", "", "", "", "", "", "")?;
 		for (ident_id, table) in self.tables.iter() {
 			let name = self.text(ident_id);
-			let size = table.size;
+			let size = table.size(self);
 			let row_size = size / table.row_count;
 			let address = table.address
 				.map(|num| format!("#{num:0>8X}"))

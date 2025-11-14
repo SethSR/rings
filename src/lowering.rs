@@ -411,7 +411,7 @@ impl TacSection {
 							// existence to get the column-offset.
 							let field_size = table.column_spec.iter()
 								.find(|(id,_)| field_id == *id)
-								.map(|(_, field_type)| data.type_size(*field_type))
+								.map(|(_, field_type)| data.type_size(field_type))
 								.unwrap();
 
 							// t0 = expr * field_size
