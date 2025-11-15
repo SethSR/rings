@@ -19,55 +19,58 @@ use crate::{Data, Type};
 
 #[derive(Debug, Default)]
 struct Checker {
-	ast_to_type: HashMap<AstId, Type>,
-	ident_to_type: HashMap<identifier::Id, Type>,
 }
 
 pub fn eval(data: &mut Data) {
-	for (proc_id, &proc_start) in &data.completed_procs {
+	let completed_procs = data.completed_procs.clone();
+	for (proc_id, proc_start) in completed_procs {
 		//let proc_name = data.text(proc_id);
 		//println!("{proc_name} AST:");
-		let proc_type = &data.procedures[proc_id];
+		let proc_type = &data.procedures[&proc_id];
 
 		let mut checker = Checker::default();
 		for (param_name, param_type) in &proc_type.params {
-			checker.ident_to_type.insert(*param_name, *param_type);
+			data.ident_to_type.insert(*param_name, *param_type);
 		}
 
-		let node = &data.ast_nodes[proc_start];
-		let range = &data.ast_pos_tok[proc_start];
+		let node = data.ast_nodes[proc_start].clone();
+		let range = data.ast_pos_tok[proc_start].clone();
 		let ret_type = proc_type.ret_type;
-		if let Some(err_msg) = checker.check_stmt(data, node, proc_start, ret_type) {
+		if let Err(err_msg) = checker.check_stmt(data, &node, proc_start, ret_type) {
 			println!("-| {checker:?}");
 			let mut err =error::error(data, &err_msg, range.start);
 			err.set_kind(error::Kind::Checker);
 			data.errors.push(err);
 			return;
 		}
+
+		// Clear helper maps for next run
+		data.ast_to_type.clear();
+		data.ident_to_type.clear();
 	}
 }
 
 impl Checker {
-	fn check_stmt(&mut self, data: &Data,
-		node: &Kind, ast_id: AstId, ret_type: crate::Type,
-	) -> Option<String> {
+	fn check_stmt(&mut self, data: &mut Data,
+		node: &Kind, ast_id: AstId, ret_type: Type,
+	) -> Result<(), String> {
 		match node {
 			Kind::Int(num) => {
 				//println!("  Int({num})");
-				self.ast_to_type.insert(ast_id, Type::Top);
-				None
+				data.ast_to_type.insert(ast_id, Type::Top);
+				Ok(())
 			}
 
 			Kind::Dec(num) => {
 				//println!("  Dec({num})");
-				self.ast_to_type.insert(ast_id, Type::Top);
-				None
+				data.ast_to_type.insert(ast_id, Type::Top);
+				Ok(())
 			}
 
 			Kind::Ident(ident_id) => {
 				//println!("  Ident({})", data.text(ident_id));
-				self.check_ident(ident_id, ast_id);
-				None
+				self.check_ident(data, ident_id, ast_id);
+				Ok(())
 			}
 
 			Kind::Define(lvalue_id, var_type, expr_id) => {
@@ -94,7 +97,7 @@ impl Checker {
 				//println!("  Return({})", expr_id
 				//	.map(|id| id.index().to_string())
 				//	.unwrap_or("-".to_string()));
-				self.check_return(*expr_id, ret_type)
+				self.check_return(data, *expr_id, ret_type)
 			}
 
 			Kind::Block(block) => {
@@ -161,17 +164,17 @@ impl Checker {
 				//	vars.iter().map(|var| data.text(var)).collect::<Vec<_>>().join(","),
 				//	range, block.0.len());
 				if vars.len() != 1 {
-					return Some("simple for-loops require a single loop variable".to_string());
+					return Err("simple for-loops require a single loop variable".to_string());
 				}
 				match range {
 					crate::Bounds::Full { start, end } => {
 						debug_assert!(start <= end);
 						if start > end {
-							return Some("start value must be less than or equal to end value".to_string());
+							return Err("start value must be less than or equal to end value".to_string());
 						}
 					}
 					crate::Bounds::From {..} | crate::Bounds::To {..} => {
-						return Some("simple for-loops require a fully specified range (start..end)".to_string());
+						return Err("simple for-loops require a fully specified range (start..end)".to_string());
 					}
 				}
 				self.check_block(data, block, ret_type)
@@ -226,40 +229,40 @@ impl Checker {
 		}
 	}
 
-	fn check_ident(&mut self,
+	fn check_ident(&mut self, data: &mut Data,
 		ident_id: &identifier::Id, ast_id: AstId,
 	) {
-		let new_type = self.ident_to_type.get(ident_id)
+		let new_type = data.ident_to_type.get(ident_id)
 			.unwrap_or(&Type::Top);
-		self.ast_to_type.insert(ast_id, *new_type);
+		data.ast_to_type.insert(ast_id, *new_type);
 	}
 
-	fn check_define(&mut self, data: &Data,
+	fn check_define(&mut self, data: &mut Data,
 		lvalue_id: AstId, ast_id: AstId,
-		var_type: crate::Type,
-	) -> Option<String> {
+		var_type: Type,
+	) -> Result<(), String> {
 		let Kind::Ident(ident_id) = data.ast_nodes[lvalue_id] else {
-			return Some("TC - Cannot define internal values, assign instead".to_string());
+			return Err("TC - Cannot define internal values, assign instead".to_string());
 		};
 
-		match self.ident_to_type.entry(ident_id) {
+		match data.ident_to_type.entry(ident_id) {
 			Entry::Occupied(_) => {
-				Some(format!("TC - '{}' has already been defined", data.text(&ident_id)))
+				Err(format!("TC - '{}' has already been defined", data.text(&ident_id)))
 			}
 			Entry::Vacant(e) => {
-				let Some(expr_type) = self.ast_to_type.get(&ast_id) else {
-						return Some(format!("CE - expression has no type: {ast_id:?}"));
+				let Some(expr_type) = data.ast_to_type.get(&ast_id) else {
+						return Err(format!("CE - expression has no type: {ast_id:?}"));
 				};
 				match expr_type.meet(&var_type) {
 					Type::Bot => {
-						Some(format!("TC - variable has type '{}', but the expression has type '{}'",
+						Err(format!("TC - variable has type '{}', but the expression has type '{}'",
 								var_type,
 								expr_type,
 							))
 					}
 					new_type => {
 						e.insert(new_type);
-						None
+						Ok(())
 					}
 				}
 			}
@@ -268,32 +271,32 @@ impl Checker {
 
 	fn check_assign(&mut self, data: &Data,
 		lvalue_id: AstId, ast_id: AstId,
-	) -> Option<String> {
-		let Some(lvalue_type) = self.ast_to_type.get(&lvalue_id) else {
-			return Some(format!("CE - lvalue has no type: {lvalue_id:?}"));
+	) -> Result<(), String> {
+		let Some(lvalue_type) = data.ast_to_type.get(&lvalue_id) else {
+			return Err(format!("CE - lvalue has no type: {lvalue_id:?}"));
 		};
-		let Some(expr_type) = self.ast_to_type.get(&ast_id) else {
-			return Some(format!("CE - expression has no type: {ast_id:?}"));
+		let Some(expr_type) = data.ast_to_type.get(&ast_id) else {
+			return Err(format!("CE - expression has no type: {ast_id:?}"));
 		};
 		if expr_type.meet(lvalue_type) != *lvalue_type {
-			Some(format!("TC - variable has type '{}', but expression has type '{}'",
+			Err(format!("TC - variable has type '{}', but expression has type '{}'",
 				lvalue_type,
 				expr_type,
 			))
 		} else {
 			// The types match, so we're okay.
-			None
+			Ok(())
 		}
 	}
 
-	fn check_binop(&mut self, data: &Data,
+	fn check_binop(&mut self, data: &mut Data,
 		ast_id: AstId,
-		op: crate::BinaryOp, left_id: &AstId, right_id: &AstId, proc_type: crate::Type,
-	) -> Option<String> {
-		let left = &data.ast_nodes[*left_id];
-		self.check_stmt(data, left, *left_id, proc_type)?;
-		let right = &data.ast_nodes[*right_id];
-		self.check_stmt(data, right, *right_id, proc_type)?;
+		op: crate::BinaryOp, left_id: &AstId, right_id: &AstId, proc_type: Type,
+	) -> Result<(), String> {
+		let left = data.ast_nodes[*left_id].clone();
+		self.check_stmt(data, &left, *left_id, proc_type)?;
+		let right = data.ast_nodes[*right_id].clone();
+		self.check_stmt(data, &right, *right_id, proc_type)?;
 		match op {
 			crate::BinaryOp::Add |
 			crate::BinaryOp::Sub |
@@ -314,17 +317,17 @@ impl Checker {
 			crate::BinaryOp::CmpGT |
 			crate::BinaryOp::CmpLE |
 			crate::BinaryOp::CmpLT => {
-				let left_type = self.ast_to_type[left_id];
-				let right_type = self.ast_to_type[right_id];
+				let left_type = data.ast_to_type[left_id];
+				let right_type = data.ast_to_type[right_id];
 				match left_type.meet(&right_type) {
-					Type::Bot => Some(format!("TC - unable to apply '{op}' to types '{}' and '{}'",
+					Type::Bot => Err(format!("TC - unable to apply '{op}' to types '{}' and '{}'",
 						left_type,
 						right_type,
 					)),
 					new_type => {
 						// Types are able to meet
-						self.ast_to_type.insert(ast_id, new_type);
-						None
+						data.ast_to_type.insert(ast_id, new_type);
+						Ok(())
 					}
 				}
 			}
@@ -332,66 +335,72 @@ impl Checker {
 		}
 	}
 
-	fn check_unop(&mut self, data: &Data,
+	fn check_unop(&mut self, data: &mut Data,
 		ast_id: AstId,
 		op: crate::UnaryOp, right: &AstId,
-	) -> Option<String> {
-		let right_type = self.ast_to_type[right];
+	) -> Result<(), String> {
+		let right_type = data.ast_to_type[right];
 		if !matches!(right_type, Type::S8(_)) {
-			return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type));
+			return Err(format!("TC - unable to apply '{op}' to type '{}'", right_type));
 		};
 
 		#[cfg(feature="ready")]
 		if !matches!(rtype, T::Bool | T::U8 | T::S8 | T::U16 | T::S16 | T::U32 | T::S32) {
 			return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type.display(data)));
 		}
-		self.ast_to_type.insert(ast_id, right_type);
-		None
+		data.ast_to_type.insert(ast_id, right_type);
+		Ok(())
 	}
 
-	fn check_return(&mut self,
-		ast_id: Option<AstId>, proc_type: crate::Type,
-	) -> Option<String> {
+	fn check_return(&mut self, data: &mut Data,
+		ast_id: Option<AstId>, proc_type: Type,
+	) -> Result<(), String> {
 		let ret_type = match ast_id {
-			Some(ast_id) => match self.ast_to_type.get(&ast_id) {
-				Some(ret_type) => *ret_type,
-				None => return Some(format!("CE - expression has no type: {ast_id:?}")),
+			Some(ast_id) => {
+				let kind = data.ast_nodes[ast_id].clone();
+				self.check_stmt(data, &kind, ast_id, proc_type)?;
+				match data.ast_to_type.get(&ast_id) {
+					Some(ret_type) => *ret_type,
+					None => return Err(format!("CE - expression has no type: {ast_id:?}")),
+				}
 			}
 			None => Type::Unit,
 		};
-		if ret_type.meet(&proc_type) == Type::Bot {
-			return Some(format!("TC - Expected return type {proc_type:?}, found '{ret_type:?}'"));
+
+		let meet_type = ret_type.meet(&proc_type);
+		if meet_type == Type::Bot {
+			return Err(format!("TC - Expected return type {proc_type}, found {ret_type}"));
 		}
-		None
+		Ok(())
 	}
 
-	fn check_block(&mut self, data: &Data,
-		block: &AstBlock, proc_type: crate::Type,
-	) -> Option<String> {
+	fn check_block(&mut self, data: &mut Data,
+		block: &AstBlock, proc_type: Type,
+	) -> Result<(), String> {
 		for stmt_id in &block.0 {
-			let stmt = &data.ast_nodes[*stmt_id];
-			self.check_stmt(data, stmt, *stmt_id, proc_type)?;
+			let stmt = data.ast_nodes[*stmt_id].clone();
+			self.check_stmt(data, &stmt, *stmt_id, proc_type)?;
 		}
-		None
+		Ok(())
 	}
 
-	fn check_condition(&mut self, data: &Data,
-		cond_id: AstId, proc_type: crate::Type,
-	) -> Option<String> {
-		let cond = &data.ast_nodes[cond_id];
-		self.check_stmt(data, cond, cond_id, proc_type)?;
-		let cond_type = self.ast_to_type[&cond_id];
+	fn check_condition(&mut self, data: &mut Data,
+		cond_id: AstId, proc_type: Type,
+	) -> Result<(), String> {
+		let cond = data.ast_nodes[cond_id].clone();
+		self.check_stmt(data, &cond, cond_id, proc_type)?;
+		let cond_type = data.ast_to_type[&cond_id];
 		if cond_type.meet(&Type::s8_top()) == Type::Bot
 		//&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
 		{
 			todo!("TC - cond node must have integer type");
 		}
-		None
+		Ok(())
 	}
 
-	fn check_if(&mut self, data: &Data,
-		cond_id: AstId, then_block: &AstBlock, else_block: &AstBlock, proc_type: crate::Type,
-	) -> Option<String> {
+	fn check_if(&mut self, data: &mut Data,
+		cond_id: AstId, then_block: &AstBlock, else_block: &AstBlock, proc_type: Type,
+	) -> Result<(), String> {
 		self.check_condition(data, cond_id, proc_type)?;
 		self.check_block(data, then_block, proc_type)?;
 		self.check_block(data, else_block, proc_type)

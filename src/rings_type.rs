@@ -46,6 +46,7 @@ impl Meet for Type {
 			(Self::Bot, _) | (_, Self::Bot) => Self::Bot,
 
 			(Self::S8(a), Self::S8(b)) => Self::S8(a.meet(b)),
+			(Self::Unit, Self::Unit) => Self::Unit,
 
 			_ => Self::Bot,
 		}

@@ -53,8 +53,6 @@ impl Lexer {
 					self.advance(data);
 				}
 				match &data.source[start..self.pos] {
-					"main" => token::Kind::Main,
-					"sub" => token::Kind::Sub,
 					"value" => token::Kind::Value,
 					"region" => token::Kind::Region,
 					"return" => token::Kind::Return,
@@ -83,7 +81,11 @@ impl Lexer {
 						if let Entry::Vacant(e) = data.identifiers.entry(ident_id) {
 							e.insert(start..self.pos);
 						}
-						token::Kind::Identifier(ident_id)
+						match text {
+							"main" => token::Kind::Main,
+							"sub" => token::Kind::Sub,
+							_ => token::Kind::Identifier(ident_id),
+						}
 					}
 				}
 			}
@@ -175,102 +177,87 @@ impl Lexer {
 
 			Some('-') => {
 				self.advance(data);
-				if self.expect(data, '=') {
-					token::Kind::DashEqual
-				} else if self.expect(data, '>') {
-					token::Kind::Arrow
-				} else {
-					token::Kind::Dash
-				}
+				self.item(data, &[
+					('=', token::Kind::DashEqual),
+					('>', token::Kind::Arrow),
+				], token::Kind::Dash)
 			}
 
 			Some(':') => {
 				self.advance(data);
-				if self.expect(data, ':') {
-					token::Kind::ColonColon
-				} else if self.expect(data, '=') {
-					token::Kind::ColonEqual
-				} else {
-					token::Kind::Colon
-				}
+				self.item(data, &[
+					(':', token::Kind::ColonColon),
+					('=', token::Kind::ColonEqual),
+				], token::Kind::Colon)
 			}
 
 			Some('<') => {
 				self.advance(data);
-				if self.expect(data, '<') {
-					token::Kind::LessLess
-				} else if self.expect(data, '=') {
-					token::Kind::LessEqual
-				} else {
-					token::Kind::Less
-				}
+				self.item(data, &[
+					('<', token::Kind::LessLess),
+					('=', token::Kind::LessEqual),
+				], token::Kind::Less)
 			}
 
 			Some('>') => {
 				self.advance(data);
-				if self.expect(data, '>') {
-					token::Kind::GreaterGreater
-				} else if self.expect(data, '=') {
-					token::Kind::GreaterEqual
-				} else {
-					token::Kind::Greater
-				}
+				self.item(data, &[
+					('>', token::Kind::GreaterGreater),
+					('=', token::Kind::GreaterEqual),
+				], token::Kind::Greater)
 			}
 
 			Some('^') => {
 				self.advance(data);
-				if self.expect(data, '^') {
-					token::Kind::CarrotCarrot
-				} else if self.expect(data, '=') {
-					token::Kind::CarrotEqual
-				} else {
-					token::Kind::Carrot
-				}
+				self.item(data, &[
+					('^', token::Kind::CarrotCarrot),
+					('=', token::Kind::CarrotEqual),
+				], token::Kind::Carrot)
 			}
 
 			Some('+') => {
 				self.advance(data);
-				if self.expect(data, '=') { token::Kind::PlusEqual } else { token::Kind::Plus }
+				self.item(data, &[('=', token::Kind::PlusEqual)], token::Kind::Plus)
 			}
 
 			Some('*') => {
 				self.advance(data);
-				if self.expect(data, '=') { token::Kind::StarEqual } else { token::Kind::Star }
+				self.item(data, &[('=', token::Kind::StarEqual)], token::Kind::Star)
 			}
 
 			Some('/') => {
 				self.advance(data);
-				if self.expect(data, '=') { token::Kind::SlashEqual } else { token::Kind::Slash }
+				self.item(data, &[('=', token::Kind::SlashEqual)], token::Kind::Slash)
 			}
 
 			Some('%') => {
 				self.advance(data);
-				if self.expect(data, '=') { token::Kind::PercentEqual } else { token::Kind::Percent }
+				self.item(data, &[('=', token::Kind::PercentEqual)], token::Kind::Percent)
 			}
 
 			Some('=') => {
 				self.advance(data);
-				if self.expect(data, '=') { token::Kind::EqualEqual } else { token::Kind::Equal }
+				self.item(data, &[('=', token::Kind::EqualEqual)], token::Kind::Equal)
 			}
 
 			Some('!') => {
 				self.advance(data);
-				if self.expect(data, '=') { token::Kind::BangEqual } else { token::Kind::Bang }
+				self.item(data, &[('=', token::Kind::BangEqual)], token::Kind::Bang)
 			}
 
 			Some('.') => {
 				self.advance(data);
-				if self.expect(data, '.') { token::Kind::DotDot } else { token::Kind::Dot }
+				self.item(data, &[('.', token::Kind::DotDot)], token::Kind::Dot)
 			}
 
 			Some('&') => {
 				self.advance(data);
-				if self.expect(data, '&') { token::Kind::AmpAmp } else { token::Kind::Amp }
+				self.item(data, &[('&', token::Kind::AmpAmp)], token::Kind::Amp)
 			}
 
 			Some('|') => {
 				self.advance(data);
-				if self.expect(data, '|') { token::Kind::BarBar } else { token::Kind::Bar }
+				self.item(data, &[('|', token::Kind::BarBar)], token::Kind::Bar)
 			}
 
 			Some('(') => { self.advance(data); token::Kind::OParen }
@@ -322,6 +309,18 @@ impl Lexer {
 				_ => break,
 			}
 		}
+	}
+
+	fn item(&mut self, db: &Data,
+		pairs: &[(char, token::Kind)],
+		end: token::Kind,
+	) -> token::Kind {
+		for &(ch, kind) in pairs {
+			if self.expect(db, ch) {
+				return kind;
+			}
+		}
+		end
 	}
 
 	fn peek(&self, data: &Data, offset: usize) -> Option<char> {

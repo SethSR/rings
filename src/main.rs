@@ -1,6 +1,6 @@
 
 use std::{env, fmt, fs};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 
 mod ast;
@@ -75,8 +75,11 @@ pub struct Data {
 	ast_pos_tok: ast::LocList,
 	// procedures ready to be type-checked
 	completed_procs: identifier::Map<ast::Id>,
+	/* Type Checking */
+	ast_to_type: HashMap<ast::Id, Type>,
+	ident_to_type: HashMap<identifier::Id, Type>,
 	/* Lowering TAC */
-	tac_sections: identifier::Map<lowering::TacSection>,
+	tac_sections: identifier::Map<tac::TacSection>,
 }
 
 fn fmt_size(size: usize) -> String {
@@ -316,6 +319,27 @@ impl fmt::Display for Data {
 			for (ident_id, &proc_start) in &self.completed_procs {
 				let node_count = self.ast_nodes[proc_start..].len();
 				writeln!(f, "{:<32} | {node_count}", self.text(ident_id))?;
+			}
+			writeln!(f)?;
+		}
+
+		if !self.ast_to_type.is_empty() {
+			writeln!(f, "{:<8} | TYPE",
+				"AST-ID")?;
+			writeln!(f, "{:-<8} | {:-<8}", "", "")?;
+			for (ast_id, rings_type) in &self.ast_to_type {
+				let ast = ast_id.to_string();
+				writeln!(f, "{ast:<8} | {:<8}", self.type_text(*rings_type))?;
+			}
+			writeln!(f)?;
+		}
+
+		if !self.ident_to_type.is_empty() {
+			writeln!(f, "{:<16} | TYPE",
+				"VARIABLE")?;
+			writeln!(f, "{:-<16} | {:-<8}", "", "")?;
+			for (ident_id, rings_type) in &self.ident_to_type {
+				writeln!(f, "{:<16} | {:<8}", self.text(ident_id), self.type_text(*rings_type))?;
 			}
 			writeln!(f)?;
 		}

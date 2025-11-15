@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::ast::{ Block as AstBlock, Id as AstId, Kind as AKind, PathSegment };
 use crate::cursor::Cursor;
 use crate::error::{ self, CompilerError };
-use crate::identifier::Id as IdentId;
+use crate::identifier::{Id as IdentId, Identifier};
 use crate::token::{ Id as TokenId, Kind as TKind };
 use crate::{ BinaryOp, Data, Bounds, UnaryOp };
 
@@ -12,8 +12,6 @@ type ParseResult = Result<AstId, CompilerError>;
 
 #[derive(Debug)]
 pub enum TaskKind {
-	Main,
-	Sub,
 	// procedure name
 	Proc(IdentId),
 }
@@ -26,47 +24,43 @@ pub struct Task {
 }
 
 impl Task {
+	fn new(kind: TaskKind, tok_start: TokenId) -> Self {
+		Self {
+			kind,
+			tok_start,
+			prev_furthest_token: TokenId::default(),
+			prev_ready_proc_count: 0,
+		}
+	}
+
 	pub fn name<'a>(&self, data: &'a Data) -> &'a str {
 		match self.kind {
-			TaskKind::Main => "main",
-			TaskKind::Sub => "sub",
 			TaskKind::Proc(proc_name) => data.text(&proc_name),
 		}
 	}
 
 	fn name_id(&self) -> IdentId {
-		use crate::identifier::Identifier;
-
 		match self.kind {
-			TaskKind::Main => "main".id(),
-			TaskKind::Sub => "sub".id(),
 			TaskKind::Proc(proc_name) => proc_name,
 		}
 	}
 }
 
 pub fn eval(data: &mut Data) {
-	data.proc_queue.extend(data.procedures.iter()
-		.map(|(&proc_name, proc)| Task {
-			kind: TaskKind::Proc(proc_name),
-			tok_start: proc.tok_start,
-			prev_furthest_token: TokenId::default(),
-			prev_ready_proc_count: 0,
-		}));
 	data.proc_queue.extend(data.parse_queue.iter()
 		.map(|task| match task {
-			crate::discovery::Task::MainProc { tok_start } => Task {
-				kind: TaskKind::Main,
-				tok_start: *tok_start,
-				prev_furthest_token: TokenId::default(),
-				prev_ready_proc_count: 0,
-			},
-			crate::discovery::Task::SubProc { tok_start } => Task {
-				kind: TaskKind::Sub,
-				tok_start: *tok_start,
-				prev_furthest_token: TokenId::default(),
-				prev_ready_proc_count: 0,
-			},
+			crate::discovery::Task::MainProc { tok_start } => Task::new(
+				TaskKind::Proc("main".id()),
+				*tok_start,
+			),
+			crate::discovery::Task::SubProc { tok_start } => Task::new(
+				TaskKind::Proc("sub".id()),
+				*tok_start,
+			),
+			crate::discovery::Task::Proc { name_id, tok_start } => Task::new(
+				TaskKind::Proc(*name_id),
+				*tok_start,
+			),
 		})
 	);
 

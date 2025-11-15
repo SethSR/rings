@@ -1,11 +1,11 @@
 
 use crate::cursor::Cursor;
 use crate::error::{self, CompilerError};
-use crate::identifier;
+use crate::identifier::{self, Id as IdentId, Identifier};
 use crate::token;
-use crate::Data;
+use crate::{Data, Type};
 
-type IdentId = identifier::Id;
+type TokenId = token::Id;
 
 pub type ValueMap = identifier::Map<Value>;
 #[cfg(feature="ready")]
@@ -16,7 +16,7 @@ pub type RecordMap = identifier::Map<Record>;
 #[cfg(feature="ready")]
 pub type TableMap = identifier::Map<Table>;
 
-pub type Param = (identifier::Id, crate::Type);
+pub type Param = (IdentId, Type);
 
 // TODO - srenshaw - At some point, we'll want the discovery phase to use a work queue to allow
 // out-of-order type recognition.
@@ -37,8 +37,7 @@ pub struct Region {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Procedure {
 	pub params: Vec<Param>,
-	pub ret_type: crate::Type,
-	pub tok_start: token::Id,
+	pub ret_type: Type,
 }
 
 #[cfg(feature="ready")]
@@ -96,13 +95,18 @@ impl Table {
 	}
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Task {
 	MainProc {
-		tok_start: token::Id,
+		tok_start: TokenId,
 	},
 	SubProc {
-		tok_start: token::Id,
+		tok_start: TokenId,
 	},
+	Proc {
+		name_id: IdentId,
+		tok_start: TokenId,
+	}
 	// TODO - srenshaw - Add the rest of the top-level constructs
 }
 
@@ -122,6 +126,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				let tok_start = cursor.index();
 				check_braces(cursor, data)?;
 				data.parse_queue.push_back(Task::MainProc { tok_start });
+				data.procedures.insert("main".id(), Procedure { params: vec![], ret_type: Type::Unit });
 			}
 
 			token::Kind::Sub => {
@@ -129,13 +134,21 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				let tok_start = cursor.index();
 				check_braces(cursor, data)?;
 				data.parse_queue.push_back(Task::SubProc { tok_start });
+				data.procedures.insert("sub".id(), Procedure { params: vec![], ret_type: Type::Unit });
 			}
 
 			token::Kind::Proc => {
 				cursor.advance();
-				let ident_id = cursor.expect_identifier(data, "procedure name")?;
-				let proc = discover_proc(cursor, data)?;
-				data.procedures.insert(ident_id, proc);
+				let name_id = cursor.expect_identifier(data, "procedure name")?;
+				let (params, ret_type, tok_start) = discover_proc(cursor, data)?;
+				data.parse_queue.push_back(Task::Proc {
+					name_id,
+					tok_start,
+				});
+				data.procedures.insert(name_id, Procedure {
+					params,
+					ret_type,
+				});
 			}
 
 			#[cfg(feature="ready")]
@@ -213,7 +226,7 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerErro
 }
 
 fn discover_proc(cursor: &mut Cursor, data: &mut Data,
-) -> Result<Procedure, CompilerError> {
+) -> Result<(Vec<Param>, Type, token::Id), CompilerError> {
 	cursor.expect(data, token::Kind::OParen)?;
 	let params = discover_fields(cursor, data, token::Kind::CParen)?;
 	cursor.expect(data, token::Kind::CParen)?;
@@ -224,11 +237,7 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 	};
 	let tok_start = cursor.index();
 	check_braces(cursor, data)?;
-	Ok(Procedure {
-		params,
-		ret_type,
-		tok_start,
-	})
+	Ok((params, ret_type, tok_start))
 }
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data,
@@ -337,36 +346,48 @@ mod can_parse {
 	#[test]
 	fn procedures() {
 		let data = setup("a :: 5; proc b() {}");
+		assert_eq!(data.parse_queue.len(), 1);
+		assert_eq!(data.parse_queue[0], Task::Proc {
+			name_id: "b".id(),
+			tok_start: token::Id::new(8),
+		});
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"b".id()], Procedure {
 			params: vec![],
-			ret_type: crate::Type::Unit,
-			tok_start: token::Id::new(8),
+			ret_type: Type::Unit,
 		});
 	}
 
 	#[test]
 	fn procedure_with_params() {
 		let data = setup("proc a(b: s8, c: s8) {}");
+		assert_eq!(data.parse_queue.len(), 1);
+		assert_eq!(data.parse_queue[0], Task::Proc {
+			name_id: "a".id(),
+			tok_start: token::Id::new(11),
+		});
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], Procedure {
 			params: vec![
-				("b".id(), crate::Type::s8_top()),
-				("c".id(), crate::Type::s8_top()),
+				("b".id(), Type::s8_top()),
+				("c".id(), Type::s8_top()),
 			],
-			ret_type: crate::Type::Unit,
-			tok_start: token::Id::new(11),
+			ret_type: Type::Unit,
 		});
 	}
 
 	#[test]
 	fn procedure_with_return() {
 		let data = setup("proc a() -> s8 {}");
+		assert_eq!(data.parse_queue.len(), 1);
+		assert_eq!(data.parse_queue[0], Task::Proc {
+			name_id: "a".id(),
+			tok_start: token::Id::new(6),
+		});
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], Procedure {
 			params: vec![],
-			ret_type: crate::Type::s8_top(),
-			tok_start: token::Id::new(6),
+			ret_type: Type::s8_top(),
 		});
 	}
 
