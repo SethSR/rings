@@ -31,7 +31,7 @@ impl std::fmt::Display for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
 			Self::Top => write!(f, "top"),
-			Self::S8(lattice) => write!(f, "s8_{lattice}"),
+			Self::S8(_) => write!(f, "s8"),
 			Self::Unit => write!(f, "unit"),
 			Self::Bot => write!(f, "bot"),
 		}

@@ -1,4 +1,4 @@
 
-proc test_return_expression() -> u16 {
-    return 100 + 200;
+proc test_return_expression() -> s8 {
+	return 100 - 200;
 }

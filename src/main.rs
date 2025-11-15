@@ -157,10 +157,8 @@ impl Data {
 
 	// Convert byte offset to line and column
 	pub fn lookup_position(&self, tok_pos: SrcPos) -> (usize, usize) {
-		let line = match self.line_pos.binary_search(&tok_pos) {
-			Ok(line) => line,
-			Err(line) => line - 1,
-		};
+		let line = self.line_pos.binary_search(&tok_pos)
+			.unwrap_or_else(|line| line - 1);
 
 		let line_pos = self.line_pos.get(line)
 			.unwrap_or_else(|| panic!("missing position for line number {line}"));
@@ -231,7 +229,9 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
+		#[cfg(feature="ready")]
 		writeln!(f, "{:<16} | {:<9} | {:<9}", "REGION", "ADDRESS", "SIZE")?;
+		#[cfg(feature="ready")]
 		writeln!(f, "{:-<16} | {:-<9} | {:-<9}", "", "", "")?;
 		#[cfg(feature="ready")]
 		for (ident_id, data) in self.regions.iter() {
@@ -240,10 +240,13 @@ impl fmt::Display for Data {
 			let size = fmt_size(data.byte_count as usize);
 			writeln!(f, "{name:<16} | #{address:0>8X} | {size:<8}")?;
 		}
+		#[cfg(feature="ready")]
 		writeln!(f)?;
 
+		#[cfg(feature="ready")]
 		writeln!(f, "{:<16} | {:<8} | {:<9} | FIELDS",
 			"RECORD", "SIZE", "ADDRESS")?;
+		#[cfg(feature="ready")]
 		writeln!(f, "{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "")?;
 		#[cfg(feature="ready")]
 		for (ident_id, record) in self.records.iter() {
@@ -255,10 +258,13 @@ impl fmt::Display for Data {
 			let field_str = fields_to_str(self, &record.fields);
 			writeln!(f, "{name:<16} | {size:<8} | {address:9} | {field_str}")?;
 		}
+		#[cfg(feature="ready")]
 		writeln!(f)?;
 
+		#[cfg(feature="ready")]
 		writeln!(f, "{:<16} | {:<10} | {:<8} | {:<9} | {:<9} | COLUMNS",
 			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT", "ADDRESS")?;
+		#[cfg(feature="ready")]
 		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<9} | {:-<16}", "", "", "", "", "", "")?;
 		#[cfg(feature="ready")]
 		for (ident_id, table) in self.tables.iter() {
@@ -271,70 +277,78 @@ impl fmt::Display for Data {
 			let field_str = fields_to_str(self, &table.column_spec);
 			writeln!(f, "{name:<16} | {size:<10} | {row_size:<8} | {:<9} | {address:9} | {field_str}", table.row_count)?;
 		}
+		#[cfg(feature="ready")]
 		writeln!(f)?;
 
-		writeln!(f, "{:<32} | {:<16} | PARAMETERS",
-			"PROC-TYPE", "RETURN-TYPE")?;
-		writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
-		for ident_id in self.procedures.keys() {
-			let name = self.text(ident_id);
-			let data = &self.procedures[ident_id];
-			let ret_type = format!("{:?}", data.ret_type);
-			let param_str = fields_to_str(self, &data.params);
-			writeln!(f, "{name:<32} | {ret_type:<16} | {param_str}")?;
+		if !self.procedures.is_empty() {
+			writeln!(f, "{:<32} | {:<16} | PARAMETERS",
+				"PROC-TYPE", "RETURN-TYPE")?;
+			writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
+			for ident_id in self.procedures.keys() {
+				let name = self.text(ident_id);
+				let data = &self.procedures[ident_id];
+				let ret_type = format!("{:?}", data.ret_type);
+				let param_str = fields_to_str(self, &data.params);
+				writeln!(f, "{name:<32} | {ret_type:<16} | {param_str}")?;
+			}
+			writeln!(f)?;
 		}
-		writeln!(f)?;
 
-		writeln!(f, "{:<32} | {:<11} | {:<10} | PREV READY COUNT",
-			"PROC-TASK", "START TOKEN", "PREV TOKEN")?;
-		writeln!(f, "{:-<32} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "")?;
-		for task in &self.proc_queue {
-			writeln!(f, "{:<32} | {:<11} | {:<10} | {}",
-				task.name(self),
-				task.tok_start.index(),
-				task.prev_furthest_token.index(),
-				task.prev_ready_proc_count,
-			)?;
-		}
-		writeln!(f)?;
-
-		writeln!(f, "{:<32} | AST-NODE-COUNT",
-			"PROCEDURE")?;
-		writeln!(f, "{:-<32} | {:-<16}", "", "")?;
-		for (ident_id, &proc_start) in &self.completed_procs {
-			let node_count = self.ast_nodes[proc_start..].len();
-			writeln!(f, "{:<32} | {node_count}", self.text(ident_id))?;
-		}
-		writeln!(f)?;
-
-		writeln!(f, "{:<32} | {:<16} | LOCAL-TYPE",
-			"TAC-LOCALS", "LOCAL-NAME")?;
-		writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
-		for (ident_id, section) in &self.tac_sections {
-			for (local_id, ring_type) in &section.locals {
-				writeln!(f, "{:<32} | {:<16} | {:<16}",
-					self.text(ident_id),
-					self.text(local_id),
-					self.type_text(*ring_type),
+		if !self.proc_queue.is_empty() {
+			writeln!(f, "{:<32} | {:<11} | {:<10} | PREV READY COUNT",
+				"PROC-TASK", "START TOKEN", "PREV TOKEN")?;
+			writeln!(f, "{:-<32} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "")?;
+			for task in &self.proc_queue {
+				writeln!(f, "{:<32} | {:<11} | {:<10} | {}",
+					task.name(self),
+					task.tok_start.index(),
+					task.prev_furthest_token.index(),
+					task.prev_ready_proc_count,
 				)?;
 			}
+			writeln!(f)?;
 		}
-		writeln!(f)?;
 
-		writeln!(f, "{:<32} | INSTRUCTIONS",
-			"TAC-SECTIONS")?;
-		writeln!(f, "{:-<32} | {:-<16}", "", "")?;
-		for (ident_id, section) in &self.tac_sections {
-			for tac in &section.instructions {
-				writeln!(f, "{:<32} | {}", self.text(ident_id), tac.to_text(self))?;
+		if !self.completed_procs.is_empty() {
+			writeln!(f, "{:<32} | AST-NODE-COUNT",
+				"PROCEDURE")?;
+			writeln!(f, "{:-<32} | {:-<16}", "", "")?;
+			for (ident_id, &proc_start) in &self.completed_procs {
+				let node_count = self.ast_nodes[proc_start..].len();
+				writeln!(f, "{:<32} | {node_count}", self.text(ident_id))?;
 			}
+			writeln!(f)?;
 		}
-		writeln!(f)?;
+
+		if !self.tac_sections.is_empty() {
+			writeln!(f, "{:<32} | {:<16} | LOCAL-TYPE",
+				"TAC-LOCALS", "LOCAL-NAME")?;
+			writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
+			for (ident_id, section) in &self.tac_sections {
+				for (local_id, ring_type) in &section.locals {
+					writeln!(f, "{:<32} | {:<16} | {:<16}",
+						self.text(ident_id),
+						self.text(local_id),
+						self.type_text(*ring_type),
+					)?;
+				}
+			}
+			writeln!(f)?;
+
+			writeln!(f, "{:<32} | INSTRUCTIONS",
+				"TAC-SECTIONS")?;
+			writeln!(f, "{:-<32} | {:-<16}", "", "")?;
+			for (ident_id, section) in &self.tac_sections {
+				for tac in &section.instructions {
+					writeln!(f, "{:<32} | {}", self.text(ident_id), tac.to_text(self))?;
+				}
+			}
+			writeln!(f)?;
+		}
 
 		for err in &self.errors {
 			writeln!(f, "{}\n", err.display(self))?;
 		}
-		writeln!(f)?;
 
 		Ok(())
 	}
