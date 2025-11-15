@@ -39,6 +39,7 @@ pub enum Kind {
 	While(Id, Block),
 	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Block),
 	Call(IdentId, Vec<Id>),
+	#[cfg(feature="ready")]
 	Access(IdentId, Vec<PathSegment>),
 }
 

@@ -10,11 +10,12 @@ use crate::ast::{
 };
 use crate::identifier;
 use crate::error;
-use crate::Data;
+use crate::rings_type::Meet;
+use crate::{Data, Type};
 
 // NOTE - srenshaw - CE <== Compiler Error: This shouldn't happen and needs to be fixed
 
-// NOTE - srenshaw - TC <== Type-Checker Error: Turn this into it's own error category
+// NOTE - srenshaw - TC <== Type-Checker Error: Turn this into its own error category
 
 #[derive(Debug, Default)]
 struct Checker {
@@ -30,7 +31,7 @@ pub fn eval(data: &mut Data) {
 
 		let mut checker = Checker::default();
 		for (param_name, param_type) in &proc_type.params {
-			checker.ident_to_type.insert(*param_name, Type::Rings(*param_type));
+			checker.ident_to_type.insert(*param_name, *param_type);
 		}
 
 		let node = &data.ast_nodes[proc_start];
@@ -112,6 +113,8 @@ impl Checker {
 				self.check_block(data, block, ret_type)
 			}
 
+			Kind::For(_, Some(_), _, _) => { todo!() }
+			#[cfg(feature="ready")]
 			Kind::For(vars, Some(table_id), range, block) => {
 				//println!("  For({} in {}{} -> {} nodes)",
 				//	vars.iter()
@@ -189,6 +192,7 @@ impl Checker {
 				todo!("procedure-call")
 			}
 
+			#[cfg(feature="ready")]
 			Kind::Access(base_id, segments) => {
 				//println!("  Access({}{})", data.text(base_id), segments.iter()
 				//	.map(|segment| match segment {
@@ -246,11 +250,11 @@ impl Checker {
 				let Some(expr_type) = self.ast_to_type.get(&ast_id) else {
 						return Some(format!("CE - expression has no type: {ast_id:?}"));
 				};
-				match expr_type.meet(Type::Rings(var_type)) {
+				match expr_type.meet(&var_type) {
 					Type::Bot => {
 						Some(format!("TC - variable has type '{}', but the expression has type '{}'",
-								var_type.display(data),
-								expr_type.display(data),
+								var_type,
+								expr_type,
 							))
 					}
 					new_type => {
@@ -271,10 +275,10 @@ impl Checker {
 		let Some(expr_type) = self.ast_to_type.get(&ast_id) else {
 			return Some(format!("CE - expression has no type: {ast_id:?}"));
 		};
-		if &expr_type.meet(*lvalue_type) != lvalue_type {
+		if expr_type.meet(lvalue_type) != *lvalue_type {
 			Some(format!("TC - variable has type '{}', but expression has type '{}'",
-				lvalue_type.display(data),
-				expr_type.display(data),
+				lvalue_type,
+				expr_type,
 			))
 		} else {
 			// The types match, so we're okay.
@@ -312,10 +316,10 @@ impl Checker {
 			crate::BinaryOp::CmpLT => {
 				let left_type = self.ast_to_type[left_id];
 				let right_type = self.ast_to_type[right_id];
-				match left_type.meet(right_type) {
+				match left_type.meet(&right_type) {
 					Type::Bot => Some(format!("TC - unable to apply '{op}' to types '{}' and '{}'",
-						left_type.display(data),
-						right_type.display(data),
+						left_type,
+						right_type,
 					)),
 					new_type => {
 						// Types are able to meet
@@ -333,11 +337,11 @@ impl Checker {
 		op: crate::UnaryOp, right: &AstId,
 	) -> Option<String> {
 		let right_type = self.ast_to_type[right];
-		let Type::Rings(rtype) = right_type else {
-			return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type.display(data)));
+		if !matches!(right_type, Type::S8(_)) {
+			return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type));
 		};
 
-		use crate::Type as T;
+		#[cfg(feature="ready")]
 		if !matches!(rtype, T::Bool | T::U8 | T::S8 | T::U16 | T::S16 | T::U32 | T::S32) {
 			return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type.display(data)));
 		}
@@ -353,9 +357,9 @@ impl Checker {
 				Some(ret_type) => *ret_type,
 				None => return Some(format!("CE - expression has no type: {ast_id:?}")),
 			}
-			None => Type::Rings(crate::Type::Unit),
+			None => Type::Unit,
 		};
-		if ret_type.meet(Type::Rings(proc_type)) == Type::Bot {
+		if ret_type.meet(&proc_type) == Type::Bot {
 			return Some(format!("TC - Expected return type {proc_type:?}, found '{ret_type:?}'"));
 		}
 		None
@@ -377,8 +381,8 @@ impl Checker {
 		let cond = &data.ast_nodes[cond_id];
 		self.check_stmt(data, cond, cond_id, proc_type)?;
 		let cond_type = self.ast_to_type[&cond_id];
-		if cond_type.meet(Type::Rings(crate::Type::S32)) == Type::Bot
-		&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
+		if cond_type.meet(&Type::s8_top()) == Type::Bot
+		//&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
 		{
 			todo!("TC - cond node must have integer type");
 		}
@@ -391,68 +395,6 @@ impl Checker {
 		self.check_condition(data, cond_id, proc_type)?;
 		self.check_block(data, then_block, proc_type)?;
 		self.check_block(data, else_block, proc_type)
-	}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Type {
-	Top, // Any/unknown type
-	Rings(crate::Type), // specific compiler type
-	Bot, // All/invalid type
-}
-
-impl Type {
-	fn display<'a>(&self, data: &'a Data) -> &'a str {
-		match self {
-			Self::Top => "Unknown type",
-			Self::Bot => "Invalid type",
-			Self::Rings(ty) => ty.display(data),
-		}
-	}
-}
-
-impl Type {
-	fn meet(self, rhs: Type) -> Type {
-		match (self, rhs) {
-			(Self::Top, _) => rhs,
-			(_, Self::Top) => self,
-			(Self::Bot, _) | (_, Self::Bot) => Self::Bot,
-
-			(Self::Rings(a), Self::Rings(b)) => meet_rings(a, b)
-				.map(Self::Rings)
-				.unwrap_or(Self::Bot),
-		}
-	}
-}
-
-fn meet_rings(a: crate::Type, b: crate::Type) -> Option<crate::Type> {
-	use crate::Type as T;
-
-	match (a, b) {
-		(type_a, type_b) if type_a == type_b => Some(type_a),
-
-		(T::Record(_), _) | (_, T::Record(_)) => None,
-
-		(T::Table(_), _) | (_, T::Table(_)) => None,
-
-		(T::Unit, _) | (_, T::Unit) => None,
-
-		(T::U32, T::S32) | (T::S32, T::U32) => None,
-		(T::U32, T::S16) | (T::S16, T::U32) => None,
-		(T::U32, T::S8 ) | (T::S8 , T::U32) => None,
-
-		(T::U16, T::S16) | (T::S16, T::U16) => None,
-		(T::U16, T::S8)  | (T::S8 , T::U16) => None,
-		(T::U8 , T::S8)  | (T::S8 , T::U8 ) => None,
-
-		(T::S8, T::S8) => Some(T::S8),
-		(T::U8, T::U8) => Some(T::U8),
-
-		(T::Bool, _) | (_, T::Bool) => Some(T::Bool),
-		(T::S32, _) | (_, T::S32) => Some(T::S32),
-		(T::U32, _) | (_, T::U32) => Some(T::U32),
-		(T::S16, _) | (_, T::S16) => Some(T::S16),
-		(T::U16, _) | (_, T::U16) => Some(T::U16),
 	}
 }
 

@@ -72,6 +72,7 @@ impl Cursor {
 
 	pub fn expect_type(&mut self, data: &Data) -> Result<crate::Type, CompilerError> {
 		let result = match self.current(data) {
+			#[cfg(feature="ready")]
 			token::Kind::Identifier(ident_id) => {
 				if data.records.contains_key(&ident_id) {
 					Ok(crate::Type::Record(ident_id))
@@ -81,12 +82,18 @@ impl Cursor {
 					return Err(error::expected_token(data, "type-specifier", self.index()))
 				}
 			}
+			#[cfg(feature="ready")]
 			token::Kind::Bool => Ok(crate::Type::Bool),
+			#[cfg(feature="ready")]
 			token::Kind::U8 => Ok(crate::Type::U8),
-			token::Kind::S8 => Ok(crate::Type::S8),
+			token::Kind::S8 => Ok(crate::Type::s8_top()),
+			#[cfg(feature="ready")]
 			token::Kind::U16 => Ok(crate::Type::U16),
+			#[cfg(feature="ready")]
 			token::Kind::S16 => Ok(crate::Type::S16),
+			#[cfg(feature="ready")]
 			token::Kind::U32 => Ok(crate::Type::U32),
+			#[cfg(feature="ready")]
 			token::Kind::S32 => Ok(crate::Type::S32),
 			_ => return Err(error::expected_token(data, "type-specifier", self.index())),
 		};

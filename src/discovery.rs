@@ -8,9 +8,12 @@ use crate::Data;
 type IdentId = identifier::Id;
 
 pub type ValueMap = identifier::Map<Value>;
+#[cfg(feature="ready")]
 pub type RegionMap = identifier::Map<Region>;
 pub type ProcMap = identifier::Map<Procedure>;
+#[cfg(feature="ready")]
 pub type RecordMap = identifier::Map<Record>;
+#[cfg(feature="ready")]
 pub type TableMap = identifier::Map<Table>;
 
 pub type Param = (identifier::Id, crate::Type);
@@ -24,6 +27,7 @@ pub enum Value {
 	Decimal(f64),
 }
 
+#[cfg(feature="ready")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region {
 	pub address: u32,
@@ -37,12 +41,14 @@ pub struct Procedure {
 	pub tok_start: token::Id,
 }
 
+#[cfg(feature="ready")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
 	pub fields: Vec<Param>,
 	pub address: Option<u32>,
 }
 
+#[cfg(feature="ready")]
 impl Record {
 	pub fn size(&self, db: &Data) -> u32 {
 		self.fields.iter()
@@ -64,6 +70,7 @@ impl Record {
 	}
 }
 
+#[cfg(feature="ready")]
 #[derive(Debug, PartialEq)]
 pub struct Table {
 	pub row_count: u32,
@@ -71,6 +78,7 @@ pub struct Table {
 	pub address: Option<u32>,
 }
 
+#[cfg(feature="ready")]
 impl Table {
 	pub fn size(&self, data: &Data) -> u32 {
 		let row_size: u32 = self.column_spec.iter()
@@ -130,6 +138,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				data.procedures.insert(ident_id, proc);
 			}
 
+			#[cfg(feature="ready")]
 			token::Kind::Region => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(data, "region name")?;
@@ -137,6 +146,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				data.regions.insert(ident_id, region);
 			}
 
+			#[cfg(feature="ready")]
 			token::Kind::Record => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(data, "record name")?;
@@ -144,6 +154,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				data.records.insert(ident_id, record);
 			}
 
+			#[cfg(feature="ready")]
 			token::Kind::Table => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(data, "table name")?;
@@ -237,6 +248,7 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	Ok(fields)
 }
 
+#[cfg(feature="ready")]
 fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<Region, CompilerError> {
 	cursor.expect(data, token::Kind::OBracket)?;
 	let byte_count = cursor.expect_u32(data, "region size")?;
@@ -247,6 +259,7 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<Region, Compi
 	Ok(Region { byte_count, address })
 }
 
+#[cfg(feature="ready")]
 fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<u32>, CompilerError> {
 	if cursor.expect(data, token::Kind::At).is_ok() {
 		if let Ok(num) = cursor.expect_u32(data, "record address") {
@@ -270,6 +283,7 @@ fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<u32>,
 	}
 }
 
+#[cfg(feature="ready")]
 fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, CompilerError> {
 	let address = discover_address(cursor, data)?;
 	cursor.expect(data, token::Kind::OBrace)?;
@@ -278,6 +292,7 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, Compi
 	Ok(Record { address, fields })
 }
 
+#[cfg(feature="ready")]
 fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, CompilerError> {
 	cursor.expect(data, token::Kind::OBracket)?;
 	let row_count = cursor.expect_u32(data, "table size")?;
@@ -332,12 +347,12 @@ mod can_parse {
 
 	#[test]
 	fn procedure_with_params() {
-		let data = setup("proc a(b: u8, c: s32) {}");
+		let data = setup("proc a(b: s8, c: s8) {}");
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], Procedure {
 			params: vec![
-				("b".id(), crate::Type::U8),
-				("c".id(), crate::Type::S32),
+				("b".id(), crate::Type::s8_top()),
+				("c".id(), crate::Type::s8_top()),
 			],
 			ret_type: crate::Type::Unit,
 			tok_start: token::Id::new(11),
@@ -346,15 +361,16 @@ mod can_parse {
 
 	#[test]
 	fn procedure_with_return() {
-		let data = setup("proc a() -> s32 {}");
+		let data = setup("proc a() -> s8 {}");
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], Procedure {
 			params: vec![],
-			ret_type: crate::Type::S32,
+			ret_type: crate::Type::s8_top(),
 			tok_start: token::Id::new(6),
 		});
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn region() {
 		let data = setup("region a[1024] @ 0x0020_0000;");
@@ -365,6 +381,7 @@ mod can_parse {
 		});
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn empty_record() {
 		let data = setup("record a {}");
@@ -375,6 +392,7 @@ mod can_parse {
 		});
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn record_with_one_field_no_trailing_comma() {
 		let data = setup("record a { b: u8 }");
@@ -385,6 +403,7 @@ mod can_parse {
 		assert_eq!(record.fields, [("b".id(), crate::Type::U8)]);
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn record_with_one_field_and_trailing_comma() {
 		let data = setup("record a { b: u8, }");
@@ -395,6 +414,7 @@ mod can_parse {
 		assert_eq!(record.fields, [("b".id(), crate::Type::U8)]);
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn record_with_multiple_fields() {
 		let data = setup("record a { b: u8, c: s16 }");
@@ -408,6 +428,7 @@ mod can_parse {
 		]);
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn record_with_user_defined_field() {
 		let data = setup("record a {} record b { c: a }");
@@ -420,6 +441,7 @@ mod can_parse {
 		]);
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn record_with_address() {
 		let data = setup("record a @ 32 {}");
@@ -430,6 +452,7 @@ mod can_parse {
 		assert!(record.fields.is_empty());
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn empty_table() {
 		let data = setup("table a[10] {}");
@@ -441,6 +464,7 @@ mod can_parse {
 		assert_eq!(table.address, None);
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn table_with_one_field() {
 		let data = setup("table a[10] { b: u32 }");
@@ -452,6 +476,7 @@ mod can_parse {
 		assert_eq!(table.address, None);
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn table_with_multiple_field() {
 		let data = setup("table a[10] { b: u32, c: s16 }");
@@ -466,6 +491,7 @@ mod can_parse {
 		assert_eq!(table.address, None);
 	}
 
+	#[cfg(feature="ready")]
 	#[test]
 	fn table_with_user_defined_field() {
 		let data = setup("record a { a1: s16 } table b[10] { b1: a }");

@@ -338,6 +338,7 @@ impl TacSection {
 				todo!("lower proc-call")
 			}
 
+			#[cfg(feature="ready")]
 			ast::Kind::Access(base_id, segments) => {
 				let temp = Location::Temp(self.alloc_temp());
 				let address = if let Some(record) = data.records.get(base_id) {
@@ -562,13 +563,13 @@ mod tests {
 
 	#[test]
 	fn return_expression() {
-		let data = setup("proc a() -> u16 {
-			return 100 + 200;
+		let data = setup("proc a() -> s8 {
+			return 100 - 200;
 		}");
 		assert_eq!(data.tac_sections.len(), 1);
 		assert_eq!(data.tac_sections[&"a".id()].instructions, [
 			Tac::BinOp {
-				op: BinaryOp::Add,
+				op: BinaryOp::Sub,
 				left: Location::Constant(100),
 				right: Location::Constant(200),
 				dst: Location::Temp(0),

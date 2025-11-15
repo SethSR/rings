@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 index_vec = "0.1.4"
+
+[features]
+ready=[]

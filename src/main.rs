@@ -13,8 +13,10 @@ mod lowering;
 mod parser;
 mod token;
 mod type_checker;
+mod rings_type;
 
 use error::CompilerError;
+use rings_type::Type;
 
 fn main() {
 	let mut args = env::args();
@@ -30,36 +32,6 @@ fn main() {
 }
 
 type SrcPos = usize;
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum Type {
-	Bool,
-	U8, S8,
-	U16, S16,
-	U32, S32,
-	// F16, F32
-	Record(identifier::Id),
-	Table(identifier::Id),
-	#[default]
-	Unit,
-}
-
-impl Type {
-	pub fn display<'a>(&self, data: &'a Data) -> &'a str {
-		match self {
-			Self::Bool => "bool",
-			Self::S8 => "s8",
-			Self::U8 => "u8",
-			Self::S16 => "s16",
-			Self::U16 => "u16",
-			Self::S32 => "s32",
-			Self::U32 => "u32",
-			Self::Record(ident_id) => data.text(ident_id),
-			Self::Table(ident_id) => data.text(ident_id),
-			Self::Unit => "_",
-		}
-	}
-}
 
 pub fn compile(file_path: String, source: Box<str>) -> Data {
 	let mut data = Data::new(file_path, source);
@@ -91,8 +63,11 @@ pub struct Data {
 	parse_queue: VecDeque<discovery::Task>,
 	procedures: discovery::ProcMap,
 	values: discovery::ValueMap,
+	#[cfg(feature="ready")]
 	regions: discovery::RegionMap,
+	#[cfg(feature="ready")]
 	records: discovery::RecordMap,
+	#[cfg(feature="ready")]
 	tables: discovery::TableMap,
 	/* Parsing */
 	proc_queue: VecDeque<parser::Task>,
@@ -143,7 +118,9 @@ impl Data {
 
 	fn type_text(&self, ring_type: Type) -> String {
 		match ring_type {
+			#[cfg(feature="ready")]
 			Type::Record(ident_id) => self.text(&ident_id).to_string(),
+			#[cfg(feature="ready")]
 			Type::Table(ident_id) => self.text(&ident_id).to_string(),
 			_ => format!("{ring_type:?}"),
 		}
@@ -151,16 +128,25 @@ impl Data {
 
 	fn type_size(&self, ring_type: &Type) -> u32 {
 		match ring_type {
-			Type::Bool |
-			Type::U8 |
-			Type::S8 => 1,
-			Type::U16 |
+			#[cfg(feature="ready")]
+			Type::Bool => 1,
+			#[cfg(feature="ready")]
+			Type::U8 => 1,
+			Type::S8(_) => 1,
+			#[cfg(feature="ready")]
+			Type::U16 => 2,
+			#[cfg(feature="ready")]
 			Type::S16 => 2,
-			Type::U32 |
+			#[cfg(feature="ready")]
+			Type::U32 => 4,
+			#[cfg(feature="ready")]
 			Type::S32 => 4,
+			#[cfg(feature="ready")]
 			Type::Record(ident_id) => self.records[&ident_id].size(self),
+			#[cfg(feature="ready")]
 			Type::Table(ident_id) => self.tables[&ident_id].size(self),
 			Type::Unit => 0,
+			Type::Top | Type::Bot => 0,
 		}
 	}
 
@@ -247,6 +233,7 @@ impl fmt::Display for Data {
 
 		writeln!(f, "{:<16} | {:<9} | {:<9}", "REGION", "ADDRESS", "SIZE")?;
 		writeln!(f, "{:-<16} | {:-<9} | {:-<9}", "", "", "")?;
+		#[cfg(feature="ready")]
 		for (ident_id, data) in self.regions.iter() {
 			let name = self.text(ident_id);
 			let address = data.address;
@@ -258,6 +245,7 @@ impl fmt::Display for Data {
 		writeln!(f, "{:<16} | {:<8} | {:<9} | FIELDS",
 			"RECORD", "SIZE", "ADDRESS")?;
 		writeln!(f, "{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "")?;
+		#[cfg(feature="ready")]
 		for (ident_id, record) in self.records.iter() {
 			let name = self.text(ident_id);
 			let size = record.size(self);
@@ -272,6 +260,7 @@ impl fmt::Display for Data {
 		writeln!(f, "{:<16} | {:<10} | {:<8} | {:<9} | {:<9} | COLUMNS",
 			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT", "ADDRESS")?;
 		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<9} | {:-<16}", "", "", "", "", "", "")?;
+		#[cfg(feature="ready")]
 		for (ident_id, table) in self.tables.iter() {
 			let name = self.text(ident_id);
 			let size = table.size(self);
