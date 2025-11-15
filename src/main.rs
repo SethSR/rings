@@ -9,8 +9,8 @@ mod discovery;
 mod error;
 mod identifier;
 mod lexer;
-mod lowering;
 mod parser;
+mod tac;
 mod token;
 mod type_checker;
 mod rings_type;
@@ -39,7 +39,7 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	discovery::eval(&mut data);
 	parser::eval(&mut data);
 	type_checker::eval(&mut data);
-	lowering::eval(&mut data);
+	tac::eval(&mut data);
 	data
 }
 
