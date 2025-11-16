@@ -82,6 +82,7 @@ pub struct Data {
 	tac_sections: identifier::Map<tac::TacSection>,
 }
 
+#[cfg(feature="ready")]
 fn fmt_size(size: usize) -> String {
 	let mut buffer = [size,0,0,0];
 	for idx in 0..3 {
@@ -129,6 +130,7 @@ impl Data {
 		}
 	}
 
+	#[cfg(feature="ready")]
 	fn type_size(&self, ring_type: &Type) -> u32 {
 		match ring_type {
 			#[cfg(feature="ready")]
@@ -312,6 +314,7 @@ impl fmt::Display for Data {
 			writeln!(f)?;
 		}
 
+		#[cfg(feature="ready")]
 		if !self.completed_procs.is_empty() {
 			writeln!(f, "{:<32} | AST-NODE-COUNT",
 				"PROCEDURE")?;
@@ -455,6 +458,7 @@ enum Bounds {
 	To { end: u32 },
 }
 
+#[cfg(feature="ready")]
 impl Bounds {
 	fn get_start(&self) -> u32 {
 		match self {

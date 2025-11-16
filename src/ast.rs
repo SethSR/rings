@@ -46,6 +46,7 @@ pub enum Kind {
 pub type KindList = IndexVec<Id, Kind>;
 pub type LocList = IndexVec<Id, Range<token::Id>>;
 
+#[cfg(feature="ready")]
 #[derive(Debug, Default)]
 pub struct Graph {
 	node_kinds: Vec<Kind>,

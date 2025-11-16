@@ -3,6 +3,7 @@ pub trait Meet {
 	fn meet(&self, rhs: &Self) -> Self;
 }
 
+#[cfg(feature="ready")]
 pub trait Dual {
 	fn dual(&self) -> Self;
 }
@@ -53,6 +54,7 @@ impl Meet for Type {
 	}
 }
 
+#[cfg(feature="ready")]
 impl Dual for Type {
 	fn dual(&self) -> Self {
 		match self {
@@ -96,6 +98,7 @@ impl<T: Clone + Copy + PartialEq> Meet for Lattice<T> {
 	}
 }
 
+#[cfg(feature="ready")]
 impl<T: Clone + Copy> Dual for Lattice<T> {
 	fn dual(&self) -> Self {
 		match self {

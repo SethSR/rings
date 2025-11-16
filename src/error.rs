@@ -8,6 +8,7 @@ pub fn error(data: &Data, message: &str, token_id: token::Id) -> CompilerError {
 	CompilerError::new(get_location(data, token_id), message)
 }
 
+#[cfg(feature="ready")]
 pub fn error_with_notes(data: &Data, message: &str, token_id: token::Id,
 	notes: &[(&str, token::Id)],
 ) -> CompilerError {
@@ -61,8 +62,11 @@ pub enum Kind {
 	Discovery,
 	Parser,
 	Checker,
+	#[cfg(feature="ready")]
 	LoweringTAC,
+	#[cfg(feature="ready")]
 	LoweringMachine,
+	#[cfg(feature="ready")]
 	Assembler,
 }
 
@@ -90,6 +94,7 @@ impl CompilerError {
 		self.kind = Some(kind);
 	}
 
+	#[cfg(feature="ready")]
 	pub fn with_note(&mut self, message: impl Into<String>) {
 		self.notes.push(Note {
 			location: None,
@@ -97,6 +102,7 @@ impl CompilerError {
 		});
 	}
 
+	#[cfg(feature="ready")]
 	pub fn with_note_at(
 		&mut self,
 		location: Span,

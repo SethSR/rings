@@ -17,7 +17,9 @@ pub enum Tac {
 	UnOp { op: UnaryOp, src: Location, dst: Location },
 
 	// Memory access (for table/variable access)
+	#[cfg(feature="ready")]
 	Load { address: Location, offset: i32, dst: TempId },
+	#[cfg(feature="ready")]
 	Store { src: Location, address: Location, offset: i32 },
 
 	// Control Flow
@@ -27,10 +29,12 @@ pub enum Tac {
 	JumpIfNot { cond: Location, target: LabelId },
 
 	// Procedure related
+	#[cfg(feature="ready")]
 	Call { name: IdentId, args: Vec<Location>, dst: Option<TempId> },
 	Return(Option<Location>),
 
 	// Comments/debug
+	#[cfg(feature="ready")]
 	Comment(String),
 }
 
@@ -47,9 +51,11 @@ impl Tac {
 			Tac::UnOp { op, src, dst } => {
 				format!("UNOP  {op}{} -> {}", src.to_text(data), dst.to_text(data))
 			}
+			#[cfg(feature="ready")]
 			Tac::Load { address, offset, dst } => {
 				format!("LOAD  ({} + {offset}) -> ?{dst}", address.to_text(data))
 			}
+			#[cfg(feature="ready")]
 			Tac::Store { src, address, offset } => {
 				format!("STORE {} -> ({} + {offset})", src.to_text(data), address.to_text(data))
 			}
@@ -65,10 +71,12 @@ impl Tac {
 			Tac::JumpIfNot { cond, target } => {
 				format!("JIF  !{} => label_{target}", cond.to_text(data))
 			}
+			#[cfg(feature="ready")]
 			Tac::Call { name, args, dst: Some(dst) } => {
 				format!("CALL  {}({}) -> {dst}", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
+			#[cfg(feature="ready")]
 			Tac::Call { name, args, ..} => {
 				format!("CALL  {}({})", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
@@ -79,6 +87,7 @@ impl Tac {
 			Tac::Return(None) => {
 				"RET".to_string()
 			}
+			#[cfg(feature="ready")]
 			Tac::Comment(msg) => {
 				format!("; {msg}")
 			}
