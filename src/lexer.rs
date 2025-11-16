@@ -53,28 +53,33 @@ impl Lexer {
 					self.advance(data);
 				}
 				match &data.source[start..self.pos] {
-					"value" => token::Kind::Value,
-					"region" => token::Kind::Region,
-					"return" => token::Kind::Return,
-					"record" => token::Kind::Record,
-					"table" => token::Kind::Table,
+					// Top Level Stmts
 					"index" => token::Kind::Index,
 					"proc" => token::Kind::Proc,
+					"record" => token::Kind::Record,
+					"region" => token::Kind::Region,
+					"table" => token::Kind::Table,
+					"value" => token::Kind::Value,
+
+					// Types
 					"bool" => token::Kind::Bool,
-					"true" => token::Kind::True,
-					"false" => token::Kind::False,
-					"in" => token::Kind::In,
-					"if" => token::Kind::If,
-					"else" => token::Kind::Else,
-					"for" => token::Kind::For,
-					"where" => token::Kind::Where,
-					"while" => token::Kind::While,
-					"u8" => token::Kind::U8,
+					"s16" => token::Kind::S16,
+					"s32" => token::Kind::S32,
 					"s8" => token::Kind::S8,
 					"u16" => token::Kind::U16,
-					"s16" => token::Kind::S16,
 					"u32" => token::Kind::U32,
-					"s32" => token::Kind::S32,
+					"u8" => token::Kind::U8,
+
+					// Keywords
+					"else" => token::Kind::Else,
+					"false" => token::Kind::False,
+					"for" => token::Kind::For,
+					"if" => token::Kind::If,
+					"in" => token::Kind::In,
+					"return" => token::Kind::Return,
+					"true" => token::Kind::True,
+					"where" => token::Kind::Where,
+					"while" => token::Kind::While,
 
 					text => {
 						let ident_id = text.id();
