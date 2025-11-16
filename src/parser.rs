@@ -173,30 +173,21 @@ fn parse_block(cursor: &mut Cursor, data: &mut Data,
 	Ok(AstBlock(block))
 }
 
-// ident       := expr
-// ident       = expr
-// ident.ident = expr
-// ident[expr] = expr
-// ident = expr
 fn parse_ident_statement(cursor: &mut Cursor, data: &mut Data,
 	ident_id: IdentId,
 ) -> ParseResult {
-	// parse left-value
-	// check "op" (Define, Assign, OpAssign)
-	// parse right-value
-
 	let left_id = parse_access(cursor, data, ident_id)?;
 
 	match cursor.current(data) {
 		TKind::Colon => parse_definition(cursor, data, left_id),
-		TKind::Equal => parse_assignment(cursor, data, left_id),
-		TKind::ColonEqual => Err(error::error(data,
+		TKind::Eq => parse_assignment(cursor, data, left_id),
+		TKind::ColonEq => Err(error::error(data,
 			"type-inference is not implemented yet, please add a type-specifier",
 			cursor.index())),
-		TKind::PlusEqual => parse_op_assignment(cursor, data, left_id, BinaryOp::Add),
-		TKind::DashEqual => parse_op_assignment(cursor, data, left_id, BinaryOp::Sub),
-		TKind::StarEqual => parse_op_assignment(cursor, data, left_id, BinaryOp::Mul),
-		TKind::SlashEqual => parse_op_assignment(cursor, data, left_id, BinaryOp::Div),
+		TKind::PlusEq => parse_op_assignment(cursor, data, left_id, BinaryOp::Add),
+		TKind::DashEq => parse_op_assignment(cursor, data, left_id, BinaryOp::Sub),
+		TKind::StarEq => parse_op_assignment(cursor, data, left_id, BinaryOp::Mul),
+		TKind::SlashEq => parse_op_assignment(cursor, data, left_id, BinaryOp::Div),
 		_ => Err(error::expected_token(data,
 			"definition or assignment statement",
 			cursor.index())),
@@ -246,7 +237,7 @@ fn parse_definition(cursor: &mut Cursor, data: &mut Data,
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::Colon)?;
 	let var_type = cursor.expect_type(data)?;
-	cursor.expect(data, TKind::Equal)?;
+	cursor.expect(data, TKind::Eq)?;
 	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
@@ -257,7 +248,7 @@ fn parse_assignment(cursor: &mut Cursor, data: &mut Data,
 	lvalue_id: AstId,
 ) -> ParseResult {
 	let tok_start = cursor.index();
-	cursor.expect(data, TKind::Equal)?;
+	cursor.expect(data, TKind::Eq)?;
 	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
@@ -349,7 +340,7 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 		let range = if TKind::OBracket == cursor.current(data) {
 			cursor.advance();
 			let range_start = cursor.expect_u32(data, "COMPILER ERROR").ok();
-			cursor.expect(data, TKind::DotDot)?;
+			cursor.expect(data, TKind::Dot2)?;
 			let range_end = cursor.expect_u32(data, "COMPILER ERROR").ok();
 			cursor.expect(data, TKind::CBracket)?;
 			match (range_start, range_end) {
@@ -365,7 +356,7 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	} else if TKind::OBracket == cursor.current(data) {
 		cursor.advance();
 		let start = cursor.expect_u32(data, "start (inclusive) value")?;
-		cursor.expect(data, TKind::DotDot)?;
+		cursor.expect(data, TKind::Dot)?;
 		let end = cursor.expect_u32(data, "end (exclusive) value")?;
 		cursor.expect(data, TKind::CBracket)?;
 		(None, Some(Bounds::Full { start, end }))
@@ -496,28 +487,28 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 
 fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, CompilerError> {
 	let op = match cursor.current(data) {
-		TKind::Plus => BinaryOp::Add,
-		TKind::Dash => BinaryOp::Sub,
-		TKind::Star => BinaryOp::Mul,
-		TKind::Slash => BinaryOp::Div,
-		TKind::Percent => BinaryOp::Mod,
-		TKind::Amp => BinaryOp::BinAnd,
-		TKind::AmpAmp => BinaryOp::LogAnd,
-		TKind::Bar => BinaryOp::BinOr,
-		TKind::BarBar => BinaryOp::LogOr,
-		TKind::Carrot => BinaryOp::BinXor,
-		TKind::CarrotCarrot => BinaryOp::LogXor,
-		TKind::EqualEqual => BinaryOp::CmpEQ,
-		TKind::BangEqual => BinaryOp::CmpNE,
-		TKind::Less => BinaryOp::CmpLT,
-		TKind::LessEqual => BinaryOp::CmpLE,
-		TKind::LessLess => BinaryOp::ShL,
-		TKind::Greater => BinaryOp::CmpGT,
-		TKind::GreaterEqual => BinaryOp::CmpGE,
-		TKind::GreaterGreater => BinaryOp::ShR,
+		TKind::Amp      => BinaryOp::BinAnd,
+		TKind::Amp2     => BinaryOp::LogAnd,
+		TKind::BangEq   => BinaryOp::CmpNE,
+		TKind::Bar      => BinaryOp::BinOr,
+		TKind::Bar2     => BinaryOp::LogOr,
+		TKind::Carrot   => BinaryOp::BinXor,
+		TKind::Carrot2  => BinaryOp::LogXor,
+		TKind::Dash     => BinaryOp::Sub,
+		TKind::Dot      => BinaryOp::Access,
+		TKind::Eq2      => BinaryOp::CmpEQ,
+		TKind::LArr     => BinaryOp::CmpLT,
+		TKind::LArr2    => BinaryOp::ShL,
+		TKind::LArrEq   => BinaryOp::CmpLE,
 		TKind::OBracket => BinaryOp::Index,
-		TKind::OParen => BinaryOp::Call,
-		TKind::Dot => BinaryOp::Access,
+		TKind::OParen   => BinaryOp::Call,
+		TKind::Percent  => BinaryOp::Mod,
+		TKind::Plus     => BinaryOp::Add,
+		TKind::RArr     => BinaryOp::CmpGT,
+		TKind::RArr2    => BinaryOp::ShR,
+		TKind::RArrEq   => BinaryOp::CmpGE,
+		TKind::Slash    => BinaryOp::Div,
+		TKind::Star     => BinaryOp::Mul,
 		_ => return Err(error::expected_token(data, "binary operator", cursor.index())),
 	};
 	cursor.advance();
@@ -526,15 +517,15 @@ fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, Compil
 
 fn binding_power(op: &BinaryOp) -> usize {
 	match op {
-		BinaryOp::Call | BinaryOp::Index => 10,
-		BinaryOp::Add | BinaryOp::Sub => 20,
-		BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 30,
-		BinaryOp::ShL | BinaryOp::ShR => 40,
+		BinaryOp::Call   | BinaryOp::Index => 10,
+		BinaryOp::Add    | BinaryOp::Sub   => 20,
+		BinaryOp::Mul    | BinaryOp::Div   | BinaryOp::Mod    => 30,
+		BinaryOp::ShL    | BinaryOp::ShR   => 40,
 		BinaryOp::LogAnd | BinaryOp::LogOr | BinaryOp::LogXor => 50,
 		BinaryOp::BinAnd | BinaryOp::BinOr | BinaryOp::BinXor => 60,
-		BinaryOp::CmpEQ | BinaryOp::CmpNE |
-		BinaryOp::CmpGE | BinaryOp::CmpGT |
-		BinaryOp::CmpLE | BinaryOp::CmpLT => 70,
+		BinaryOp::CmpEQ  | BinaryOp::CmpNE |
+		BinaryOp::CmpGE  | BinaryOp::CmpGT |
+		BinaryOp::CmpLE  | BinaryOp::CmpLT => 70,
 		BinaryOp::Access => 80,
 	}
 }

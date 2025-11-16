@@ -175,7 +175,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 
 			token::Kind::Identifier(ident_id) => {
 				cursor.advance();
-				cursor.expect(data, token::Kind::ColonColon)?;
+				cursor.expect(data, token::Kind::Colon2)?;
 				match cursor.peek(data, 0) {
 					token::Kind::Integer(value) => {
 						cursor.advance(); // increment past the integer, as we already have it

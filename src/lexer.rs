@@ -55,6 +55,7 @@ impl Lexer {
 				match &data.source[start..self.pos] {
 					// Top Level Stmts
 					"index" => token::Kind::Index,
+					"overlay" => token::Kind::Overlay,
 					"proc" => token::Kind::Proc,
 					"record" => token::Kind::Record,
 					"region" => token::Kind::Region,
@@ -183,7 +184,7 @@ impl Lexer {
 			Some('-') => {
 				self.advance(data);
 				self.item(data, &[
-					('=', token::Kind::DashEqual),
+					('=', token::Kind::DashEq),
 					('>', token::Kind::Arrow),
 				], token::Kind::Dash)
 			}
@@ -191,78 +192,78 @@ impl Lexer {
 			Some(':') => {
 				self.advance(data);
 				self.item(data, &[
-					(':', token::Kind::ColonColon),
-					('=', token::Kind::ColonEqual),
+					(':', token::Kind::Colon2),
+					('=', token::Kind::ColonEq),
 				], token::Kind::Colon)
 			}
 
 			Some('<') => {
 				self.advance(data);
 				self.item(data, &[
-					('<', token::Kind::LessLess),
-					('=', token::Kind::LessEqual),
-				], token::Kind::Less)
+					('<', token::Kind::LArr2),
+					('=', token::Kind::LArrEq),
+				], token::Kind::LArr)
 			}
 
 			Some('>') => {
 				self.advance(data);
 				self.item(data, &[
-					('>', token::Kind::GreaterGreater),
-					('=', token::Kind::GreaterEqual),
-				], token::Kind::Greater)
+					('>', token::Kind::RArr2),
+					('=', token::Kind::RArrEq),
+				], token::Kind::RArr)
 			}
 
 			Some('^') => {
 				self.advance(data);
 				self.item(data, &[
-					('^', token::Kind::CarrotCarrot),
-					('=', token::Kind::CarrotEqual),
+					('^', token::Kind::Carrot2),
+					('=', token::Kind::CarrotEq),
 				], token::Kind::Carrot)
 			}
 
 			Some('+') => {
 				self.advance(data);
-				self.item(data, &[('=', token::Kind::PlusEqual)], token::Kind::Plus)
+				self.item(data, &[('=', token::Kind::PlusEq)], token::Kind::Plus)
 			}
 
 			Some('*') => {
 				self.advance(data);
-				self.item(data, &[('=', token::Kind::StarEqual)], token::Kind::Star)
+				self.item(data, &[('=', token::Kind::StarEq)], token::Kind::Star)
 			}
 
 			Some('/') => {
 				self.advance(data);
-				self.item(data, &[('=', token::Kind::SlashEqual)], token::Kind::Slash)
+				self.item(data, &[('=', token::Kind::SlashEq)], token::Kind::Slash)
 			}
 
 			Some('%') => {
 				self.advance(data);
-				self.item(data, &[('=', token::Kind::PercentEqual)], token::Kind::Percent)
+				self.item(data, &[('=', token::Kind::PercentEq)], token::Kind::Percent)
 			}
 
 			Some('=') => {
 				self.advance(data);
-				self.item(data, &[('=', token::Kind::EqualEqual)], token::Kind::Equal)
+				self.item(data, &[('=', token::Kind::Eq2)], token::Kind::Eq)
 			}
 
 			Some('!') => {
 				self.advance(data);
-				self.item(data, &[('=', token::Kind::BangEqual)], token::Kind::Bang)
+				self.item(data, &[('=', token::Kind::BangEq)], token::Kind::Bang)
 			}
 
 			Some('.') => {
 				self.advance(data);
-				self.item(data, &[('.', token::Kind::DotDot)], token::Kind::Dot)
+				self.item(data, &[('.', token::Kind::Dot2)], token::Kind::Dot)
 			}
 
 			Some('&') => {
 				self.advance(data);
-				self.item(data, &[('&', token::Kind::AmpAmp)], token::Kind::Amp)
+				self.item(data, &[('&', token::Kind::Amp2)], token::Kind::Amp)
 			}
 
 			Some('|') => {
 				self.advance(data);
-				self.item(data, &[('|', token::Kind::BarBar)], token::Kind::Bar)
+				self.item(data, &[('|', token::Kind::Bar2)], token::Kind::Bar)
 			}
 
 			Some('(') => { self.advance(data); token::Kind::OParen }
@@ -380,7 +381,7 @@ mod can_lex {
 		let data = setup("wram_high :: region[2*1024^3] @ 0x0020_0000;");
 		assert_eq!(data.tok_list, [
 			Kind::Identifier("wram_high".id()),
-			Kind::ColonColon,
+			Kind::Colon2,
 			Kind::Region,
 			Kind::OBracket,
 			Kind::Integer(2),

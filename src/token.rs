@@ -17,31 +17,35 @@ define_index_type! {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Kind {
+	// Basic Tokens
 	Identifier(identifier::Id),
 	Integer(i64),
 	Decimal(f64),
 
 	// TODO - srenshaw - Add Fixed-Point identifiers
 
-	// FixedF(u8),
-	// FixedD(u8),
-
-	Main,
-	Sub,
-
-	Value,
-	Region,
-	Record,
-	Table,
-	Index, // TODO - srenshaw - Add table-indexes
-	Proc,
-	Return,
+	// Built-in Types
+	// Fix16(u8),
+	// Fix32(u8),
 	Bool,
-	True,
-	False,
 	U8, S8,
 	U16, S16,
 	U32, S32,
+
+	// Top-Level Stmts
+	Index, // TODO - srenshaw - Add table-indexes
+	Main,
+	Overlay,
+	Proc,
+	Record,
+	Region,
+	Sub,
+	Table,
+	Value,
+
+	Return,
+	True,
+	False,
 	In,
 	If,
 	Else,
@@ -52,24 +56,23 @@ pub enum Kind {
 	At,
 	Semicolon,
 	Comma,
-	Dot,
-	DotDot,
-	Colon,    ColonColon,     ColonEqual,
-	Carrot,   CarrotCarrot,   CarrotEqual,
-	Less,     LessLess,       LessEqual,
-	Greater,  GreaterGreater, GreaterEqual,
 	OParen,   CParen,
 	OBrace,   CBrace,
 	OBracket, CBracket,
-	Plus,     PlusEqual,
-	Dash,     DashEqual,
-	Star,     StarEqual,
-	Slash,    SlashEqual,
-	Percent,  PercentEqual,
-	Equal,    EqualEqual,
-	Amp,      AmpAmp,
-	Bar,      BarBar,
-	Bang,     BangEqual,
+	Amp,      Amp2,
+	Bar,      Bar2,
+	Dot,      Dot2,
+	Colon,    Colon2,    ColonEq,
+	Carrot,   Carrot2,   CarrotEq,
+	LArr,     LArr2,     LArrEq,
+	RArr,     RArr2,     RArrEq,
+	Plus,     PlusEq,
+	Dash,     DashEq,
+	Star,     StarEq,
+	Slash,    SlashEq,
+	Percent,  PercentEq,
+	Eq,       Eq2,
+	Bang,     BangEq,
 	Eof,
 }
 
@@ -80,72 +83,83 @@ impl Kind {
 			Self::Integer(num) => num.to_string().len(),
 			Self::Decimal(num) => num.to_string().len(),
 
-			// FixedF(u8),
-			// FixedD(u8),
+			// Self::Fix16(b) => if b < 10 { 2 } else { 3 },
+			// Self::Fix32(b) => if b < 10 { 2 } else { 3 },
 
-			Self::Record |
-			Self::Region |
+			Self::Overlay => 7,
+
+			Self::Record => 6,
+			Self::Region => 6,
 			Self::Return => 6,
-			Self::Value |
-			Self::Arrow |
-			Self::False |
-			Self::Index |
-			Self::Table |
-			Self::Where |
+
+			Self::Value => 5,
+			Self::Arrow => 5,
+			Self::False => 5,
+			Self::Index => 5,
+			Self::Table => 5,
+			Self::Where => 5,
 			Self::While => 5,
-			Self::Bool |
-			Self::Else |
-			Self::Main |
-			Self::Proc |
+
+			Self::Bool => 4,
+			Self::Else => 4,
+			Self::Main => 4,
+			Self::Proc => 4,
 			Self::True => 4,
-			Self::For |
-			Self::Sub |
-			Self::S16 | Self::S32 |
-			Self::U16 | Self::U32 => 3,
-			Self::AmpAmp |
-			Self::At |
-			Self::BarBar |
-			Self::BangEqual |
-			Self::CarrotCarrot |
-			Self::CarrotEqual |
-			Self::ColonColon |
-			Self::ColonEqual |
-			Self::DashEqual |
-			Self::DotDot |
-			Self::EqualEqual |
-			Self::If |
-			Self::In |
-			Self::GreaterEqual |
-			Self::GreaterGreater |
-			Self::LessEqual |
-			Self::LessLess |
-			Self::PercentEqual |
-			Self::PlusEqual |
-			Self::SlashEqual |
-			Self::StarEqual |
-			Self::S8 | Self::U8 => 2,
-			Self::Bang |
-			Self::Carrot |
-			Self::Colon |
-			Self::Comma |
-			Self::CBrace |
-			Self::CBracket |
-			Self::CParen |
-			Self::Dash |
-			Self::Dot |
-			Self::Greater |
-			Self::Less |
-			Self::OBrace |
-			Self::OBracket |
-			Self::OParen |
-			Self::Plus |
+
+			Self::For => 3,
+			Self::Sub => 3,
+			Self::S16 => 3,
+			Self::S32 => 3,
+			Self::U16 => 3,
+			Self::U32 => 3,
+
+			Self::Amp2 => 2,
+			Self::At => 2,
+			Self::Bar2 => 2,
+			Self::BangEq => 2,
+			Self::Carrot2 => 2,
+			Self::CarrotEq => 2,
+			Self::Colon2 => 2,
+			Self::ColonEq => 2,
+			Self::DashEq => 2,
+			Self::Dot2 => 2,
+			Self::Eq2 => 2,
+			Self::If => 2,
+			Self::In => 2,
+			Self::RArrEq => 2,
+			Self::RArr2 => 2,
+			Self::LArrEq => 2,
+			Self::LArr2 => 2,
+			Self::PercentEq => 2,
+			Self::PlusEq => 2,
+			Self::SlashEq => 2,
+			Self::StarEq => 2,
+			Self::S8 => 2,
+			Self::U8 => 2,
+
+			Self::Bang => 1,
+			Self::Carrot => 1,
+			Self::Colon => 1,
+			Self::Comma => 1,
+			Self::CBrace => 1,
+			Self::CBracket => 1,
+			Self::CParen => 1,
+			Self::Dash => 1,
+			Self::Dot => 1,
+			Self::RArr => 1,
+			Self::LArr => 1,
+			Self::OBrace => 1,
+			Self::OBracket => 1,
+			Self::OParen => 1,
+			Self::Plus => 1,
 			Self::Semicolon => 1,
-			Self::Amp |
-			Self::Bar |
-			Self::Equal |
-			Self::Percent |
-			Self::Star |
-			Self::Slash |
+			Self::Amp => 1,
+			Self::Bar => 1,
+			Self::Eq => 1,
+			Self::Percent => 1,
+			Self::Star => 1,
+			Self::Slash => 1,
+
 			Self::Eof => 0,
 		}
 	}
