@@ -2,10 +2,8 @@
 use crate::cursor::Cursor;
 use crate::error::{self, CompilerError};
 use crate::identifier::{self, Id as IdentId, Identifier};
-use crate::token;
+use crate::token::{Id as TokenId, Kind};
 use crate::{Data, Type};
-
-type TokenId = token::Id;
 
 pub type ValueMap = identifier::Map<Value>;
 #[cfg(feature="ready")]
@@ -121,7 +119,7 @@ pub fn eval(data: &mut Data) {
 fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
 	loop {
 		match cursor.current(data) {
-			token::Kind::Main => {
+			Kind::Main => {
 				cursor.advance();
 				let tok_start = cursor.index();
 				check_braces(cursor, data)?;
@@ -129,7 +127,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				data.procedures.insert("main".id(), ProcType { params: vec![], ret_type: Type::Unit });
 			}
 
-			token::Kind::Sub => {
+			Kind::Sub => {
 				cursor.advance();
 				let tok_start = cursor.index();
 				check_braces(cursor, data)?;
@@ -137,7 +135,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				data.procedures.insert("sub".id(), ProcType { params: vec![], ret_type: Type::Unit });
 			}
 
-			token::Kind::Proc => {
+			Kind::Proc => {
 				cursor.advance();
 				let name_id = cursor.expect_identifier(data, "procedure name")?;
 				let (params, ret_type, tok_start) = discover_proc(cursor, data)?;
@@ -146,7 +144,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 			}
 
 			#[cfg(feature="ready")]
-			token::Kind::Region => {
+			Kind::Region => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(data, "region name")?;
 				let region = discover_region(cursor, data)?;
@@ -154,7 +152,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 			}
 
 			#[cfg(feature="ready")]
-			token::Kind::Record => {
+			Kind::Record => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(data, "record name")?;
 				let record = discover_record(cursor, data)?;
@@ -162,36 +160,36 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 			}
 
 			#[cfg(feature="ready")]
-			token::Kind::Table => {
+			Kind::Table => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(data, "table name")?;
 				let table = discover_table(cursor, data)?;
 				data.tables.insert(ident_id, table);
 			}
 
-			token::Kind::Index => return Err(error::error(data,
+			Kind::Index => return Err(error::error(data,
 				"indexes not yet implemented",
 				cursor.index())),
 
-			token::Kind::Identifier(ident_id) => {
+			Kind::Identifier(ident_id) => {
 				cursor.advance();
-				cursor.expect(data, token::Kind::Colon2)?;
+				cursor.expect(data, Kind::Colon2)?;
 				match cursor.peek(data, 0) {
-					token::Kind::Integer(value) => {
+					Kind::Integer(value) => {
 						cursor.advance(); // increment past the integer, as we already have it
-						cursor.expect(data, token::Kind::Semicolon)?;
+						cursor.expect(data, Kind::Semicolon)?;
 						data.values.insert(ident_id, Value::Integer(value));
 					}
-					token::Kind::Decimal(value) => {
+					Kind::Decimal(value) => {
 						cursor.advance(); // increment past the decimal, as we already have it
-						cursor.expect(data, token::Kind::Semicolon)?;
+						cursor.expect(data, Kind::Semicolon)?;
 						data.values.insert(ident_id, Value::Decimal(value));
 					}
 					_ => return Err(error::expected_token(data, "value statement", cursor.index())),
 				}
 			}
 
-			token::Kind::Eof => break,
+			Kind::Eof => break,
 			_ => return Err(error::expected_token(data,
 				"top-level statement",
 				cursor.index())),
@@ -202,13 +200,13 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 }
 
 fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
-	cursor.expect(data, token::Kind::OBrace)?;
+	cursor.expect(data, Kind::OBrace)?;
 	let mut brace_count = 1;
-	while brace_count > 0 && cursor.current(data) != token::Kind::Eof {
+	while brace_count > 0 && cursor.current(data) != Kind::Eof {
 		brace_count += match cursor.current(data) {
-			token::Kind::OBrace => 1,
-			token::Kind::CBrace => -1,
-			token::Kind::Eof => {
+			Kind::OBrace => 1,
+			Kind::CBrace => -1,
+			Kind::Eof => {
 				return Err(crate::error::expected_token(data, "end of procedure", cursor.index()));
 			}
 			_ => 0,
@@ -220,11 +218,11 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerErro
 }
 
 fn discover_proc(cursor: &mut Cursor, data: &mut Data,
-) -> Result<(Vec<Param>, Type, token::Id), CompilerError> {
-	cursor.expect(data, token::Kind::OParen)?;
-	let params = discover_fields(cursor, data, token::Kind::CParen)?;
-	cursor.expect(data, token::Kind::CParen)?;
-	let ret_type = if cursor.expect(data, token::Kind::Arrow).is_ok() {
+) -> Result<(Vec<Param>, Type, TokenId), CompilerError> {
+	cursor.expect(data, Kind::OParen)?;
+	let params = discover_fields(cursor, data, Kind::CParen)?;
+	cursor.expect(data, Kind::CParen)?;
+	let ret_type = if cursor.expect(data, Kind::Arrow).is_ok() {
 		cursor.expect_type(data)?
 	} else {
 		crate::Type::Unit
@@ -235,15 +233,15 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 }
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data,
-	end_token: token::Kind,
+	end_token: Kind,
 ) -> Result<Vec<Param>, CompilerError> {
 	let mut fields = Vec::default();
 	while end_token != cursor.current(data) {
 		let field_id = cursor.expect_identifier(data, "field name")?;
-		cursor.expect(data, token::Kind::Colon)?;
+		cursor.expect(data, Kind::Colon)?;
 		let field_type = cursor.expect_type(data)?;
 		fields.push((field_id, field_type));
-		if cursor.current(data) != token::Kind::Comma {
+		if cursor.current(data) != Kind::Comma {
 			break;
 		}
 		cursor.advance();
@@ -253,18 +251,18 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 
 #[cfg(feature="ready")]
 fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<Region, CompilerError> {
-	cursor.expect(data, token::Kind::OBracket)?;
+	cursor.expect(data, Kind::OBracket)?;
 	let byte_count = cursor.expect_u32(data, "region size")?;
-	cursor.expect(data, token::Kind::CBracket)?;
-	cursor.expect(data, token::Kind::At)?;
+	cursor.expect(data, Kind::CBracket)?;
+	cursor.expect(data, Kind::At)?;
 	let address = cursor.expect_u32(data, "region address")?;
-	cursor.expect(data, token::Kind::Semicolon)?;
+	cursor.expect(data, Kind::Semicolon)?;
 	Ok(Region { byte_count, address })
 }
 
 #[cfg(feature="ready")]
 fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<u32>, CompilerError> {
-	if cursor.expect(data, token::Kind::At).is_ok() {
+	if cursor.expect(data, Kind::At).is_ok() {
 		if let Ok(num) = cursor.expect_u32(data, "record address") {
 			for (id, region) in &data.regions {
 				let addr_start = region.address;
@@ -289,21 +287,21 @@ fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<u32>,
 #[cfg(feature="ready")]
 fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, CompilerError> {
 	let address = discover_address(cursor, data)?;
-	cursor.expect(data, token::Kind::OBrace)?;
-	let fields = discover_fields(cursor, data, token::Kind::CBrace)?;
-	cursor.expect(data, token::Kind::CBrace)?;
+	cursor.expect(data, Kind::OBrace)?;
+	let fields = discover_fields(cursor, data, Kind::CBrace)?;
+	cursor.expect(data, Kind::CBrace)?;
 	Ok(Record { address, fields })
 }
 
 #[cfg(feature="ready")]
 fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, CompilerError> {
-	cursor.expect(data, token::Kind::OBracket)?;
+	cursor.expect(data, Kind::OBracket)?;
 	let row_count = cursor.expect_u32(data, "table size")?;
-	cursor.expect(data, token::Kind::CBracket)?;
+	cursor.expect(data, Kind::CBracket)?;
 	let address = discover_address(cursor, data)?;
-	cursor.expect(data, token::Kind::OBrace)?;
-	let column_spec = discover_fields(cursor, data, token::Kind::CBrace)?;
-	cursor.expect(data, token::Kind::CBrace)?;
+	cursor.expect(data, Kind::OBrace)?;
+	let column_spec = discover_fields(cursor, data, Kind::CBrace)?;
+	cursor.expect(data, Kind::CBrace)?;
 	Ok(Table {
 		address,
 		row_count,
