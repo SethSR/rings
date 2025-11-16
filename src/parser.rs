@@ -542,10 +542,7 @@ mod can_parse_proc {
 		lexer::eval(&mut db);
 		discovery::eval(&mut db);
 		super::eval(&mut db);
-		assert!(db.errors.is_empty(), "{}", db.errors.iter()
-			.map(|e| e.display(&db))
-			.collect::<Vec<_>>()
-			.join("\n"));
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		db
 	}
 

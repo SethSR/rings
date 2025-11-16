@@ -320,10 +320,7 @@ mod can_parse {
 		data.DEBUG_show_tokens = true;
 		crate::lexer::eval(&mut data);
 		eval(&mut data);
-		assert!(data.errors.is_empty(), "{}", data.errors.iter()
-			.map(|e| e.display(&data))
-			.collect::<Vec<_>>()
-			.join("\n"));
+		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		data
 	}
 

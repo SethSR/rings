@@ -191,6 +191,13 @@ impl Data {
 
 		&self.source[start..end]
 	}
+
+	fn errors_to_string(&self) -> String {
+		format!("{}", self.errors.iter()
+			.map(|e| e.display(self))
+			.collect::<Vec<_>>()
+			.join("\n\n"))
+	}
 }
 
 impl fmt::Display for Data {
@@ -395,8 +402,8 @@ impl fmt::Display for Data {
 			writeln!(f)?;
 		}
 
-		for err in &self.errors {
-			writeln!(f, "{}\n", err.display(self))?;
+		if !self.errors.is_empty() {
+			writeln!(f, "{}", self.errors_to_string())?;
 		}
 
 		Ok(())
