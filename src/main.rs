@@ -70,7 +70,7 @@ pub struct Data {
 	#[cfg(feature="ready")]
 	tables: discovery::TableMap,
 	/* Parsing */
-	proc_queue: VecDeque<parser::Task>,
+	task_queue: VecDeque<parser::Task>,
 	ast_nodes: ast::KindList,
 	ast_pos_tok: ast::LocList,
 	// procedures ready to be type-checked
@@ -120,7 +120,7 @@ impl Data {
 		&self.source[self.identifiers[ident_id].clone()]
 	}
 
-	fn type_text(&self, ring_type: Type) -> String {
+	fn type_text(&self, ring_type: &Type) -> String {
 		match ring_type {
 			#[cfg(feature="ready")]
 			Type::Record(ident_id) => self.text(&ident_id).to_string(),
@@ -198,10 +198,11 @@ impl fmt::Display for Data {
 		writeln!(f, "=== Rings Compiler ===")?;
 		writeln!(f)?;
 
+		#[cfg(feature="ready")]
 		fn fields_to_str(data: &Data, fields: &[(identifier::Id, Type)]) -> String {
 			fields.iter()
 				.map(|(field_id, field_type)| {
-					format!("{}:{}", data.text(field_id), data.type_text(*field_type))
+					format!("{}:{}", data.text(field_id), data.type_text(field_type))
 				})
 				.collect::<Vec<_>>()
 				.join(", ")
@@ -286,24 +287,45 @@ impl fmt::Display for Data {
 		writeln!(f)?;
 
 		if !self.procedures.is_empty() {
-			writeln!(f, "{:<32} | {:<16} | PARAMETERS",
-				"PROC-TYPE", "RETURN-TYPE")?;
-			writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
-			for ident_id in self.procedures.keys() {
-				let name = self.text(ident_id);
-				let data = &self.procedures[ident_id];
-				let ret_type = format!("{:?}", data.ret_type);
-				let param_str = fields_to_str(self, &data.params);
-				writeln!(f, "{name:<32} | {ret_type:<16} | {param_str}")?;
-			}
+			let (types, params): (Vec<_>, Vec<_>) = self.procedures.iter()
+					.map(|(ident_id, data)| {
+						let name = self.text(ident_id);
+						let params = data.params.iter()
+							.map(|(p_name, p_type)| {
+								format!("{name:<32} | {:<16} | {:<16}", self.text(p_name), self.type_text(p_type))
+							})
+							.collect::<Vec<_>>()
+							.join("\n");
+						(
+							format!("{name:<32} | {:<16?}", data.ret_type),
+							params,
+						)
+					})
+					.unzip();
+
+			writeln!(f, "{:<32} | RETURN-TYPE",
+				"PROCEDURE")?;
+			writeln!(f, "{:-<32} | {:-<16}", "", "")?;
+			writeln!(f, "{}", types.join("\n"))?;
 			writeln!(f)?;
+
+			let params = params.into_iter()
+				.filter(|p| !p.is_empty())
+				.collect::<Vec<_>>();
+			if !params.is_empty() {
+				writeln!(f, "{:<32} | {:<16} | PARAM-TYPE",
+					"PROCEDURE", "PARAM-NAME")?;
+				writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
+				writeln!(f, "{}", params.join("\n"))?;
+				writeln!(f)?;
+			}
 		}
 
-		if !self.proc_queue.is_empty() {
+		if !self.task_queue.is_empty() {
 			writeln!(f, "{:<32} | {:<11} | {:<10} | PREV READY COUNT",
 				"PROC-TASK", "START TOKEN", "PREV TOKEN")?;
 			writeln!(f, "{:-<32} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "")?;
-			for task in &self.proc_queue {
+			for task in &self.task_queue {
 				writeln!(f, "{:<32} | {:<11} | {:<10} | {}",
 					task.name(self),
 					task.tok_start.index(),
@@ -332,7 +354,7 @@ impl fmt::Display for Data {
 			writeln!(f, "{:-<8} | {:-<8}", "", "")?;
 			for (ast_id, rings_type) in &self.ast_to_type {
 				let ast = ast_id.to_string();
-				writeln!(f, "{ast:<8} | {:<8}", self.type_text(*rings_type))?;
+				writeln!(f, "{ast:<8} | {:<8}", self.type_text(rings_type))?;
 			}
 			writeln!(f)?;
 		}
@@ -342,7 +364,7 @@ impl fmt::Display for Data {
 				"VARIABLE")?;
 			writeln!(f, "{:-<16} | {:-<8}", "", "")?;
 			for (ident_id, rings_type) in &self.ident_to_type {
-				writeln!(f, "{:<16} | {:<8}", self.text(ident_id), self.type_text(*rings_type))?;
+				writeln!(f, "{:<16} | {:<8}", self.text(ident_id), self.type_text(rings_type))?;
 			}
 			writeln!(f)?;
 		}
@@ -356,7 +378,7 @@ impl fmt::Display for Data {
 					writeln!(f, "{:<32} | {:<16} | {:<16}",
 						self.text(ident_id),
 						self.text(local_id),
-						self.type_text(*ring_type),
+						self.type_text(ring_type),
 					)?;
 				}
 			}

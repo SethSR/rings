@@ -10,7 +10,7 @@ type TokenId = token::Id;
 pub type ValueMap = identifier::Map<Value>;
 #[cfg(feature="ready")]
 pub type RegionMap = identifier::Map<Region>;
-pub type ProcMap = identifier::Map<Procedure>;
+pub type ProcMap = identifier::Map<ProcType>;
 #[cfg(feature="ready")]
 pub type RecordMap = identifier::Map<Record>;
 #[cfg(feature="ready")]
@@ -35,7 +35,7 @@ pub struct Region {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Procedure {
+pub struct ProcType {
 	pub params: Vec<Param>,
 	pub ret_type: Type,
 }
@@ -126,7 +126,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				let tok_start = cursor.index();
 				check_braces(cursor, data)?;
 				data.parse_queue.push_back(Task::MainProc { tok_start });
-				data.procedures.insert("main".id(), Procedure { params: vec![], ret_type: Type::Unit });
+				data.procedures.insert("main".id(), ProcType { params: vec![], ret_type: Type::Unit });
 			}
 
 			token::Kind::Sub => {
@@ -134,21 +134,15 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				let tok_start = cursor.index();
 				check_braces(cursor, data)?;
 				data.parse_queue.push_back(Task::SubProc { tok_start });
-				data.procedures.insert("sub".id(), Procedure { params: vec![], ret_type: Type::Unit });
+				data.procedures.insert("sub".id(), ProcType { params: vec![], ret_type: Type::Unit });
 			}
 
 			token::Kind::Proc => {
 				cursor.advance();
 				let name_id = cursor.expect_identifier(data, "procedure name")?;
 				let (params, ret_type, tok_start) = discover_proc(cursor, data)?;
-				data.parse_queue.push_back(Task::Proc {
-					name_id,
-					tok_start,
-				});
-				data.procedures.insert(name_id, Procedure {
-					params,
-					ret_type,
-				});
+				data.parse_queue.push_back(Task::Proc { name_id, tok_start });
+				data.procedures.insert(name_id, ProcType { params, ret_type });
 			}
 
 			#[cfg(feature="ready")]
@@ -352,7 +346,7 @@ mod can_parse {
 			tok_start: token::Id::new(8),
 		});
 		assert_eq!(data.procedures.len(), 1);
-		assert_eq!(data.procedures[&"b".id()], Procedure {
+		assert_eq!(data.procedures[&"b".id()], ProcType {
 			params: vec![],
 			ret_type: Type::Unit,
 		});
@@ -367,7 +361,7 @@ mod can_parse {
 			tok_start: token::Id::new(11),
 		});
 		assert_eq!(data.procedures.len(), 1);
-		assert_eq!(data.procedures[&"a".id()], Procedure {
+		assert_eq!(data.procedures[&"a".id()], ProcType {
 			params: vec![
 				("b".id(), Type::s8_top()),
 				("c".id(), Type::s8_top()),
@@ -385,7 +379,7 @@ mod can_parse {
 			tok_start: token::Id::new(6),
 		});
 		assert_eq!(data.procedures.len(), 1);
-		assert_eq!(data.procedures[&"a".id()], Procedure {
+		assert_eq!(data.procedures[&"a".id()], ProcType {
 			params: vec![],
 			ret_type: Type::s8_top(),
 		});

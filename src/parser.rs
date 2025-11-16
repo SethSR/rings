@@ -47,7 +47,7 @@ impl Task {
 }
 
 pub fn eval(data: &mut Data) {
-	data.proc_queue.extend(data.parse_queue.iter()
+	data.task_queue.extend(data.parse_queue.iter()
 		.map(|task| match task {
 			crate::discovery::Task::MainProc { tok_start } => Task::new(
 				TaskKind::Proc("main".id()),
@@ -64,7 +64,7 @@ pub fn eval(data: &mut Data) {
 		})
 	);
 
-	while let Some(mut task) = data.proc_queue.pop_front() {
+	while let Some(mut task) = data.task_queue.pop_front() {
 		let err_len = data.errors.len();
 
 		match parse(data, task.tok_start) {
@@ -76,16 +76,16 @@ pub fn eval(data: &mut Data) {
 					// We made progress, so we're not stuck yet. Re-queue and try again.
 					task.prev_furthest_token = token_id;
 					task.prev_ready_proc_count = data.completed_procs.len();
-					data.proc_queue.push_back(task);
+					data.task_queue.push_back(task);
 				} else if data.completed_procs.len() > task.prev_ready_proc_count {
 					data.errors.truncate(err_len);
 
 					// Someone else made progress, so maybe a different dependency will finish. Re-queue and
 					// try again.
 					task.prev_ready_proc_count = data.completed_procs.len();
-					data.proc_queue.push_back(task);
+					data.task_queue.push_back(task);
 				} else {
-					data.proc_queue.push_back(task);
+					data.task_queue.push_back(task);
 					return;
 				}
 			}
