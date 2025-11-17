@@ -11,12 +11,14 @@ mod identifier;
 mod lexer;
 mod parser;
 mod tac;
+mod task;
 mod token;
 mod type_checker;
 mod rings_type;
 
 use error::CompilerError;
 use rings_type::Type;
+use task::Task;
 
 fn main() {
 	let mut args = env::args();
@@ -60,7 +62,6 @@ pub struct Data {
 	tok_pos: token::PosList,
 	identifiers: identifier::Map<Range<SrcPos>>,
 	/* Discovery */
-	parse_queue: VecDeque<discovery::Task>,
 	procedures: discovery::ProcMap,
 	values: discovery::ValueMap,
 	#[cfg(feature="ready")]
@@ -70,7 +71,7 @@ pub struct Data {
 	#[cfg(feature="ready")]
 	tables: discovery::TableMap,
 	/* Parsing */
-	task_queue: VecDeque<parser::Task>,
+	task_queue: VecDeque<Task>,
 	ast_nodes: ast::KindList,
 	ast_pos_tok: ast::LocList,
 	// procedures ready to be type-checked

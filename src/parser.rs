@@ -4,66 +4,13 @@ use std::ops::Range;
 use crate::ast::{ Block as AstBlock, Id as AstId, Kind as AKind, PathSegment };
 use crate::cursor::Cursor;
 use crate::error::{ self, CompilerError };
-use crate::identifier::{Id as IdentId, Identifier};
+use crate::identifier::{Id as IdentId};
 use crate::token::{ Id as TokenId, Kind as TKind };
 use crate::{ BinaryOp, Data, Bounds, UnaryOp };
 
 type ParseResult = Result<AstId, CompilerError>;
 
-#[derive(Debug)]
-pub enum TaskKind {
-	// procedure name
-	Proc(IdentId),
-}
-
-pub struct Task {
-	pub kind: TaskKind,
-	pub tok_start: TokenId,
-	pub prev_furthest_token: TokenId,
-	pub prev_ready_proc_count: usize,
-}
-
-impl Task {
-	fn new(kind: TaskKind, tok_start: TokenId) -> Self {
-		Self {
-			kind,
-			tok_start,
-			prev_furthest_token: TokenId::default(),
-			prev_ready_proc_count: 0,
-		}
-	}
-
-	pub fn name<'a>(&self, data: &'a Data) -> &'a str {
-		match self.kind {
-			TaskKind::Proc(proc_name) => data.text(&proc_name),
-		}
-	}
-
-	fn name_id(&self) -> IdentId {
-		match self.kind {
-			TaskKind::Proc(proc_name) => proc_name,
-		}
-	}
-}
-
 pub fn eval(data: &mut Data) {
-	data.task_queue.extend(data.parse_queue.iter()
-		.map(|task| match task {
-			crate::discovery::Task::MainProc { tok_start } => Task::new(
-				TaskKind::Proc("main".id()),
-				*tok_start,
-			),
-			crate::discovery::Task::SubProc { tok_start } => Task::new(
-				TaskKind::Proc("sub".id()),
-				*tok_start,
-			),
-			crate::discovery::Task::Proc { name_id, tok_start } => Task::new(
-				TaskKind::Proc(*name_id),
-				*tok_start,
-			),
-		})
-	);
-
 	while let Some(mut task) = data.task_queue.pop_front() {
 		let err_len = data.errors.len();
 
@@ -356,7 +303,7 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data) -> ParseResult {
 	} else if TKind::OBracket == cursor.current(data) {
 		cursor.advance();
 		let start = cursor.expect_u32(data, "start (inclusive) value")?;
-		cursor.expect(data, TKind::Dot)?;
+		cursor.expect(data, TKind::Dot2)?;
 		let end = cursor.expect_u32(data, "end (exclusive) value")?;
 		cursor.expect(data, TKind::CBracket)?;
 		(None, Some(Bounds::Full { start, end }))

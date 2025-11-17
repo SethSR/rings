@@ -3,7 +3,7 @@ use crate::cursor::Cursor;
 use crate::error::{self, CompilerError};
 use crate::identifier::{self, Id as IdentId, Identifier};
 use crate::token::{Id as TokenId, Kind};
-use crate::{Data, Type};
+use crate::{Data, Task, Type};
 
 pub type ValueMap = identifier::Map<Value>;
 #[cfg(feature="ready")]
@@ -93,21 +93,6 @@ impl Table {
 	}
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Task {
-	MainProc {
-		tok_start: TokenId,
-	},
-	SubProc {
-		tok_start: TokenId,
-	},
-	Proc {
-		name_id: IdentId,
-		tok_start: TokenId,
-	}
-	// TODO - srenshaw - Add the rest of the top-level constructs
-}
-
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
 	if let Err(mut e) = eval_loop(&mut cursor, data) {
@@ -123,7 +108,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				cursor.advance();
 				let tok_start = cursor.index();
 				check_braces(cursor, data)?;
-				data.parse_queue.push_back(Task::MainProc { tok_start });
+				data.task_queue.push_back(Task::new_proc("main".id(), tok_start));
 				data.procedures.insert("main".id(), ProcType { params: vec![], ret_type: Type::Unit });
 			}
 
@@ -131,7 +116,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				cursor.advance();
 				let tok_start = cursor.index();
 				check_braces(cursor, data)?;
-				data.parse_queue.push_back(Task::SubProc { tok_start });
+				data.task_queue.push_back(Task::new_proc("sub".id(), tok_start));
 				data.procedures.insert("sub".id(), ProcType { params: vec![], ret_type: Type::Unit });
 			}
 
@@ -139,7 +124,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				cursor.advance();
 				let name_id = cursor.expect_identifier(data, "procedure name")?;
 				let (params, ret_type, tok_start) = discover_proc(cursor, data)?;
-				data.parse_queue.push_back(Task::Proc { name_id, tok_start });
+				data.task_queue.push_back(Task::new_proc(name_id, tok_start));
 				data.procedures.insert(name_id, ProcType { params, ret_type });
 			}
 
@@ -335,11 +320,11 @@ mod can_parse {
 	#[test]
 	fn procedures() {
 		let data = setup("a :: 5; proc b() {}");
-		assert_eq!(data.parse_queue.len(), 1);
-		assert_eq!(data.parse_queue[0], Task::Proc {
-			name_id: "b".id(),
-			tok_start: token::Id::new(8),
-		});
+		assert_eq!(data.task_queue.len(), 1);
+		assert_eq!(data.task_queue[0], Task::new_proc(
+			"b".id(),
+			TokenId::new(8),
+		));
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"b".id()], ProcType {
 			params: vec![],
@@ -350,11 +335,11 @@ mod can_parse {
 	#[test]
 	fn procedure_with_params() {
 		let data = setup("proc a(b: s8, c: s8) {}");
-		assert_eq!(data.parse_queue.len(), 1);
-		assert_eq!(data.parse_queue[0], Task::Proc {
-			name_id: "a".id(),
-			tok_start: token::Id::new(11),
-		});
+		assert_eq!(data.task_queue.len(), 1);
+		assert_eq!(data.task_queue[0], Task::new_proc(
+			"a".id(),
+			TokenId::new(11),
+		));
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], ProcType {
 			params: vec![
@@ -368,11 +353,11 @@ mod can_parse {
 	#[test]
 	fn procedure_with_return() {
 		let data = setup("proc a() -> s8 {}");
-		assert_eq!(data.parse_queue.len(), 1);
-		assert_eq!(data.parse_queue[0], Task::Proc {
-			name_id: "a".id(),
-			tok_start: token::Id::new(6),
-		});
+		assert_eq!(data.task_queue.len(), 1);
+		assert_eq!(data.task_queue[0], Task::new_proc(
+			"a".id(),
+			TokenId::new(6),
+		));
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"a".id()], ProcType {
 			params: vec![],
