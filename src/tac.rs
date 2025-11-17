@@ -115,7 +115,7 @@ impl Location {
 pub type LabelId = u32;
 
 pub fn eval(data: &mut Data) {
-	let mut tac_functions = data.completed_procs.keys()
+	let tac_functions = data.completed_procs.keys()
 		.map(|proc_id| TacSection {
 			name: *proc_id,
 			locals: vec![],
@@ -125,11 +125,10 @@ pub fn eval(data: &mut Data) {
 		})
 		.collect::<Vec<_>>();
 
-	for mut tac_function in tac_functions.drain(..) {
-		let name = data.text(&tac_function.name).to_string();
-
+	for mut tac_function in tac_functions {
 		if !tac_function.lower(data) {
-			eprintln!("failed to lower '{name}'");
+			let name = data.text(&tac_function.name).to_string();
+			panic!("failed to lower '{name}'");
 		}
 		data.tac_sections.insert(tac_function.name, tac_function);
 	}
@@ -542,7 +541,7 @@ mod tests {
 	use crate::{lexer, discovery, parser, type_checker};
 	use crate::identifier::Identifier;
 	use crate::Data;
-
+	use crate::rings_type::Type;
 	use super::*;
 
 	fn setup(source: &str) -> Data {
@@ -552,10 +551,6 @@ mod tests {
 		parser::eval(&mut data);
 		type_checker::eval(&mut data);
 		eval(&mut data);
-		assert!(data.errors.is_empty(), "{}", data.errors.iter()
-				.map(|e| e.display(&data))
-				.collect::<Vec<_>>()
-				.join("\n"));
 		data
 	}
 
@@ -564,6 +559,7 @@ mod tests {
 		let data = setup("proc a() {
 			return;
 		}");
+		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		assert_eq!(data.tac_sections.len(), 1);
 		assert_eq!(data.tac_sections[&"a".id()].instructions, [
 			Tac::Return(None),
@@ -575,6 +571,7 @@ mod tests {
 		let data = setup("proc a() -> s8 {
 			return 100 - 200;
 		}");
+		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		assert_eq!(data.tac_sections.len(), 1);
 		assert_eq!(data.tac_sections[&"a".id()].instructions, [
 			Tac::BinOp {
@@ -584,6 +581,39 @@ mod tests {
 				dst: Location::Temp(0),
 			},
 			Tac::Return(Some(Location::Temp(0))),
+		]);
+	}
+
+	#[test]
+	fn proc_if() {
+		let data = setup("proc a() -> s8 {
+			let b: s8 = 5;
+			let c: s8 = 3;
+			if b < 10 {
+				c = 2;
+			} else {
+				b = 1;
+			}
+			return b + c;
+		}");
+		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
+		let tac = &data.tac_sections[&"a".id()];
+		assert_eq!(tac.locals, [
+			("b".id(), Type::s8_top()),
+			("c".id(), Type::s8_top()),
+		]);
+		assert_eq!(tac.instructions, [
+			Tac::Copy { src: Location::Constant(5), dst: Location::Variable("b".id()) },
+			Tac::Copy { src: Location::Constant(3), dst: Location::Variable("c".id()) },
+			Tac::BinOp { op: BinaryOp::CmpLT, left: Location::Variable("b".id()), right: Location::Constant(10), dst: Location::Temp(0) },
+			Tac::JumpIfNot { cond: Location::Temp(0), target: 0 },
+			Tac::Copy { src: Location::Constant(2), dst: Location::Variable("c".id()) },
+			Tac::Jump(1),
+			Tac::Label(0),
+			Tac::Copy { src: Location::Constant(1), dst: Location::Variable("b".id()) },
+			Tac::Label(1),
+			Tac::BinOp { op: BinaryOp::Add, left: Location::Variable("b".id()), right: Location::Variable("c".id()), dst: Location::Temp(1) },
+			Tac::Return(Some(Location::Temp(1))),
 		]);
 	}
 }

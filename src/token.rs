@@ -43,6 +43,7 @@ pub enum Kind {
 	Table,
 	Value,
 
+	Let,
 	Return,
 	True,
 	False,
@@ -107,6 +108,7 @@ impl Kind {
 			Self::True => 4,
 
 			Self::For => 3,
+			Self::Let => 3,
 			Self::Sub => 3,
 			Self::S16 => 3,
 			Self::S32 => 3,

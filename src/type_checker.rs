@@ -19,8 +19,6 @@ use crate::{Data, Type};
 pub fn eval(data: &mut Data) {
 	let completed_procs = data.completed_procs.clone();
 	for (proc_id, proc_start) in completed_procs {
-		//let proc_name = data.text(proc_id);
-		//println!("{proc_name} AST:");
 		let proc_type = &data.procedures[&proc_id];
 
 		for (param_name, param_type) in &proc_type.params {
@@ -29,6 +27,12 @@ pub fn eval(data: &mut Data) {
 
 		let node = data.ast_nodes[proc_start].clone();
 		let range = data.ast_pos_tok[proc_start].clone();
+
+		//eprintln!("{} AST:", data.text(&proc_id));
+		//for ast in &data.ast_nodes {
+		//	eprintln!("  {ast:?}");
+		//}
+
 		let ret_type = proc_type.ret_type;
 		if let Err(err_msg) = check_stmt(data, &node, proc_start, ret_type) {
 			let mut err = error::error(data, &err_msg, range.start);
@@ -67,11 +71,19 @@ fn check_stmt(data: &mut Data,
 
 		Kind::Define(lvalue_id, var_type, expr_id) => {
 			//println!("  Define({} : {var_type:?} = {})", lvalue_id.index(), ast_id.index());
+			let Some(expr_kind) = data.ast_nodes.get(*expr_id) else {
+				todo!("expression with no ast node: {expr_id:?}")
+			};
+			check_stmt(data, &expr_kind.clone(), *expr_id, ret_type)?;
 			check_define(data, *lvalue_id, *expr_id, *var_type)
 		}
 
 		Kind::Assign(lvalue_id, expr_id) => {
 			//println!("  Assign({} = {})", lvalue_id.index(), ast_id.index());
+			let Some(expr_kind) = data.ast_nodes.get(*expr_id) else {
+				todo!("expression with no ast node: {expr_id:?}")
+			};
+			check_stmt(data, &expr_kind.clone(), *expr_id, ret_type)?;
 			check_assign(data, *lvalue_id, *expr_id)
 		}
 
@@ -230,7 +242,7 @@ fn check_ident(data: &mut Data,
 }
 
 fn check_define(data: &mut Data,
-	lvalue_id: AstId, ast_id: AstId,
+	lvalue_id: AstId, expr_id: AstId,
 	var_type: Type,
 ) -> Result<(), String> {
 	let Kind::Ident(ident_id) = data.ast_nodes[lvalue_id] else {
@@ -242,8 +254,8 @@ fn check_define(data: &mut Data,
 			Err(format!("TC - '{}' has already been defined", data.text(&ident_id)))
 		}
 		Entry::Vacant(e) => {
-			let Some(expr_type) = data.ast_to_type.get(&ast_id) else {
-					return Err(format!("CE - expression has no type: {ast_id:?}"));
+			let Some(expr_type) = data.ast_to_type.get(&expr_id) else {
+					return Err(format!("CE - define expression has no type: {expr_id:?}"));
 			};
 			match expr_type.meet(&var_type) {
 				Type::Bot => {
@@ -253,6 +265,7 @@ fn check_define(data: &mut Data,
 						))
 				}
 				new_type => {
+					data.ast_to_type.insert(lvalue_id, new_type);
 					e.insert(new_type);
 					Ok(())
 				}
@@ -264,11 +277,14 @@ fn check_define(data: &mut Data,
 fn check_assign(data: &Data,
 	lvalue_id: AstId, ast_id: AstId,
 ) -> Result<(), String> {
-	let Some(lvalue_type) = data.ast_to_type.get(&lvalue_id) else {
+	let Kind::Ident(ident_id) = data.ast_nodes[lvalue_id] else {
+		todo!("missing ident for lvalue: {lvalue_id:?}")
+	};
+	let Some(lvalue_type) = data.ident_to_type.get(&ident_id) else {
 		return Err(format!("CE - lvalue has no type: {lvalue_id:?}"));
 	};
 	let Some(expr_type) = data.ast_to_type.get(&ast_id) else {
-		return Err(format!("CE - expression has no type: {ast_id:?}"));
+		return Err(format!("CE - assign expression has no type: {ast_id:?}"));
 	};
 	if expr_type.meet(lvalue_type) != *lvalue_type {
 		Err(format!("TC - variable has type '{}', but expression has type '{}'",
@@ -353,7 +369,7 @@ fn check_return(data: &mut Data,
 			check_stmt(data, &kind, ast_id, proc_type)?;
 			match data.ast_to_type.get(&ast_id) {
 				Some(ret_type) => *ret_type,
-				None => return Err(format!("CE - expression has no type: {ast_id:?}")),
+				None => return Err(format!("CE - return expression has no type: {ast_id:?}")),
 			}
 		}
 		None => Type::Unit,

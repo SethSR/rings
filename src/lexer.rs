@@ -77,6 +77,7 @@ impl Lexer {
 					"for" => token::Kind::For,
 					"if" => token::Kind::If,
 					"in" => token::Kind::In,
+					"let" => token::Kind::Let,
 					"return" => token::Kind::Return,
 					"true" => token::Kind::True,
 					"where" => token::Kind::Where,

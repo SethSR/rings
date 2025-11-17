@@ -100,6 +100,7 @@ fn parse_block(cursor: &mut Cursor, data: &mut Data,
 	let mut block = vec![];
 	while ![TKind::Eof, TKind::CBrace].contains(&cursor.current(data)) {
 		block.push(match cursor.current(data) {
+			TKind::Let => parse_let_statement(cursor, data)?,
 			TKind::Identifier(ident_id) => parse_ident_statement(cursor, data, ident_id)?,
 			TKind::OBrace => {
 				let tok_start = cursor.index();
@@ -117,6 +118,8 @@ fn parse_block(cursor: &mut Cursor, data: &mut Data,
 		});
 	}
 
+	cursor.expect(data, TKind::CBrace)?;
+
 	Ok(AstBlock(block))
 }
 
@@ -126,11 +129,7 @@ fn parse_ident_statement(cursor: &mut Cursor, data: &mut Data,
 	let left_id = parse_access(cursor, data, ident_id)?;
 
 	match cursor.current(data) {
-		TKind::Colon => parse_definition(cursor, data, left_id),
 		TKind::Eq => parse_assignment(cursor, data, left_id),
-		TKind::ColonEq => Err(error::error(data,
-			"type-inference is not implemented yet, please add a type-specifier",
-			cursor.index())),
 		TKind::PlusEq => parse_op_assignment(cursor, data, left_id, BinaryOp::Add),
 		TKind::DashEq => parse_op_assignment(cursor, data, left_id, BinaryOp::Sub),
 		TKind::StarEq => parse_op_assignment(cursor, data, left_id, BinaryOp::Mul),
@@ -139,6 +138,23 @@ fn parse_ident_statement(cursor: &mut Cursor, data: &mut Data,
 			"definition or assignment statement",
 			cursor.index())),
 	}
+}
+
+fn parse_let_statement(cursor: &mut Cursor, data: &mut Data,
+) -> ParseResult {
+	let tok_start = cursor.index();
+	cursor.expect(data, TKind::Let)?;
+	let tok_ident_start = cursor.index();
+	let ident_id = cursor.expect_identifier(data, "variable identifier")?;
+	let tok_ident_range = tok_ident_start..cursor.index();
+	cursor.expect(data, TKind::Colon)?;
+	let var_type = cursor.expect_type(data)?;
+	cursor.expect(data, TKind::Eq)?;
+	let ast_id = parse_expression(cursor, data, &[TKind::Semicolon])?;
+	cursor.expect(data, TKind::Semicolon)?;
+	let tok_range = tok_start..cursor.index();
+	let ident = new_ast(data, AKind::Ident(ident_id), tok_ident_range);
+	Ok(new_ast(data, AKind::Define(ident, var_type, ast_id), tok_range))
 }
 
 fn parse_access(cursor: &mut Cursor, data: &mut Data,
@@ -489,13 +505,13 @@ mod can_parse_proc {
 		lexer::eval(&mut db);
 		discovery::eval(&mut db);
 		super::eval(&mut db);
-		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		db
 	}
 
 	#[test]
 	fn main() {
 		let db = setup("main{}");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert_eq!(db.ast_nodes, [
 			ast::Kind::Return(None),
 			ast::Kind::Block(ast::Block(vec![0.into()])),
@@ -505,36 +521,42 @@ mod can_parse_proc {
 	#[test]
 	fn with_no_params() {
 		let db = setup("main{} proc a() {}");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_internal_expressions() {
-		let db = setup("main { a: s8 = 2 + 3; }");
+		let db = setup("main { let a: s8 = 2 + 3; }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_sub_expressions() {
-		let db = setup("main { a: s8 = (2 + 3) * (4 - 5); }");
+		let db = setup("main { let a: s8 = (2 + 3) * (4 - 5); }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_return() {
 		let db = setup("main{} proc a() -> s8 {}");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_single_param() {
 		let db = setup("main{} proc a(b:s8) {}");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_multi_params() {
 		let db = setup("main{} proc a(b:s8,c:s8) {}");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"a".id()));
 	}
 
@@ -542,6 +564,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_record_param() {
 		let db = setup("main{} record a {} proc b(c:a) {}");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"b".id()));
 	}
 
@@ -549,6 +572,7 @@ mod can_parse_proc {
 	// #[test]
 	// fn with_out_of_order_record_param() {
 	// 	let db = setup("main{} proc b(c:a) {} record a {}");
+	// 	assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 	// 	assert!(db.completed_procs.contains_key(&"b".id()));
 	// }
 
@@ -556,18 +580,21 @@ mod can_parse_proc {
 	#[test]
 	fn with_table_param() {
 		let db = setup("main{} table a[0] {} proc b(c:a) {}");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"b".id()));
 	}
 
 	#[test]
 	fn with_basic_for_loop() {
 		let db = setup("main { for i in [0..10] {} }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_multi_element_for_loop() {
 		let db = setup("main { for i,j in [0..10] {} }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -575,6 +602,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_table_for_loop() {
 		let db = setup("main { for i in a {} }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -582,6 +610,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_table_index_for_loop() {
 		let db = setup("main { for i in a[0..10] {} }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -589,6 +618,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_table_from_for_loop() {
 		let db = setup("main { for i in a[0..] {} }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -596,6 +626,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_table_to_for_loop() {
 		let db = setup("main { for i in a[..10] {} }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -603,6 +634,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_table_full_for_loop() {
 		let db = setup("main { for i in a[..] {} }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -610,6 +642,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_internal_table_index() {
 		let db = setup("main { return a[10].b; }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -617,36 +650,42 @@ mod can_parse_proc {
 	#[test]
 	fn with_internal_table_expression_indexing() {
 		let db = setup("main { return a[2 + 4].b; }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_proc_call() {
 		let db = setup("main { return a(3); }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_proc_call_in_subexpression() {
 		let db = setup("main { return 3 * a(3); }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_proc_call_with_expression_argument() {
 		let db = setup("main { return a(b + 4); }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_proc_call_with_multiple_arguments() {
 		let db = setup("main { return a(2, 4 / b, b + 4); }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_while_loop() {
 		let db = setup("main { while true { } }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -654,6 +693,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_internal_field_assign() {
 		let db = setup("main { a.b = 2; }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 
@@ -661,6 +701,7 @@ mod can_parse_proc {
 	#[test]
 	fn with_internal_table_assign() {
 		let db = setup("main { a[3].b = 2; }");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		assert!(db.completed_procs.contains_key(&"main".id()));
 	}
 }

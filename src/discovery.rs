@@ -152,6 +152,7 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 				data.tables.insert(ident_id, table);
 			}
 
+			#[cfg(feature="ready")]
 			Kind::Index => return Err(error::error(data,
 				"indexes not yet implemented",
 				cursor.index())),
@@ -192,7 +193,7 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerErro
 			Kind::OBrace => 1,
 			Kind::CBrace => -1,
 			Kind::Eof => {
-				return Err(crate::error::expected_token(data, "end of procedure", cursor.index()));
+				return Err(error::expected_token(data, "end of procedure", cursor.index()));
 			}
 			_ => 0,
 		};
@@ -210,7 +211,7 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 	let ret_type = if cursor.expect(data, Kind::Arrow).is_ok() {
 		cursor.expect_type(data)?
 	} else {
-		crate::Type::Unit
+		Type::Unit
 	};
 	let tok_start = cursor.index();
 	check_braces(cursor, data)?;
