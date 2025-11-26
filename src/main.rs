@@ -10,11 +10,11 @@ mod error;
 mod identifier;
 mod lexer;
 mod parser;
+mod rings_type;
 mod tac;
 mod task;
 mod token;
 mod type_checker;
-mod rings_type;
 
 use error::CompilerError;
 use rings_type::Type;
@@ -72,15 +72,28 @@ pub struct Data {
 	tables: discovery::TableMap,
 	/* Parsing */
 	task_queue: VecDeque<Task>,
+	/* Backend Procedure Data */
+	proc_db: identifier::Map<ProcData>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ProcData {
+	ast_start: ast::Id,
 	ast_nodes: ast::KindList,
 	ast_pos_tok: ast::LocList,
-	// procedures ready to be type-checked
-	completed_procs: identifier::Map<ast::Id>,
 	/* Type Checking */
 	ast_to_type: HashMap<ast::Id, Type>,
-	ident_to_type: HashMap<identifier::Id, Type>,
+	ident_to_type: identifier::Map<Type>,
 	/* Lowering TAC */
-	tac_sections: identifier::Map<tac::TacSection>,
+	tac_data: Option<tac::Section>,
+}
+
+impl ProcData {
+	pub fn new(ast_start: ast::Id) -> Self {
+		let mut this = Self::default();
+		this.ast_start = ast_start;
+		this
+	}
 }
 
 #[cfg(feature="ready")]
@@ -356,51 +369,50 @@ impl fmt::Display for Data {
 			writeln!(f)?;
 		}
 
-		if !self.ast_to_type.is_empty() {
-			writeln!(f, "{:<8} | TYPE",
-				"AST-ID")?;
-			writeln!(f, "{:-<8} | {:-<8}", "", "")?;
-			for (ast_id, rings_type) in &self.ast_to_type {
-				let ast = ast_id.to_string();
-				writeln!(f, "{ast:<8} | {:<8}", self.type_text(rings_type))?;
-			}
-			writeln!(f)?;
-		}
+		if !self.proc_db.is_empty() {
+			for (proc_id, proc_data) in &self.proc_db {
+				if !proc_data.ast_to_type.is_empty() {
+					writeln!(f, "{:<32} | {:<8} | TYPE",
+						"PROCEDURE", "AST-ID")?;
+					writeln!(f, "{:-<32} | {:-<8} | {:-<8}", "", "", "")?;
+					for (ast_id, rings_type) in &proc_data.ast_to_type {
+						let ast = ast_id.to_string();
+						writeln!(f, "{:<32} | {ast:<8} | {:<8}",
+							self.text(proc_id), self.type_text(rings_type))?;
+					}
+					writeln!(f)?;
+				}
 
-		if !self.ident_to_type.is_empty() {
-			writeln!(f, "{:<16} | TYPE",
-				"VARIABLE")?;
-			writeln!(f, "{:-<16} | {:-<8}", "", "")?;
-			for (ident_id, rings_type) in &self.ident_to_type {
-				writeln!(f, "{:<16} | {:<8}", self.text(ident_id), self.type_text(rings_type))?;
-			}
-			writeln!(f)?;
-		}
+				if !proc_data.ident_to_type.is_empty() {
+					writeln!(f, "{:<32} | {:<16} | TYPE",
+						"PROCEDURE", "VARIABLE")?;
+					writeln!(f, "{:-<32} | {:-<16} | {:-<8}", "", "", "")?;
+					for (ident_id, rings_type) in &proc_data.ident_to_type {
+						writeln!(f, "{:<32} | {:<16} | {:<8}",
+							self.text(proc_id), self.text(ident_id), self.type_text(rings_type))?;
+					}
+					writeln!(f)?;
+				}
 
-		if !self.tac_sections.is_empty() {
-			writeln!(f, "{:<32} | {:<16} | LOCAL-TYPE",
-				"TAC-LOCALS", "LOCAL-NAME")?;
-			writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
-			for (ident_id, section) in &self.tac_sections {
-				for (local_id, ring_type) in &section.locals {
-					writeln!(f, "{:<32} | {:<16} | {:<16}",
-						self.text(ident_id),
-						self.text(local_id),
-						self.type_text(ring_type),
-					)?;
+				if let Some(tac_data) = &proc_data.tac_data {
+					writeln!(f, "{:<32} | {:<16} | LOCAL-TYPE",
+						"TAC-LOCALS", "LOCAL-NAME")?;
+					writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
+					for (local_id, ring_type) in &tac_data.locals {
+						writeln!(f, "{:<32} | {:<16} | {:<16}",
+							self.text(proc_id), self.text(local_id), self.type_text(ring_type))?;
+					}
+					writeln!(f)?;
+
+					writeln!(f, "{:<32} | INSTRUCTIONS",
+						"TAC-SECTIONS")?;
+					writeln!(f, "{:-<32} | {:-<16}", "", "")?;
+					for tac in &tac_data.instructions {
+						writeln!(f, "{:<32} | {}", self.text(proc_id), tac.to_text(self))?;
+					}
+					writeln!(f)?;
 				}
 			}
-			writeln!(f)?;
-
-			writeln!(f, "{:<32} | INSTRUCTIONS",
-				"TAC-SECTIONS")?;
-			writeln!(f, "{:-<32} | {:-<16}", "", "")?;
-			for (ident_id, section) in &self.tac_sections {
-				for tac in &section.instructions {
-					writeln!(f, "{:<32} | {}", self.text(ident_id), tac.to_text(self))?;
-				}
-			}
-			writeln!(f)?;
 		}
 
 		if !self.errors.is_empty() {

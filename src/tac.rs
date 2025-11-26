@@ -2,7 +2,7 @@
 use crate::ast;
 use crate::error;
 use crate::identifier::Id as IdentId;
-use crate::{BinaryOp, Data, Bounds, UnaryOp};
+use crate::{BinaryOp, Bounds, Data, ProcData, UnaryOp};
 
 
 type TempId = u32; // Temporary variable ID
@@ -115,27 +115,18 @@ impl Location {
 pub type LabelId = u32;
 
 pub fn eval(data: &mut Data) {
-	let tac_functions = data.completed_procs.keys()
-		.map(|proc_id| TacSection {
-			name: *proc_id,
-			locals: vec![],
-			instructions: vec![],
-			next_temp: 0,
-			next_label: 0,
-		})
-		.collect::<Vec<_>>();
-
-	for mut tac_function in tac_functions {
-		if !tac_function.lower(data) {
-			let name = data.text(&tac_function.name).to_string();
-			panic!("failed to lower '{name}'");
+	for (proc_id, proc_data) in &mut data.proc_db {
+		let mut section = Section::default();
+		section.name = *proc_id;
+		match section.lower(proc_data) {
+			Ok(_) => proc_data.tac_data = Some(section),
+			Err(e) => panic!("{e}"),
 		}
-		data.tac_sections.insert(tac_function.name, tac_function);
 	}
 }
 
-#[derive(Debug, PartialEq)]
-pub struct TacSection {
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Section {
 	pub name: IdentId,
 	// pub params: Vec<IdentId>,
 	pub locals: Vec<(IdentId, crate::Type)>,
@@ -144,21 +135,22 @@ pub struct TacSection {
 	pub next_label: LabelId,
 }
 
-impl TacSection {
-	pub fn lower(&mut self, data: &mut Data) -> bool {
-		let proc_start = data.completed_procs[&self.name];
+impl Section {
+	pub fn lower(&mut self, proc_data: &mut ProcData) -> Result<(), String> {
+		let proc_start = proc_data.ast_start;
 
-		let kind = &data.ast_nodes[proc_start];
-		let range = &data.ast_pos_tok[proc_start];
-		if let Err(err_msg) = self.lower_node(kind, data) {
-			error::error(data, &err_msg, range.start);
-			return false;
+		let kind = &proc_data.ast_nodes[proc_start];
+		if let Err(err_msg) = self.lower_node(kind, proc_data) {
+			//let range = &proc_data.ast_pos_tok[proc_start];
+			//error::error(proc_data, &err_msg, range.start);
+			todo!("output '{err_msg}' as an actual error message with the correct source ranges");
 		}
 
-		true
+		Ok(())
 	}
 
-	fn lower_node(&mut self, kind: &ast::Kind, data: &Data) -> Result<Option<Location>, String> {
+	fn lower_node(&mut self, kind: &ast::Kind, proc_data: &ProcData,
+	) -> Result<Option<Location>, String> {
 		match kind {
 			ast::Kind::Int(value) => {
 				// TODO - srenshaw - Ensure value is within u32
@@ -174,12 +166,12 @@ impl TacSection {
 			}
 
 			ast::Kind::Define(var_id, type_kind, expr_id) => {
-				let ast::Kind::Ident(ident_id) = &data.ast_nodes[*var_id] else {
+				let ast::Kind::Ident(ident_id) = &proc_data.ast_nodes[*var_id] else {
 					return Err("cannot initialize internal variables, assign instead".to_string());
 				};
 
 				// Get initializer value
-				let Some(init_value) = self.lower_node(&data.ast_nodes[*expr_id], data)? else {
+				let Some(init_value) = self.lower_node(&proc_data.ast_nodes[*expr_id], proc_data)? else {
 					return Ok(None);
 				};
 
@@ -196,14 +188,14 @@ impl TacSection {
 			}
 
 			ast::Kind::Assign(var_id, expr_id) => {
-				let Some(lvalue) = self.lower_node(&data.ast_nodes[*var_id], data)? else {
-					todo!("unknown assign L-Value '{:?}'", data.ast_nodes.get(*var_id));
+				let Some(lvalue) = self.lower_node(&proc_data.ast_nodes[*var_id], proc_data)? else {
+					todo!("unknown assign L-Value '{:?}'", proc_data.ast_nodes.get(*var_id));
 				};
 
-				let Some(expr_node) = data.ast_nodes.get(*expr_id) else {
+				let Some(expr_node) = proc_data.ast_nodes.get(*expr_id) else {
 					todo!("no expression AST node {expr_id}");
 				};
-				let Some(rvalue) = self.lower_node(expr_node, data)? else {
+				let Some(rvalue) = self.lower_node(expr_node, proc_data)? else {
 					return Ok(None);
 				};
 
@@ -216,10 +208,10 @@ impl TacSection {
 			}
 
 			ast::Kind::BinOp(op, left_id, right_id) => {
-				let Some(left) = self.lower_node(&data.ast_nodes[*left_id], data)? else {
+				let Some(left) = self.lower_node(&proc_data.ast_nodes[*left_id], proc_data)? else {
 					return Ok(None);
 				};
-				let Some(right) = self.lower_node(&data.ast_nodes[*right_id], data)? else {
+				let Some(right) = self.lower_node(&proc_data.ast_nodes[*right_id], proc_data)? else {
 					return Ok(None);
 				};
 
@@ -237,7 +229,7 @@ impl TacSection {
 			}
 
 			ast::Kind::UnOp(op, right_id) => {
-				let Some(node) = self.lower_node(&data.ast_nodes[*right_id], data)? else {
+				let Some(node) = self.lower_node(&proc_data.ast_nodes[*right_id], proc_data)? else {
 					return Ok(None);
 				};
 
@@ -254,7 +246,7 @@ impl TacSection {
 
 			ast::Kind::Return(maybe_expr) => {
 				let value = if let Some(expr_id) = maybe_expr {
-					self.lower_node(&data.ast_nodes[*expr_id], data)?
+					self.lower_node(&proc_data.ast_nodes[*expr_id], proc_data)?
 				} else {
 					None
 				};
@@ -265,13 +257,13 @@ impl TacSection {
 
 			ast::Kind::Block(stmts) => {
 				for stmt_id in &stmts.0 {
-					self.lower_node(&data.ast_nodes[*stmt_id], data)?;
+					self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
 				}
 				Ok(None)
 			}
 
 			ast::Kind::If(cond_id, then_block, else_block) => {
-				let Some(cond) = self.lower_node(&data.ast_nodes[*cond_id], data)? else {
+				let Some(cond) = self.lower_node(&proc_data.ast_nodes[*cond_id], proc_data)? else {
 					return Ok(None);
 				};
 
@@ -283,14 +275,14 @@ impl TacSection {
 
 				// then block
 				for stmt_id in &then_block.0 {
-					self.lower_node(&data.ast_nodes[*stmt_id], data)?;
+					self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
 				}
 				self.emit(Tac::Jump(end_label));
 
 				// else block
 				self.emit(Tac::Label(else_label));
 				for stmt_id in &else_block.0 {
-					self.lower_node(&data.ast_nodes[*stmt_id], data)?;
+					self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
 				}
 
 				// end
@@ -309,14 +301,14 @@ impl TacSection {
 
 				// body
 				for stmt_id in &body_block.0 {
-					self.lower_node(&data.ast_nodes[*stmt_id], data)?;
+					self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
 				}
 
 				// goto start
 				self.emit(Tac::Label(cond_label));
 
 				// if !cond goto end
-				let Some(cond) = self.lower_node(&data.ast_nodes[*cond_id], data)? else {
+				let Some(cond) = self.lower_node(&proc_data.ast_nodes[*cond_id], proc_data)? else {
 					return Ok(None);
 				};
 				self.emit(Tac::JumpIf { cond, target: loop_label });
@@ -337,7 +329,7 @@ impl TacSection {
 				//   body
 				//   i = i + 1
 
-				self.lower_for_loop(data, iter_vars, table_id, bounds, body_block)?;
+				self.lower_for_loop(proc_data, iter_vars, table_id, bounds, body_block)?;
 
 				Ok(None)
 			}
@@ -349,12 +341,12 @@ impl TacSection {
 			#[cfg(feature="ready")]
 			ast::Kind::Access(base_id, segments) => {
 				let temp = Location::Temp(self.alloc_temp());
-				let address = if let Some(record) = data.records.get(base_id) {
-					record.address.unwrap_or_else(|| panic!("no address for record '{}'", data.text(base_id)))
-				} else if let Some(table) = data.tables.get(base_id) {
-					table.address.unwrap_or_else(|| panic!("no address for table '{}'", data.text(base_id)))
+				let address = if let Some(record) = proc_data.records.get(base_id) {
+					record.address.unwrap_or_else(|| panic!("no address for record '{}'", proc_data.text(base_id)))
+				} else if let Some(table) = proc_data.tables.get(base_id) {
+					table.address.unwrap_or_else(|| panic!("no address for table '{}'", proc_data.text(base_id)))
 				} else {
-					panic!("'{}' is not a Record or Table", data.text(base_id));
+					panic!("'{}' is not a Record or Table", proc_data.text(base_id));
 				};
 
 				self.emit(Tac::Copy {
@@ -367,17 +359,17 @@ impl TacSection {
 				while i < segments.len() {
 					match segments[i] {
 						ast::PathSegment::Field(field_id) => {
-							let Some(record) = data.records.get(&curr_ident) else {
-								panic!("no record '{}'", data.text(&curr_ident));
+							let Some(record) = proc_data.records.get(&curr_ident) else {
+								panic!("no record '{}'", proc_data.text(&curr_ident));
 							};
-							let Some(field_offset) = record.field_offset(data, field_id) else {
-								panic!("no field '{}' in record '{}'", data.text(&field_id), data.text(&curr_ident));
+							let Some(field_offset) = record.field_offset(proc_data, field_id) else {
+								panic!("no field '{}' in record '{}'", proc_data.text(&field_id), proc_data.text(&curr_ident));
 							};
 							curr_ident = *match record.fields.iter().find(|(id,_)| field_id == *id) {
 								Some((_, field_type)) => match field_type {
 									crate::Type::Record(id) => Ok(id),
 									crate::Type::Table(id) => Ok(id),
-									_ => Err(format!("expected a record or table type, found '{}'", data.type_text(*field_type))),
+									_ => Err(format!("expected a record or table type, found '{}'", proc_data.type_text(*field_type))),
 								}
 								None => unreachable!(),
 							}?;
@@ -393,18 +385,18 @@ impl TacSection {
 						}
 
 						ast::PathSegment::Index(expr_id, field_id) => {
-							let Some(expr) = self.lower_node(&data.ast_nodes[expr_id], data)? else {
+							let Some(expr) = self.lower_node(&proc_data.ast_nodes[expr_id], proc_data)? else {
 								return Ok(None);
 							};
 
-							let table = &data.tables[&curr_ident];
-							let column_offset = table.column_offset(data, field_id)
-								.unwrap_or_else(|| panic!("no field '{}' in table '{}'", data.text(&field_id), data.text(&curr_ident)));
+							let table = &proc_data.tables[&curr_ident];
+							let column_offset = table.column_offset(proc_data, field_id)
+								.unwrap_or_else(|| panic!("no field '{}' in table '{}'", proc_data.text(&field_id), proc_data.text(&curr_ident)));
 							curr_ident = *match table.column_spec.iter().find(|(id,_)| field_id == *id) {
 								Some((_, field_type)) => match field_type {
 									crate::Type::Record(id) => Ok(id),
 									crate::Type::Table(id) => Ok(id),
-									_ => Err(format!("expected a record or table type, found '{}'", data.type_text(*field_type))),
+									_ => Err(format!("expected a record or table type, found '{}'", proc_data.type_text(*field_type))),
 								}
 								None => unreachable!(),
 							}?;
@@ -420,7 +412,7 @@ impl TacSection {
 							// existence to get the column-offset.
 							let field_size = table.column_spec.iter()
 								.find(|(id,_)| field_id == *id)
-								.map(|(_, field_type)| data.type_size(field_type))
+								.map(|(_, field_type)| proc_data.type_size(field_type))
 								.unwrap();
 
 							// t0 = expr * field_size
@@ -452,7 +444,7 @@ impl TacSection {
 
 	fn lower_for_loop(
 		&mut self,
-		data: &Data,
+		proc_data: &ProcData,
 		iter_vars: &[IdentId],
 		table_id: &Option<IdentId>,
 		bounds: &Option<Bounds>,
@@ -494,11 +486,10 @@ impl TacSection {
 
 			// body
 			for stmt_id in &body_block.0 {
-				self.lower_node(&data.ast_nodes[*stmt_id], data)?;
+				self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
 			}
 
 			// i = i + 1
-			let temp2 = self.alloc_temp();
 			self.emit(Tac::BinOp {
 				op: BinaryOp::Add,
 				left: Location::Variable(index_var),
@@ -556,8 +547,11 @@ mod tests {
 			return;
 		}");
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
-		assert_eq!(data.tac_sections.len(), 1);
-		assert_eq!(data.tac_sections[&"a".id()].instructions, [
+		assert_eq!(data.proc_db.len(), 1);
+		let section = data.proc_db[&"a".id()].tac_data
+			.as_ref()
+			.expect("existing tac-data");
+		assert_eq!(section.instructions, [
 			Tac::Return(None),
 		]);
 	}
@@ -568,8 +562,11 @@ mod tests {
 			return 100 - 200;
 		}");
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
-		assert_eq!(data.tac_sections.len(), 1);
-		assert_eq!(data.tac_sections[&"a".id()].instructions, [
+		assert_eq!(data.proc_db.len(), 1);
+		let section = data.proc_db[&"a".id()].tac_data
+			.as_ref()
+			.expect("existing tac-data");
+		assert_eq!(section.instructions, [
 			Tac::BinOp {
 				op: BinaryOp::Sub,
 				left: Location::Constant(100),
@@ -593,7 +590,10 @@ mod tests {
 			return b + c;
 		}");
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
-		let tac = &data.tac_sections[&"a".id()];
+		let proc_data = &data.proc_db[&"a".id()];
+		let tac = proc_data.tac_data
+			.as_ref()
+			.expect("existing tac-data");
 		assert_eq!(tac.locals, [
 			("b".id(), Type::s8_top()),
 			("c".id(), Type::s8_top()),
@@ -622,7 +622,9 @@ mod tests {
 			}
 		}");
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
-		let tac = &data.tac_sections[&"a".id()];
+		let proc_data = &data.proc_db[&"a".id()];
+		let tac = proc_data.tac_data.as_ref()
+			.expect("existing tac-data");
 		assert_eq!(tac.locals, [
 			("b".id(), Type::s8_top()),
 		]);
@@ -649,7 +651,9 @@ mod tests {
 			}
 		}");
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
-		let tac = &data.tac_sections[&"main".id()];
+		let proc_data = &data.proc_db[&"main".id()];
+		let tac = proc_data.tac_data.as_ref()
+			.expect("existing tac-data");
 		assert_eq!(tac.locals, [
 			("b".id(), Type::s8_top()),
 			("c".id(), Type::s8_top()),
