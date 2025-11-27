@@ -44,26 +44,22 @@ fn check_stmt(proc_data: &mut ProcData,
 	ast_id: AstId, ret_type: Type,
 ) -> Result<(), String> {
 	match proc_data.ast_nodes[ast_id].clone() {
-		Kind::Int(num) => {
-			//println!("  Int({num})");
+		Kind::Int(_) => {
 			proc_data.ast_to_type.insert(ast_id, Type::Top);
 			Ok(())
 		}
 
-		Kind::Dec(num) => {
-			//println!("  Dec({num})");
+		Kind::Dec(_) => {
 			proc_data.ast_to_type.insert(ast_id, Type::Top);
 			Ok(())
 		}
 
 		Kind::Ident(ident_id) => {
-			//println!("  Ident({})", proc_data.text(ident_id));
 			check_ident(proc_data, &ident_id, ast_id);
 			Ok(())
 		}
 
 		Kind::Define(lvalue_id, var_type, expr_id) => {
-			//println!("  Define({} : {var_type:?} = {})", lvalue_id.index(), ast_id.index());
 			if proc_data.ast_nodes.get(expr_id).is_none() {
 				todo!("expression with no ast node: {expr_id:?}")
 			}
@@ -72,7 +68,6 @@ fn check_stmt(proc_data: &mut ProcData,
 		}
 
 		Kind::Assign(lvalue_id, expr_id) => {
-			//println!("  Assign({} = {})", lvalue_id.index(), ast_id.index());
 			if proc_data.ast_nodes.get(expr_id).is_none() {
 				todo!("expression with no ast node: {expr_id:?}")
 			}
@@ -81,34 +76,26 @@ fn check_stmt(proc_data: &mut ProcData,
 		}
 
 		Kind::BinOp(op, left, right) => {
-			//println!("  BinOp({} {op} {})", left.index(), right.index());
 			check_binop(proc_data, ast_id, op, &left, &right, ret_type)
 		}
 
 		Kind::UnOp(op, right) => {
-			//println!("  UnOp({op}{})", right.index());
 			check_unop(proc_data, ast_id, op, &right)
 		}
 
 		Kind::Return(expr_id) => {
-			//println!("  Return({})", expr_id
-			//	.map(|id| id.index().to_string())
-			//	.unwrap_or("-".to_string()));
 			check_return(proc_data, expr_id, ret_type)
 		}
 
 		Kind::Block(block) => {
-			//println!("  Block({} nodes)", block.0.len());
 			check_block(proc_data, &block, ret_type)
 		}
 
 		Kind::If(cond_id, then_block, else_block) => {
-			//println!("  If({} -> {} nodes <> {} nodes)", cond_id.index(), then_block.0.len(), else_block.0.len());
 			check_if(proc_data, cond_id, &then_block, &else_block, ret_type)
 		}
 
 		Kind::While(cond_id, block) => {
-			//println!("  While({} -> {} nodes)", cond_id.index(), block.0.len());
 			check_condition(proc_data, cond_id, ret_type)?;
 			check_block(proc_data, &block, ret_type)
 		}
@@ -116,15 +103,6 @@ fn check_stmt(proc_data: &mut ProcData,
 		Kind::For(_, Some(_), _, _) => { todo!() }
 		#[cfg(feature="ready")]
 		Kind::For(vars, Some(table_id), range, block) => {
-			//println!("  For({} in {}{} -> {} nodes)",
-			//	vars.iter()
-			//		.map(|var| proc_data.text(var))
-			//		.collect::<Vec<_>>()
-			//		.join(","),
-			//	proc_data.text(table_id),
-			//	range.map(|r| format!("[{r}]")).unwrap_or(String::new()),
-			//	block.0.len());
-
 			let table = &proc_data.tables[table_id];
 			debug_assert!(vars.len() <= table.column_spec.len());
 
@@ -157,9 +135,6 @@ fn check_stmt(proc_data: &mut ProcData,
 		}
 
 		Kind::For(vars, None, Some(range), block) => {
-			//println!("  For({} in {} -> {} nodes)",
-			//	vars.iter().map(|var| proc_data.text(var)).collect::<Vec<_>>().join(","),
-			//	range, block.0.len());
 			if vars.len() != 1 {
 				return Err("simple for-loops require a single loop variable".to_string());
 			}
@@ -178,30 +153,15 @@ fn check_stmt(proc_data: &mut ProcData,
 		}
 
 		Kind::For(vars, None, None, block) => {
-			//println!("  For({} -> {} nodes)",
-			//	vars.iter().map(|var| proc_data.text(var)).collect::<Vec<_>>().join(","),
-			//	block.0.len());
 			todo!("infinite for-loop")
 		}
 
 		Kind::Call(proc_id, exprs) => {
-			//println!("  Call({}({}))", proc_data.text(proc_id), exprs.iter()
-			//	.map(|id| id.to_string())
-			//	.collect::<Vec<_>>()
-			//	.join(","));
 			todo!("procedure-call")
 		}
 
 		#[cfg(feature="ready")]
 		Kind::Access(base_id, segments) => {
-			//println!("  Access({}{})", proc_data.text(base_id), segments.iter()
-			//	.map(|segment| match segment {
-			//		PathSegment::Field(field_id) => format!(".{}", proc_data.text(field_id)),
-			//		PathSegment::Index(expr_id, field_id) => format!("[{expr_id}].{}", proc_data.text(field_id)),
-			//	})
-			//	.collect::<Vec<_>>()
-			//	.join(""));
-
 			let mut curr_id = base_id;
 			for segment in segments {
 				match segment {
