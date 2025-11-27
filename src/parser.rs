@@ -195,19 +195,6 @@ fn parse_access(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 	Ok(new_ast(proc_data, kind, tok_range))
 }
 
-fn parse_definition(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
-	lvalue_id: AstId,
-) -> ParseResult {
-	let tok_start = cursor.index();
-	cursor.expect(data, TKind::Colon)?;
-	let var_type = cursor.expect_type(data)?;
-	cursor.expect(data, TKind::Eq)?;
-	let ast_id = parse_expression(cursor, data, proc_data, &[TKind::Semicolon])?;
-	cursor.expect(data, TKind::Semicolon)?;
-	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(proc_data, AKind::Define(lvalue_id, var_type, ast_id), tok_range))
-}
-
 fn parse_assignment(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 	lvalue_id: AstId,
 ) -> ParseResult {
@@ -232,7 +219,8 @@ fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data, proc_data: &mut Pro
 	Ok(new_ast(proc_data, AKind::Assign(lvalue_id, op_id), tok_range))
 }
 
-fn parse_return_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData) -> ParseResult {
+fn parse_return_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
+) -> ParseResult {
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::Return)?;
 	let ast_id = match cursor.expect(data, TKind::Semicolon) {
@@ -273,7 +261,8 @@ fn parse_while_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut P
 	Ok(new_ast(proc_data, AKind::While(cond, block), tok_range))
 }
 
-fn parse_for_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData) -> ParseResult {
+fn parse_for_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
+) -> ParseResult {
 	let tok_start = cursor.index();
 	cursor.expect(data, TKind::For)?;
 
