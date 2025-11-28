@@ -1,51 +1,27 @@
 
-use std::ops::Range;
+use crate::ast::Id as AstId;
+use crate::identifier::Id as IdentId;
+use crate::token::Id as TokenId;
+use crate::{Data, Span};
 
-use crate::token;
-use crate::Data;
-
-pub fn error(data: &Data, message: &str, token_id: token::Id) -> CompilerError {
-	CompilerError::new(get_location(data, token_id), message)
+pub fn error(data: &Data, message: &str, token_id: TokenId) -> Error {
+	Error::new(data.token_source(token_id), message)
 }
 
 #[cfg(feature="ready")]
-pub fn error_with_notes(data: &Data, message: &str, token_id: token::Id,
-	notes: &[(&str, token::Id)],
-) -> CompilerError {
-	let mut err = CompilerError::new(get_location(data, token_id), message);
+pub fn error_with_notes(data: &Data, message: &str, token_id: TokenId,
+	notes: &[(&str, TokenId)],
+) -> Error {
+	let mut err = Error::new(get_location(data, token_id), message);
 	for (note_msg, note_id) in notes {
 		err.with_note_at(get_location(data, *note_id), *note_msg);
 	}
 	err
 }
 
-pub fn expected(span: Range<usize>, expected: &str, found: &str) -> CompilerError {
-	let span = Span { start: span.start, end: span.end };
-	CompilerError::new(span, format!("Expected {expected}, found {found}"))
-}
-
-pub fn expected_token(data: &Data, expected: &str, token_id: token::Id) -> CompilerError {
-	let found = data.tok_list[token_id];
-	if let token::Kind::Identifier(ident_id) = found {
-		error(data, &format!("Expected {expected}, found '{}'", data.text(&ident_id)), token_id)
-	} else {
-		error(data, &format!("Expected {expected}, found {found:?}"), token_id)
-	}
-}
-
-fn get_location(data: &Data, token_id: token::Id) -> Span {
-	let kind = data.tok_list[token_id];
-	let start = data.tok_pos[token_id];
-	Span { start, end: start + kind.size(data) }
-}
-
-pub struct Span {
-	pub start: usize,
-	pub end: usize,
-}
-
+#[derive(Debug, Default, Clone)]
 pub struct Note {
-	pub location: Option<Span>,
+	pub location: Option<Span<usize>>,
 	pub message: String,
 }
 
@@ -56,8 +32,9 @@ const BLUE  : &str = "\x1b[34m";
 const BOLD  : &str = "\x1b[1m";
 const RESET : &str = "\x1b[0m";
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Kind {
+	// User facing Errors
 	Lexer,
 	Discovery,
 	Parser,
@@ -68,18 +45,24 @@ pub enum Kind {
 	LoweringMachine,
 	#[cfg(feature="ready")]
 	Assembler,
+
+	// Internal Errors
+	NoType { msg: &'static str, ast_id: AstId },
+	MissingAstNode { proc_id: IdentId, ast_id: AstId },
+	MissingLoopBounds { proc_id: IdentId },
 }
 
-pub struct CompilerError {
+#[derive(Debug, Default, Clone)]
+pub struct Error {
 	kind: Option<Kind>,
-	location: Span,
+	location: Span<usize>,
 	message: String,
 	notes: Vec<Note>,
 }
 
-impl CompilerError {
+impl Error {
 	pub fn new(
-		location: Span,
+		location: Span<usize>,
 		message: impl Into<String>,
 	) -> Self {
 		Self {

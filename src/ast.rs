@@ -1,12 +1,10 @@
 
-use std::ops::Range;
-
 use index_vec::define_index_type;
 use index_vec::IndexVec;
 
 use crate::identifier::Id as IdentId;
 use crate::token;
-use crate::{BinaryOp, Bounds, UnaryOp};
+use crate::{BinaryOp, Bounds, Span, UnaryOp};
 
 define_index_type! {
 	pub struct Id = usize;
@@ -44,7 +42,7 @@ pub enum Kind {
 }
 
 pub type KindList = IndexVec<Id, Kind>;
-pub type LocList = IndexVec<Id, Range<token::Id>>;
+pub type LocList = IndexVec<Id, Span<token::Id>>;
 
 #[cfg(feature="ready")]
 #[derive(Debug, Default)]

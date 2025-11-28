@@ -1,7 +1,7 @@
 
 use std::collections::hash_map::Entry;
 
-use crate::error::{self, CompilerError};
+use crate::error::{self, Error};
 use crate::identifier::Identifier;
 use crate::token;
 use crate::{Data, SrcPos};
@@ -34,7 +34,7 @@ struct Lexer {
 }
 
 impl Lexer {
-	fn next(&mut self, data: &mut Data) -> Result<bool, CompilerError> {
+	fn next(&mut self, data: &mut Data) -> Result<bool, Error> {
 		let start = self.pos;
 
 		let kind = match self.peek(data, 0) {
@@ -86,7 +86,7 @@ impl Lexer {
 					text => {
 						let ident_id = text.id();
 						if let Entry::Vacant(e) = data.identifiers.entry(ident_id) {
-							e.insert(start..self.pos);
+							e.insert((start..self.pos).into());
 						}
 						match text {
 							"main" => token::Kind::Main,

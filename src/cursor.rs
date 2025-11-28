@@ -1,8 +1,31 @@
-use std::ops::Range;
-use crate::error::{self, CompilerError};
+
 use crate::identifier;
 use crate::token;
-use crate::Data;
+use crate::{Data, Span};
+
+pub enum Error {
+	ExpectedToken { expected: String, found: token::Id },
+	Expected { span: Span<usize>, expected: String, found: String },
+}
+
+impl Error {
+	pub fn into_comp_error(self, db: &Data) -> crate::error::Error {
+		match self {
+			Error::ExpectedToken { expected, found: token_id } => {
+				let found = db.tok_list[token_id];
+				let message = if let token::Kind::Identifier(ident_id) = found {
+					format!("Expected {expected}, found '{}'", db.text(&ident_id))
+				} else {
+					format!("Expected {expected}, found {found:?}")
+				};
+				crate::Error::new(db.token_source(token_id), message)
+			}
+			Error::Expected { span, expected, found } => {
+				crate::Error::new(span, format!("Expected {expected}, found {found}"))
+			}
+		}
+	}
+}
 
 #[derive(Default)]
 pub struct Cursor(token::Id);
@@ -31,46 +54,47 @@ impl Cursor {
 		self.peek(data, 0)
 	}
 
-	pub fn expect(&mut self, data: &Data, expected: token::Kind) -> Result<(), CompilerError> {
+	pub fn expect(&mut self, data: &Data, expected: token::Kind) -> Result<(), Error> {
 		if self.current(data) == expected {
 			self.advance();
 			Ok(())
 		} else {
-			Err(error::expected_token(data, &format!("{expected:?}"), self.index()))
+			Err(self.expected_token(&format!("{expected:?}")))
 		}
 	}
 
 	pub fn expect_identifier(&mut self, data: &Data,
 		expected: &str,
-	) -> Result<identifier::Id, CompilerError> {
+	) -> Result<identifier::Id, Error> {
 		if let token::Kind::Identifier(ident_id) = self.current(data) {
 			self.advance();
 			Ok(ident_id)
 		} else {
-			Err(error::expected_token(data, expected, self.index()))
+			Err(self.expected_token(expected))
 		}
 	}
 
 	pub fn expect_integer(&mut self, data: &Data,
 		expected: &str,
-	) -> Result<i64, CompilerError> {
+	) -> Result<i64, Error> {
 		if let token::Kind::Integer(num) = self.current(data) {
 			self.advance();
 			Ok(num)
 		} else {
-			Err(error::expected_token(data, expected, self.index()))
+			Err(self.expected_token(expected))
 		}
 	}
 
-	pub fn expect_u32(&mut self, data: &Data, expected: &str) -> Result<u32, CompilerError> {
+	pub fn expect_u32(&mut self, data: &Data, expected: &str) -> Result<u32, Error> {
 		self.expect_integer(data, expected)
-			.and_then(|num| {
-				check_integer_as_u32(&format!("valid {expected}"), num,
-					(self.index() - 1).into()..self.index().into())
-			})
+			.and_then(|num| check_integer_as_u32(
+				&format!("valid {expected}"),
+				num,
+				data.token_source(self.index() - 1) + data.token_source(self.index())
+			))
 	}
 
-	pub fn expect_type(&mut self, data: &Data) -> Result<crate::Type, CompilerError> {
+	pub fn expect_type(&mut self, data: &Data) -> Result<crate::Type, Error> {
 		let result = match self.current(data) {
 			#[cfg(feature="ready")]
 			token::Kind::Identifier(ident_id) => {
@@ -95,16 +119,20 @@ impl Cursor {
 			token::Kind::U32 => Ok(crate::Type::U32),
 			#[cfg(feature="ready")]
 			token::Kind::S32 => Ok(crate::Type::S32),
-			_ => return Err(error::expected_token(data, "type-specifier", self.index())),
+			_ => return Err(self.expected_token("type-specifier")),
 		};
 		self.advance();
 		result
 	}
+
+	pub fn expected_token(&self, expected: impl Into<String>) -> Error {
+		Error::ExpectedToken { expected: expected.into(), found: self.index() }
+	}
 }
 
-fn check_integer_as_u32(expected: &str, found: i64, span: Range<usize>) -> Result<u32, CompilerError> {
+fn check_integer_as_u32(expected: &str, found: i64, span: Span<usize>) -> Result<u32, Error> {
 	if !(0..u32::MAX as i64).contains(&found) {
-		Err(error::expected(span, expected, &found.to_string()))
+		Err(Error::Expected { span, expected: expected.into(), found: found.to_string() })
 	} else {
 		Ok(found as u32)
 	}

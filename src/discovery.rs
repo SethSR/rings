@@ -1,6 +1,6 @@
 
-use crate::cursor::Cursor;
-use crate::error::{self, CompilerError};
+use crate::cursor::{Cursor, Error};
+use crate::error;
 use crate::identifier::{self, Id as IdentId, Identifier};
 use crate::token::{Id as TokenId, Kind};
 use crate::{Data, Task, Type};
@@ -95,13 +95,16 @@ impl Table {
 
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
-	if let Err(mut e) = eval_loop(&mut cursor, data) {
-		e.set_kind(error::Kind::Discovery);
-		data.errors.push(e);
+	if let Err(e) = eval_loop(&mut cursor, data) {
+		let mut err = e.into_comp_error(data);
+		err.set_kind(error::Kind::Discovery);
+		data.errors.push(err);
 	}
 }
 
-fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
+type DiscResult<T> = Result<T, Error>;
+
+fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
 	loop {
 		match cursor.current(data) {
 			Kind::Main => {
@@ -171,21 +174,19 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> 
 						cursor.expect(data, Kind::Semicolon)?;
 						data.values.insert(ident_id, Value::Decimal(value));
 					}
-					_ => return Err(error::expected_token(data, "value statement", cursor.index())),
+					_ => return Err(cursor.expected_token("value statement")),
 				}
 			}
 
 			Kind::Eof => break,
-			_ => return Err(error::expected_token(data,
-				"top-level statement",
-				cursor.index())),
+			_ => return Err(cursor.expected_token("top-level statement")),
 		}
 	}
 
 	Ok(())
 }
 
-fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerError> {
+fn check_braces(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
 	cursor.expect(data, Kind::OBrace)?;
 	let mut brace_count = 1;
 	while brace_count > 0 && cursor.current(data) != Kind::Eof {
@@ -193,7 +194,7 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerErro
 			Kind::OBrace => 1,
 			Kind::CBrace => -1,
 			Kind::Eof => {
-				return Err(error::expected_token(data, "end of procedure", cursor.index()));
+				return Err(cursor.expected_token("end of procedure"));
 			}
 			_ => 0,
 		};
@@ -204,7 +205,7 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> Result<(), CompilerErro
 }
 
 fn discover_proc(cursor: &mut Cursor, data: &mut Data,
-) -> Result<(Vec<Param>, Type, TokenId), CompilerError> {
+) -> DiscResult<(Vec<Param>, Type, TokenId)> {
 	cursor.expect(data, Kind::OParen)?;
 	let params = discover_fields(cursor, data, Kind::CParen)?;
 	cursor.expect(data, Kind::CParen)?;
@@ -220,7 +221,7 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 
 fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	end_token: Kind,
-) -> Result<Vec<Param>, CompilerError> {
+) -> DiscResult<Vec<Param>> {
 	let mut fields = Vec::default();
 	while end_token != cursor.current(data) {
 		let field_id = cursor.expect_identifier(data, "field name")?;
@@ -236,7 +237,7 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 }
 
 #[cfg(feature="ready")]
-fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<Region, CompilerError> {
+fn discover_region(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Region> {
 	cursor.expect(data, Kind::OBracket)?;
 	let byte_count = cursor.expect_u32(data, "region size")?;
 	cursor.expect(data, Kind::CBracket)?;
@@ -247,7 +248,7 @@ fn discover_region(cursor: &mut Cursor, data: &mut Data) -> Result<Region, Compi
 }
 
 #[cfg(feature="ready")]
-fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<u32>, CompilerError> {
+fn discover_address(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Option<u32>> {
 	if cursor.expect(data, Kind::At).is_ok() {
 		if let Ok(num) = cursor.expect_u32(data, "record address") {
 			for (id, region) in &data.regions {
@@ -271,7 +272,7 @@ fn discover_address(cursor: &mut Cursor, data: &mut Data) -> Result<Option<u32>,
 }
 
 #[cfg(feature="ready")]
-fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, CompilerError> {
+fn discover_record(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Record> {
 	let address = discover_address(cursor, data)?;
 	cursor.expect(data, Kind::OBrace)?;
 	let fields = discover_fields(cursor, data, Kind::CBrace)?;
@@ -280,7 +281,7 @@ fn discover_record(cursor: &mut Cursor, data: &mut Data) -> Result<Record, Compi
 }
 
 #[cfg(feature="ready")]
-fn discover_table(cursor: &mut Cursor, data: &mut Data) -> Result<Table, CompilerError> {
+fn discover_table(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Table> {
 	cursor.expect(data, Kind::OBracket)?;
 	let row_count = cursor.expect_u32(data, "table size")?;
 	cursor.expect(data, Kind::CBracket)?;

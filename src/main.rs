@@ -11,14 +11,16 @@ mod identifier;
 mod lexer;
 mod parser;
 mod rings_type;
+mod span;
 mod tac;
 mod task;
 mod token;
 mod type_checker;
 
-use error::CompilerError;
+use error::Error;
 use rings_type::Type;
 use task::Task;
+use span::Span;
 
 fn main() {
 	let mut args = env::args();
@@ -56,11 +58,11 @@ pub struct Data {
 	source: Box<str>,
 	// stores the position of each newline (\n) character in the source
 	line_pos: token::PosList,
-	errors: Vec<CompilerError>,
+	errors: Vec<Error>,
 	/* Lexer */
 	tok_list: token::KindList,
 	tok_pos: token::PosList,
-	identifiers: identifier::Map<Range<SrcPos>>,
+	identifiers: identifier::Map<Span<SrcPos>>,
 	/* Discovery */
 	procedures: discovery::ProcMap,
 	values: discovery::ValueMap,
@@ -93,6 +95,14 @@ impl ProcData {
 		let mut this = Self::default();
 		this.ast_start = ast_start;
 		this
+	}
+
+	pub fn add_ast(&mut self, kind: ast::Kind,
+		tok_range: Range<token::Id>,
+	) -> ast::Id {
+		self.ast_nodes.push(kind);
+		self.ast_pos_tok.push(tok_range.into());
+		ast::Id::new(self.ast_nodes.len() - 1)
 	}
 }
 
@@ -131,7 +141,21 @@ impl Data {
 	}
 
 	pub fn text(&self, ident_id: &identifier::Id) -> &str {
-		&self.source[self.identifiers[ident_id].clone()]
+		let Span { start, end } = self.identifiers[ident_id];
+		&self.source[start..end]
+	}
+
+	pub fn token_source(&self, token_id: token::Id) -> Span<usize> {
+		let kind = self.tok_list[token_id];
+		let start = self.tok_pos[token_id];
+		Span { start, end: start + kind.size(self) }
+	}
+
+	pub fn ast_source(&self, proc_id: identifier::Id, ast_id: ast::Id) -> Span<usize> {
+		let span = self.proc_db[&proc_id].ast_pos_tok[ast_id];
+		let start = self.token_source(span.start).start;
+		let end = self.token_source(span.end).end;
+		Span { start, end }
 	}
 
 	fn type_text(&self, ring_type: &Type) -> String {
@@ -424,7 +448,7 @@ impl fmt::Display for Data {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BinaryOp {
+pub enum BinaryOp {
 	Add,
 	Sub,
 	Mul,
@@ -479,7 +503,7 @@ impl fmt::Display for BinaryOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UnaryOp {
+pub enum UnaryOp {
 	Neg,
 	Not,
 }

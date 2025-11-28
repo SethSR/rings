@@ -1,14 +1,12 @@
 
-use std::ops::Range;
-
 use crate::ast::{ Block as AstBlock, Id as AstId, Kind as AKind, PathSegment };
-use crate::cursor::Cursor;
-use crate::error::{ self, CompilerError };
+use crate::cursor::{Cursor, Error};
+use crate::error;
 use crate::identifier::{Id as IdentId};
 use crate::token::{ Id as TokenId, Kind as TKind };
 use crate::{ BinaryOp, Bounds, Data, ProcData, UnaryOp };
 
-type ParseResult = Result<AstId, CompilerError>;
+type ParseResult = Result<AstId, Error>;
 
 pub fn eval(data: &mut Data) {
 	while let Some(mut task) = data.task_queue.pop_front() {
@@ -59,9 +57,10 @@ fn parse(data: &mut Data, start_token: TokenId) -> Result<ProcData, TokenId> {
 
 	let tok_start = cursor.index();
 	let mut block = parse_block(cursor, data, &mut proc_data)
-		.map_err(|mut e| {
-			e.set_kind(error::Kind::Parser);
-			data.errors.push(e);
+		.map_err(|e| {
+			let mut err = e.into_comp_error(&data);
+			err.set_kind(error::Kind::Parser);
+			data.errors.push(err);
 			cursor.index()
 		})?;
 	let tok_end = cursor.index();
@@ -74,28 +73,20 @@ fn parse(data: &mut Data, start_token: TokenId) -> Result<ProcData, TokenId> {
 
 	if !has_return {
 		let tok_pos = cursor.index();
-		let ast_id = new_ast(&mut proc_data, AKind::Return(None),
+		let ast_id = proc_data.add_ast(AKind::Return(None),
 			tok_pos..tok_pos,
 		);
 		block.0.push(ast_id);
 	}
 
-	proc_data.ast_start = new_ast(&mut proc_data, AKind::Block(block),
+	proc_data.ast_start = proc_data.add_ast(AKind::Block(block),
 		tok_start..tok_end,
 	);
 	Ok(proc_data)
 }
 
-fn new_ast(proc_data: &mut ProcData, kind: AKind,
-	tok_range: Range<TokenId>,
-) -> AstId {
-	proc_data.ast_nodes.push(kind);
-	proc_data.ast_pos_tok.push(tok_range);
-	AstId::new(proc_data.ast_nodes.len() - 1)
-}
-
 fn parse_block(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
-) -> Result<AstBlock, CompilerError> {
+) -> Result<AstBlock, Error> {
 	cursor.expect(data, TKind::OBrace)?;
 
 	let mut block = vec![];
@@ -107,15 +98,13 @@ fn parse_block(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 				let tok_start = cursor.index();
 				let b = parse_block(cursor, data, proc_data)?;
 				let tok_range = tok_start..cursor.index();
-				new_ast(proc_data, AKind::Block(b), tok_range)
+				proc_data.add_ast(AKind::Block(b), tok_range)
 			}
 			TKind::Return => parse_return_statement(cursor, data, proc_data)?,
 			TKind::If => parse_if_statement(cursor, data, proc_data)?,
 			TKind::For => parse_for_statement(cursor, data, proc_data)?,
 			TKind::While => parse_while_statement(cursor, data, proc_data)?,
-			_ => return Err(error::expected_token(data,
-					"definition, assignment, return, if, or for statement",
-			cursor.index())),
+			_ => return Err(cursor.expected_token("definition, assignment, return, if, or for statement")),
 		});
 	}
 
@@ -135,9 +124,7 @@ fn parse_ident_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut P
 		TKind::DashEq => parse_op_assignment(cursor, data, proc_data, left_id, BinaryOp::Sub),
 		TKind::StarEq => parse_op_assignment(cursor, data, proc_data, left_id, BinaryOp::Mul),
 		TKind::SlashEq => parse_op_assignment(cursor, data, proc_data, left_id, BinaryOp::Div),
-		_ => Err(error::expected_token(data,
-			"definition or assignment statement",
-			cursor.index())),
+		_ => Err(cursor.expected_token("definition or assignment statement")),
 	}
 }
 
@@ -154,8 +141,8 @@ fn parse_let_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut Pro
 	let ast_id = parse_expression(cursor, data, proc_data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
-	let ident = new_ast(proc_data, AKind::Ident(ident_id), tok_ident_range);
-	Ok(new_ast(proc_data, AKind::Define(ident, var_type, ast_id), tok_range))
+	let ident = proc_data.add_ast(AKind::Ident(ident_id), tok_ident_range);
+	Ok(proc_data.add_ast(AKind::Define(ident, var_type, ast_id), tok_range))
 }
 
 fn parse_access(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -192,7 +179,7 @@ fn parse_access(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 		AKind::Access(ident_id, accesses);
 		todo!()
 	};
-	Ok(new_ast(proc_data, kind, tok_range))
+	Ok(proc_data.add_ast(kind, tok_range))
 }
 
 fn parse_assignment(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -203,7 +190,7 @@ fn parse_assignment(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcDa
 	let ast_id = parse_expression(cursor, data, proc_data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(proc_data, AKind::Assign(lvalue_id, ast_id), tok_range))
+	Ok(proc_data.add_ast(AKind::Assign(lvalue_id, ast_id), tok_range))
 }
 
 fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -214,9 +201,9 @@ fn parse_op_assignment(cursor: &mut Cursor, data: &mut Data, proc_data: &mut Pro
 	let ast_id = parse_expression(cursor, data, proc_data, &[TKind::Semicolon])?;
 	cursor.expect(data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
-	let op_id = new_ast(proc_data, AKind::BinOp(op, lvalue_id, ast_id),
+	let op_id = proc_data.add_ast(AKind::BinOp(op, lvalue_id, ast_id),
 		tok_range.clone());
-	Ok(new_ast(proc_data, AKind::Assign(lvalue_id, op_id), tok_range))
+	Ok(proc_data.add_ast(AKind::Assign(lvalue_id, op_id), tok_range))
 }
 
 fn parse_return_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -232,7 +219,7 @@ fn parse_return_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut 
 		},
 	};
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(proc_data, AKind::Return(ast_id), tok_range))
+	Ok(proc_data.add_ast(AKind::Return(ast_id), tok_range))
 }
 
 fn parse_if_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -248,7 +235,7 @@ fn parse_if_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut Proc
 		AstBlock(vec![])
 	};
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(proc_data, AKind::If(cond_id, then_block, else_block), tok_range))
+	Ok(proc_data.add_ast(AKind::If(cond_id, then_block, else_block), tok_range))
 }
 
 fn parse_while_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -258,7 +245,7 @@ fn parse_while_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut P
 	let cond = parse_expression(cursor, data, proc_data, &[TKind::OBrace])?;
 	let block = parse_block(cursor, data, proc_data)?;
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(proc_data, AKind::While(cond, block), tok_range))
+	Ok(proc_data.add_ast(AKind::While(cond, block), tok_range))
 }
 
 fn parse_for_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -316,15 +303,13 @@ fn parse_for_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut Pro
 		cursor.expect(data, TKind::CBracket)?;
 		(None, Some(Bounds::Full { start, end }))
 	} else {
-		return Err(error::expected_token(data,
-			"table name or bracketed range",
-			cursor.index()));
+		return Err(cursor.expected_token("table name or bracketed range"));
 	};
 
 	let block = parse_block(cursor, data, proc_data)?;
 
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(proc_data, AKind::For(vars, table_id, range, block), tok_range))
+	Ok(proc_data.add_ast(AKind::For(vars, table_id, range, block), tok_range))
 }
 
 fn parse_call(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -352,7 +337,7 @@ fn parse_call(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 
 	cursor.expect(data, TKind::CParen)?;
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(proc_data, AKind::Call(ident_id, exprs), tok_range))
+	Ok(proc_data.add_ast(AKind::Call(ident_id, exprs), tok_range))
 }
 
 fn parse_expression(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -390,7 +375,7 @@ fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData
 	};
 
 	let tok_range = tok_start..cursor.index();
-	Ok(new_ast(proc_data, AKind::BinOp(op, left, right), tok_range))
+	Ok(proc_data.add_ast(AKind::BinOp(op, left, right), tok_range))
 }
 
 fn parse_primary(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
@@ -407,7 +392,7 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 		let tok_start_expr = cursor.index();
 		cursor.advance();
 		let tok_range = tok_start_expr..cursor.index();
-		new_ast(proc_data, kind, tok_range)
+		proc_data.add_ast(kind, tok_range)
 	}
 
 	let node = match cursor.current(data) {
@@ -428,20 +413,18 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 			cursor.expect(data, TKind::CParen)?;
 			expr
 		}
-		_ => return Err(error::expected_token(data,
-			"identifier or number",
-			cursor.index())),
+		_ => return Err(cursor.expected_token("identifier or number")),
 	};
 
 	if let Some(op) = unary_op {
 		let tok_range = tok_start_op..tok_end_op;
-		Ok(new_ast(proc_data, AKind::UnOp(op, node), tok_range))
+		Ok(proc_data.add_ast(AKind::UnOp(op, node), tok_range))
 	} else {
 		Ok(node)
 	}
 }
 
-fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, CompilerError> {
+fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, Error> {
 	let op = match cursor.current(data) {
 		TKind::Amp      => BinaryOp::BinAnd,
 		TKind::Amp2     => BinaryOp::LogAnd,
@@ -465,7 +448,7 @@ fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, Compil
 		TKind::RArrEq   => BinaryOp::CmpGE,
 		TKind::Slash    => BinaryOp::Div,
 		TKind::Star     => BinaryOp::Mul,
-		_ => return Err(error::expected_token(data, "binary operator", cursor.index())),
+		_ => return Err(cursor.expected_token("binary operator")),
 	};
 	cursor.advance();
 	Ok(op)
