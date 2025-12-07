@@ -7,14 +7,57 @@ use crate::ast::{
 	Kind,
 	PathSegment,
 };
-use crate::identifier;
+use crate::identifier::{Id as IdentId};
 use crate::error;
 use crate::rings_type::Meet;
 use crate::{Data, ProcData, Type};
 
-// NOTE - srenshaw - CE <== Compiler Error: This shouldn't happen and needs to be fixed
+enum Error {
+	InternalValue,
+	AlreadyDefined(IdentId),
+	MismatchedTypes(Type, Type),
+	InvalidBinOp(crate::BinaryOp, Type, Type),
+	InvalidUnOp(crate::UnaryOp, Type),
+	TooManyLoopVariables,
+	NegativeLoopRange,
+	MissingLoopBounds,
+	// Compiler Errors
+	NoType { msg: &'static str, ast_id: AstId },
+}
 
-// NOTE - srenshaw - TC <== Type-Checker Error: Turn this into its own error category
+impl Error {
+	fn to_string(&self, db: &Data) -> String {
+		match self {
+			Self::InternalValue => {
+				"Cannot define internal values, assign instead".to_string()
+			}
+			Self::AlreadyDefined(ident_id) => {
+				format!("'{}' already defined", db.text(ident_id))
+			}
+			Self::MismatchedTypes(expected, found) => {
+				format!("Variable has type {expected}, but expression has type {found}")
+			}
+			Self::InvalidBinOp(op, lhs, rhs) => {
+				format!("Unable to apply '{op}' to '{lhs}' and '{rhs}'")
+			}
+			Self::InvalidUnOp(op, rhs) => {
+				format!("Unable to apply '{op}' to '{rhs}'")
+			}
+			Self::TooManyLoopVariables => {
+				"simple for-loops require a single loop variable".to_string()
+			}
+			Self::NegativeLoopRange => {
+				"start value must be less than or equal to end value".to_string()
+			}
+			Self::MissingLoopBounds => {
+				"simple for-loops require a fully specified range '[start..end]'".to_string()
+			}
+			Self::NoType { msg, ast_id } => {
+				format!("{msg} has no type: {ast_id:?}")
+			}
+		}
+	}
+}
 
 pub fn eval(data: &mut Data) {
 	let completed_procs = data.proc_db.clone();
@@ -29,10 +72,9 @@ pub fn eval(data: &mut Data) {
 		let range = proc_data.ast_pos_tok[proc_start].clone();
 
 		let ret_type = proc_type.ret_type;
-		if let Err(err_msg) = check_stmt(&mut proc_data, proc_start, ret_type) {
-			let mut err = error::error(data, &err_msg, range.start);
-			err.set_kind(error::Kind::Checker);
-			data.errors.push(err);
+		if let Err(err) = check_stmt(&mut proc_data, proc_start, ret_type) {
+			data.errors.push(error::error(data, &err.to_string(data), range.start)
+				.with_kind(error::Kind::Checker));
 			return;
 		}
 		data.proc_db.entry(proc_id)
@@ -42,7 +84,7 @@ pub fn eval(data: &mut Data) {
 
 fn check_stmt(proc_data: &mut ProcData,
 	ast_id: AstId, ret_type: Type,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	match proc_data.ast_nodes[ast_id].clone() {
 		Kind::Int(_) => {
 			proc_data.ast_to_type.insert(ast_id, Type::Top);
@@ -136,28 +178,28 @@ fn check_stmt(proc_data: &mut ProcData,
 
 		Kind::For(vars, None, Some(range), block) => {
 			if vars.len() != 1 {
-				return Err("simple for-loops require a single loop variable".to_string());
+				return Err(Error::TooManyLoopVariables);
 			}
 			match range {
 				crate::Bounds::Full { start, end } => {
 					debug_assert!(start <= end);
 					if start > end {
-						return Err("start value must be less than or equal to end value".to_string());
+						return Err(Error::MissingLoopBounds);
 					}
 				}
 				crate::Bounds::From {..} | crate::Bounds::To {..} => {
-					return Err("simple for-loops require a fully specified range (start..end)".to_string());
+					return Err(Error::MissingLoopBounds);
 				}
 			}
 			check_block(proc_data, &block, ret_type)
 		}
 
 		Kind::For(vars, None, None, block) => {
-			todo!("infinite for-loop")
+			todo!("infinite for-loop: {vars:?} {block:?}")
 		}
 
 		Kind::Call(proc_id, exprs) => {
-			todo!("procedure-call")
+			todo!("procedure-call: {proc_id} {exprs:?}")
 		}
 
 		#[cfg(feature="ready")]
@@ -187,7 +229,7 @@ fn check_stmt(proc_data: &mut ProcData,
 }
 
 fn check_ident(proc_data: &mut ProcData,
-	ident_id: &identifier::Id, ast_id: AstId,
+	ident_id: &IdentId, ast_id: AstId,
 ) {
 	let new_type = proc_data.ident_to_type.get(ident_id)
 		.unwrap_or(&Type::Top);
@@ -197,26 +239,22 @@ fn check_ident(proc_data: &mut ProcData,
 fn check_define(proc_data: &mut ProcData,
 	lvalue_id: AstId, expr_id: AstId,
 	var_type: Type,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	let Kind::Ident(ident_id) = proc_data.ast_nodes[lvalue_id] else {
-		return Err("TC - Cannot define internal values, assign instead".to_string());
+		return Err(Error::InternalValue);
 	};
 
 	match proc_data.ident_to_type.entry(ident_id) {
 		Entry::Occupied(_) => {
-			//Err(format!("TC - '{ident_id:?}' has already been defined", proc_data.text(&ident_id)))
-			Err(format!("TC - '{ident_id:?}' has already been defined"))
+			Err(Error::AlreadyDefined(ident_id))
 		}
 		Entry::Vacant(e) => {
 			let Some(expr_type) = proc_data.ast_to_type.get(&expr_id) else {
-					return Err(format!("CE - define expression has no type: {expr_id:?}"));
+				return Err(Error::NoType { msg: "define expression", ast_id: expr_id});
 			};
 			match expr_type.meet(&var_type) {
 				Type::Bot => {
-					Err(format!("TC - variable has type '{}', but the expression has type '{}'",
-							var_type,
-							expr_type,
-						))
+					Err(Error::MismatchedTypes(var_type, *expr_type))
 				}
 				new_type => {
 					proc_data.ast_to_type.insert(lvalue_id, new_type);
@@ -230,21 +268,18 @@ fn check_define(proc_data: &mut ProcData,
 
 fn check_assign(proc_data: &ProcData,
 	lvalue_id: AstId, ast_id: AstId,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	let Kind::Ident(ident_id) = proc_data.ast_nodes[lvalue_id] else {
 		todo!("missing ident for lvalue: {lvalue_id:?}")
 	};
 	let Some(lvalue_type) = proc_data.ident_to_type.get(&ident_id) else {
-		return Err(format!("CE - lvalue has no type: {lvalue_id:?}"));
+		return Err(Error::NoType { msg: "lvalue", ast_id: lvalue_id });
 	};
 	let Some(expr_type) = proc_data.ast_to_type.get(&ast_id) else {
-		return Err(format!("CE - assign expression has no type: {ast_id:?}"));
+		return Err(Error::NoType { msg: "assign expression", ast_id });
 	};
 	if expr_type.meet(lvalue_type) != *lvalue_type {
-		Err(format!("TC - variable has type '{}', but expression has type '{}'",
-			lvalue_type,
-			expr_type,
-		))
+		Err(Error::MismatchedTypes(*lvalue_type, *expr_type))
 	} else {
 		// The types match, so we're okay.
 		Ok(())
@@ -254,7 +289,7 @@ fn check_assign(proc_data: &ProcData,
 fn check_binop(proc_data: &mut ProcData,
 	ast_id: AstId,
 	op: crate::BinaryOp, left_id: &AstId, right_id: &AstId, proc_type: Type,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	check_stmt(proc_data, *left_id, proc_type)?;
 	check_stmt(proc_data, *right_id, proc_type)?;
 	match op {
@@ -280,10 +315,7 @@ fn check_binop(proc_data: &mut ProcData,
 			let left_type = proc_data.ast_to_type[left_id];
 			let right_type = proc_data.ast_to_type[right_id];
 			match left_type.meet(&right_type) {
-				Type::Bot => Err(format!("TC - unable to apply '{op}' to types '{}' and '{}'",
-					left_type,
-					right_type,
-				)),
+				Type::Bot => Err(Error::InvalidBinOp(op, left_type, right_type)),
 				new_type => {
 					// Types are able to meet
 					proc_data.ast_to_type.insert(ast_id, new_type);
@@ -298,10 +330,10 @@ fn check_binop(proc_data: &mut ProcData,
 fn check_unop(proc_data: &mut ProcData,
 	ast_id: AstId,
 	op: crate::UnaryOp, right: &AstId,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	let right_type = proc_data.ast_to_type[right];
 	if !matches!(right_type, Type::S8(_)) {
-		return Err(format!("TC - unable to apply '{op}' to type '{}'", right_type));
+		return Err(Error::InvalidUnOp(op, right_type));
 	};
 
 	#[cfg(feature="ready")]
@@ -314,13 +346,13 @@ fn check_unop(proc_data: &mut ProcData,
 
 fn check_return(proc_data: &mut ProcData,
 	ast_id: Option<AstId>, proc_type: Type,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	let ret_type = match ast_id {
 		Some(ast_id) => {
 			check_stmt(proc_data, ast_id, proc_type)?;
 			match proc_data.ast_to_type.get(&ast_id) {
 				Some(ret_type) => *ret_type,
-				None => return Err(format!("CE - return expression has no type: {ast_id:?}")),
+				None => return Err(Error::NoType { msg: "return expression", ast_id }),
 			}
 		}
 		None => Type::Unit,
@@ -328,14 +360,14 @@ fn check_return(proc_data: &mut ProcData,
 
 	let meet_type = ret_type.meet(&proc_type);
 	if meet_type == Type::Bot {
-		return Err(format!("TC - Expected return type {proc_type}, found {ret_type}"));
+		return Err(Error::MismatchedTypes(proc_type, ret_type));
 	}
 	Ok(())
 }
 
 fn check_block(proc_data: &mut ProcData,
 	block: &AstBlock, proc_type: Type,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	for stmt_id in &block.0 {
 		check_stmt(proc_data, *stmt_id, proc_type)?;
 	}
@@ -344,12 +376,13 @@ fn check_block(proc_data: &mut ProcData,
 
 fn check_condition(proc_data: &mut ProcData,
 	cond_id: AstId, proc_type: Type,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	check_stmt(proc_data, cond_id, proc_type)?;
 	let cond_type = proc_data.ast_to_type[&cond_id];
 	if cond_type.meet(&Type::s8_top()) == Type::Bot
 	//&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
 	{
+		//return Err(Error::MismatchedTypes(Type::Int, cond_type));
 		todo!("TC - cond node must have integer type");
 	}
 	Ok(())
@@ -357,7 +390,7 @@ fn check_condition(proc_data: &mut ProcData,
 
 fn check_if(proc_data: &mut ProcData,
 	cond_id: AstId, then_block: &AstBlock, else_block: &AstBlock, proc_type: Type,
-) -> Result<(), String> {
+) -> Result<(), Error> {
 	check_condition(proc_data, cond_id, proc_type)?;
 	check_block(proc_data, then_block, proc_type)?;
 	check_block(proc_data, else_block, proc_type)

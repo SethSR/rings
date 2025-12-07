@@ -58,9 +58,8 @@ fn parse(data: &mut Data, start_token: TokenId) -> Result<ProcData, TokenId> {
 	let tok_start = cursor.index();
 	let mut block = parse_block(cursor, data, &mut proc_data)
 		.map_err(|e| {
-			let mut err = e.into_comp_error(&data);
-			err.set_kind(error::Kind::Parser);
-			data.errors.push(err);
+			data.errors.push(e.into_comp_error(&data)
+				.with_kind(error::Kind::Parser));
 			cursor.index()
 		})?;
 	let tok_end = cursor.index();

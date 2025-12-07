@@ -73,8 +73,9 @@ impl Error {
 		}
 	}
 
-	pub fn set_kind(&mut self, kind: Kind) {
+	pub fn with_kind(mut self, kind: Kind) -> Self {
 		self.kind = Some(kind);
+		self
 	}
 
 	#[cfg(feature="ready")]

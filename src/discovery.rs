@@ -96,9 +96,8 @@ impl Table {
 pub fn eval(data: &mut Data) {
 	let mut cursor = Cursor::default();
 	if let Err(e) = eval_loop(&mut cursor, data) {
-		let mut err = e.into_comp_error(data);
-		err.set_kind(error::Kind::Discovery);
-		data.errors.push(err);
+		data.errors.push(e.into_comp_error(data)
+			.with_kind(error::Kind::Discovery));
 	}
 }
 

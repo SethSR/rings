@@ -17,9 +17,8 @@ pub fn eval(data: &mut Data) {
 		match lexer.next(data) {
 			Ok(true) => {}
 			Ok(false) => return, // all done!
-			Err(mut e) => {
-				e.set_kind(error::Kind::Lexer);
-				data.errors.push(e);
+			Err(e) => {
+				data.errors.push(e.with_kind(error::Kind::Lexer));
 				return;
 			}
 		}
