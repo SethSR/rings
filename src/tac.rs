@@ -1,5 +1,5 @@
 
-use crate::ast::{Block as ABlock, Kind};
+use crate::ast::{Block as ABlock, Id as AstId, Kind};
 use crate::error;
 use crate::identifier::Id as IdentId;
 use crate::{BinaryOp, Bounds, Data, ProcData, UnaryOp};
@@ -114,15 +114,22 @@ impl Location {
 
 pub type LabelId = u32;
 
-pub fn eval(data: &mut Data) {
+pub fn eval(data: &mut Data) -> Result<(), crate::Error> {
+	let mut result = Ok(());
 	for (proc_id, proc_data) in &mut data.proc_db {
 		let mut section = Section::default();
 		section.name = *proc_id;
 		match section.lower(proc_data) {
-			Ok(_) => proc_data.tac_data = Some(section),
-			Err(e) => panic!("{e}"),
+			Ok(_) => {
+				proc_data.tac_data = Some(section);
+			},
+			Err(e) => {
+				result = Err(e.into_comp_error(data));
+				break;
+			},//.into_comp_error(data, proc_data)),
 		}
 	}
+	result
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -136,21 +143,24 @@ pub struct Section {
 }
 
 impl Section {
-	pub fn lower(&mut self, proc_data: &mut ProcData) -> Result<(), String> {
+	fn lower(&mut self, proc_data: &mut ProcData) -> Result<(), Error> {
 		let proc_start = proc_data.ast_start;
 
-		let kind = &proc_data.ast_nodes[proc_start];
-		if let Err(err_msg) = self.lower_node(kind, proc_data) {
+		if let Err(err) = self.lower_node(&proc_start, proc_data) {
 			//let range = &proc_data.ast_pos_tok[proc_start];
 			//error::error(proc_data, &err_msg, range.start);
-			todo!("output '{err_msg}' as an actual error message with the correct source ranges");
+			return Err(err);
 		}
 
 		Ok(())
 	}
 
-	fn lower_node(&mut self, kind: &Kind, proc_data: &ProcData,
-	) -> Result<Option<Location>, String> {
+	fn lower_node(&mut self, id: &AstId, proc_data: &ProcData,
+	) -> Result<Option<Location>, Error> {
+		let Some(kind) = proc_data.ast_nodes.get(*id) else {
+			return Err(Error::missing_ast_node(self.name, *id));
+		};
+
 		match kind {
 			Kind::Int(value) => {
 				// TODO - srenshaw - Ensure value is within u32
@@ -167,11 +177,11 @@ impl Section {
 
 			Kind::Define(var_id, type_kind, expr_id) => {
 				let Kind::Ident(ident_id) = &proc_data.ast_nodes[*var_id] else {
-					return Err("cannot initialize internal variables, assign instead".to_string());
+					return Err(Error::missing_ast_node(self.name, *var_id));
 				};
 
 				// Get initializer value
-				let Some(init_value) = self.lower_node(&proc_data.ast_nodes[*expr_id], proc_data)? else {
+				let Some(init_value) = self.lower_node(expr_id, proc_data)? else {
 					return Ok(None);
 				};
 
@@ -188,14 +198,11 @@ impl Section {
 			}
 
 			Kind::Assign(var_id, expr_id) => {
-				let Some(lvalue) = self.lower_node(&proc_data.ast_nodes[*var_id], proc_data)? else {
+				let Some(lvalue) = self.lower_node(var_id, proc_data)? else {
 					todo!("unknown assign L-Value '{:?}'", proc_data.ast_nodes.get(*var_id));
 				};
 
-				let Some(expr_node) = proc_data.ast_nodes.get(*expr_id) else {
-					todo!("no expression AST node {expr_id}");
-				};
-				let Some(rvalue) = self.lower_node(expr_node, proc_data)? else {
+				let Some(rvalue) = self.lower_node(expr_id, proc_data)? else {
 					return Ok(None);
 				};
 
@@ -208,10 +215,10 @@ impl Section {
 			}
 
 			Kind::BinOp(op, left_id, right_id) => {
-				let Some(left) = self.lower_node(&proc_data.ast_nodes[*left_id], proc_data)? else {
+				let Some(left) = self.lower_node(left_id, proc_data)? else {
 					return Ok(None);
 				};
-				let Some(right) = self.lower_node(&proc_data.ast_nodes[*right_id], proc_data)? else {
+				let Some(right) = self.lower_node(right_id, proc_data)? else {
 					return Ok(None);
 				};
 
@@ -235,7 +242,7 @@ impl Section {
 			}
 
 			Kind::UnOp(op, right_id) => {
-				let Some(node) = self.lower_node(&proc_data.ast_nodes[*right_id], proc_data)? else {
+				let Some(node) = self.lower_node(right_id, proc_data)? else {
 					return Ok(None);
 				};
 
@@ -252,7 +259,7 @@ impl Section {
 
 			Kind::Return(maybe_expr) => {
 				let value = if let Some(expr_id) = maybe_expr {
-					self.lower_node(&proc_data.ast_nodes[*expr_id], proc_data)?
+					self.lower_node(expr_id, proc_data)?
 				} else {
 					None
 				};
@@ -263,13 +270,13 @@ impl Section {
 
 			Kind::Block(stmts) => {
 				for stmt_id in &stmts.0 {
-					self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
+					self.lower_node(stmt_id, proc_data)?;
 				}
 				Ok(None)
 			}
 
 			Kind::If(cond_id, then_block, else_block) => {
-				let Some(cond) = self.lower_node(&proc_data.ast_nodes[*cond_id], proc_data)? else {
+				let Some(cond) = self.lower_node(cond_id, proc_data)? else {
 					return Ok(None);
 				};
 
@@ -281,14 +288,14 @@ impl Section {
 
 				// then block
 				for stmt_id in &then_block.0 {
-					self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
+					self.lower_node(stmt_id, proc_data)?;
 				}
 				self.emit(Tac::Jump(end_label));
 
 				// else block
 				self.emit(Tac::Label(else_label));
 				for stmt_id in &else_block.0 {
-					self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
+					self.lower_node(stmt_id, proc_data)?;
 				}
 
 				// end
@@ -307,14 +314,14 @@ impl Section {
 
 				// body
 				for stmt_id in &body_block.0 {
-					self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
+					self.lower_node(stmt_id, proc_data)?;
 				}
 
 				// goto start
 				self.emit(Tac::Label(cond_label));
 
 				// if !cond goto end
-				let Some(cond) = self.lower_node(&proc_data.ast_nodes[*cond_id], proc_data)? else {
+				let Some(cond) = self.lower_node(cond_id, proc_data)? else {
 					return Ok(None);
 				};
 				self.emit(Tac::JumpIf { cond, target: loop_label });
@@ -335,7 +342,7 @@ impl Section {
 				//   body
 				//   i = i + 1
 
-				self.lower_for_loop(proc_data, iter_vars, table_id, bounds, body_block)?;
+				self.lower_for_loop(proc_data, id, iter_vars, table_id, bounds, body_block)?;
 
 				Ok(None)
 			}
@@ -451,11 +458,12 @@ impl Section {
 	fn lower_for_loop(
 		&mut self,
 		proc_data: &ProcData,
+		ast_id: &AstId,
 		iter_vars: &[IdentId],
 		table_id: &Option<IdentId>,
 		bounds: &Option<Bounds>,
 		body_block: &ABlock,
-	) -> Result<(), String> {
+	) -> Result<(), Error> {
 		// Simple case: for i in 0..N
 		if iter_vars.len() == 1 && table_id.is_none() {
 			let index_var = iter_vars[0];
@@ -464,7 +472,7 @@ impl Section {
 			let end_label = self.alloc_label();
 
 			let Some(Bounds::Full { start, end }) = bounds else {
-				return Err("L - non-table loop ranges require a min and max value".to_string());
+				return Err(Error::missing_loop_bounds(self.name, *ast_id));
 			};
 
 			// i = start
@@ -492,7 +500,7 @@ impl Section {
 
 			// body
 			for stmt_id in &body_block.0 {
-				self.lower_node(&proc_data.ast_nodes[*stmt_id], proc_data)?;
+				self.lower_node(stmt_id, proc_data)?;
 			}
 
 			// i = i + 1
@@ -529,6 +537,61 @@ impl Section {
 	}
 }
 
+enum ErrorKind {
+	MissingAstNode,
+	MissingLoopBounds,
+}
+
+struct Error {
+	kind: ErrorKind,
+	proc_id: IdentId,
+	ast_id: AstId,
+}
+
+impl Error {
+	fn missing_ast_node(
+		proc_id: IdentId,
+		ast_id: AstId,
+	) -> Self {
+		Self {
+			kind: ErrorKind::MissingAstNode,
+			proc_id,
+			ast_id,
+		}
+	}
+
+	fn missing_loop_bounds(
+		proc_id: IdentId,
+		ast_id: AstId,
+	) -> Self {
+		Self {
+			kind: ErrorKind::MissingLoopBounds,
+			proc_id,
+			ast_id,
+		}
+	}
+
+	fn into_comp_error(self, db: &Data) -> crate::Error {
+		let proc_data = &db.proc_db[&self.proc_id];
+		let ast_pos = proc_data.ast_pos_tok[self.ast_id];
+		let start = db.tok_pos[ast_pos.start];
+		let end = db.tok_pos[ast_pos.end];
+		let location = crate::Span { start, end };
+
+		let message = match self.kind {
+			ErrorKind::MissingAstNode => {
+				format!("{} not found in procedure '{}'", self.ast_id, db.text(&self.proc_id))
+			}
+			ErrorKind::MissingLoopBounds => {
+				format!("type-checker missed a bounds check in {}", db.text(&self.proc_id))
+			}
+		};
+
+		crate::Error::new(location, message)
+			.with_kind(error::Kind::LoweringTAC)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use crate::{lexer, discovery, parser, type_checker};
@@ -543,7 +606,9 @@ mod tests {
 		discovery::eval(&mut data);
 		parser::eval(&mut data);
 		type_checker::eval(&mut data);
-		eval(&mut data);
+		eval(&mut data)
+				.map_err(|e| panic!("{e:?}"))
+				.unwrap();
 		data
 	}
 

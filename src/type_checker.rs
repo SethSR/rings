@@ -1,12 +1,7 @@
 
 use std::collections::hash_map::Entry;
 
-use crate::ast::{
-	Block as AstBlock,
-	Id as AstId,
-	Kind,
-	PathSegment,
-};
+use crate::ast::{Block as AstBlock, Id as AstId, Kind};
 use crate::identifier::{Id as IdentId};
 use crate::error;
 use crate::rings_type::Meet;
@@ -87,7 +82,7 @@ fn check_stmt(proc_data: &mut ProcData,
 ) -> Result<(), Error> {
 	match proc_data.ast_nodes[ast_id].clone() {
 		Kind::Int(_) => {
-			proc_data.ast_to_type.insert(ast_id, Type::Top);
+			proc_data.ast_to_type.insert(ast_id, Type::int());
 			Ok(())
 		}
 
@@ -142,7 +137,7 @@ fn check_stmt(proc_data: &mut ProcData,
 			check_block(proc_data, &block, ret_type)
 		}
 
-		Kind::For(_, Some(_), _, _) => { todo!() }
+		Kind::For(_vars, Some(_), _, _) => { todo!() }
 		#[cfg(feature="ready")]
 		Kind::For(vars, Some(table_id), range, block) => {
 			let table = &proc_data.tables[table_id];
@@ -154,13 +149,13 @@ fn check_stmt(proc_data: &mut ProcData,
 			};
 
 			if start >= table.row_count {
-				return Some("'start' value in bounds must be less than table row-count".to_string());
+				return Err("'start' value in bounds must be less than table row-count".to_string());
 			}
 			if end > table.row_count {
-				return Some("'end' value in bounds must be less than or equal to table row-count".to_string());
+				return Err("'end' value in bounds must be less than or equal to table row-count".to_string());
 			}
 			if start > end {
-				return Some("start value must be less than or equal to end value".to_string());
+				return Err("start value must be less than or equal to end value".to_string());
 			}
 
 			for i in 0..vars.len() {
@@ -170,7 +165,7 @@ fn check_stmt(proc_data: &mut ProcData,
 				}
 
 				if !table.column_spec.iter().any(|(a,_)| var == a) {
-					return Some(format!("field '{}' not found in table '{}'", proc_data.text(var), data.text(table_id)));
+					return Err(format!("field '{}' not found in table '{}'", proc_data.text(var), data.text(table_id)));
 				}
 			}
 			self.check_block(proc_data, block, ret_type)
@@ -184,7 +179,7 @@ fn check_stmt(proc_data: &mut ProcData,
 				crate::Bounds::Full { start, end } => {
 					debug_assert!(start <= end);
 					if start > end {
-						return Err(Error::MissingLoopBounds);
+						return Err(Error::NegativeLoopRange);
 					}
 				}
 				crate::Bounds::From {..} | crate::Bounds::To {..} => {
@@ -209,11 +204,11 @@ fn check_stmt(proc_data: &mut ProcData,
 				match segment {
 					PathSegment::Field(field_id) => {
 						let Some(record) = proc_data.records.get(curr_id) else {
-							return Some(format!("no record named '{}' found", proc_data.text(curr_id)));
+							return Err(format!("no record named '{}' found", proc_data.text(curr_id)));
 						};
 						if !record.fields.iter().any(|(f_id,_)| field_id == f_id) {
-							return Some(format!("no field '{}' in record '{}'",
-								proc_data.text(field_id), data.text(curr_id),
+							return Err(format!("no field '{}' in record '{}'",
+								proc_data.text(&field_id), data.text(&curr_id),
 							));
 						}
 						curr_id = field_id;
@@ -223,7 +218,7 @@ fn check_stmt(proc_data: &mut ProcData,
 					}
 				}
 			}
-			None
+			Ok(())
 		}
 	}
 }
@@ -323,7 +318,6 @@ fn check_binop(proc_data: &mut ProcData,
 				}
 			}
 		}
-		_ => todo!("add the rest of the binary operators"),
 	}
 }
 
@@ -382,8 +376,7 @@ fn check_condition(proc_data: &mut ProcData,
 	if cond_type.meet(&Type::s8_top()) == Type::Bot
 	//&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
 	{
-		//return Err(Error::MismatchedTypes(Type::Int, cond_type));
-		todo!("TC - cond node must have integer type");
+		return Err(Error::MismatchedTypes(Type::Int, cond_type));
 	}
 	Ok(())
 }

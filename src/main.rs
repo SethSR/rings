@@ -43,7 +43,9 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	discovery::eval(&mut data);
 	parser::eval(&mut data);
 	type_checker::eval(&mut data);
-	tac::eval(&mut data);
+	tac::eval(&mut data)
+			.map_err(|e| panic!("{e:?}"))
+			.unwrap();
 	data
 }
 
@@ -468,9 +470,6 @@ pub enum BinaryOp {
 	CmpGT,
 	CmpLE,
 	CmpLT,
-	Access,
-	Index,
-	Call,
 }
 
 impl fmt::Display for BinaryOp {
@@ -495,9 +494,6 @@ impl fmt::Display for BinaryOp {
 			Self::CmpGT => write!(f, ">"),
 			Self::CmpLE => write!(f, "<="),
 			Self::CmpLT => write!(f, "<"),
-			Self::Access => write!(f, "."),
-			Self::Index => write!(f, "[]"),
-			Self::Call => write!(f, "()"),
 		}
 	}
 }
@@ -518,7 +514,7 @@ impl fmt::Display for UnaryOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Bounds {
+pub enum Bounds {
 	Full { start: u32, end: u32 },
 	From { start: u32 },
 	To { end: u32 },

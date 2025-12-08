@@ -10,14 +10,23 @@ pub trait Dual {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
+	// Unknown Type
 	Top,
+	// Invalid Type
+	Bot,
+
+	// Unsized Integer
+	Int,
+
+	// Language Types
 	S8(Lattice<i8>),
 	Unit,
-	Bot,
 }
 
 impl Type {
 	pub fn top() -> Self { Self::Top }
+
+	pub fn int() -> Self { Self::Int }
 
 	pub fn s8_top() -> Self { Self::S8(Lattice::Top) }
 	pub fn s8_val(v: i8) -> Self { Self::S8(Lattice::Val(v)) }
@@ -32,9 +41,10 @@ impl std::fmt::Display for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
 			Self::Top => write!(f, "top"),
+			Self::Bot => write!(f, "bot"),
+			Self::Int => write!(f, "int"),
 			Self::S8(_) => write!(f, "s8"),
 			Self::Unit => write!(f, "unit"),
-			Self::Bot => write!(f, "bot"),
 		}
 	}
 }
@@ -45,6 +55,10 @@ impl Meet for Type {
 			(Self::Top, _) => *rhs,
 			(_, Self::Top) => *self,
 			(Self::Bot, _) | (_, Self::Bot) => Self::Bot,
+
+			(Self::Int, Self::Int) => Self::Int,
+			(Self::Int, b @ Self::S8(_)) |
+			(b @ Self::S8(_), Self::Int) => b.clone(),
 
 			(Self::S8(a), Self::S8(b)) => Self::S8(a.meet(b)),
 			(Self::Unit, Self::Unit) => Self::Unit,

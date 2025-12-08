@@ -1,6 +1,4 @@
 
-use crate::ast::Id as AstId;
-use crate::identifier::Id as IdentId;
 use crate::token::Id as TokenId;
 use crate::{Data, Span};
 
@@ -39,17 +37,11 @@ pub enum Kind {
 	Discovery,
 	Parser,
 	Checker,
-	#[cfg(feature="ready")]
 	LoweringTAC,
 	#[cfg(feature="ready")]
 	LoweringMachine,
 	#[cfg(feature="ready")]
 	Assembler,
-
-	// Internal Errors
-	NoType { msg: &'static str, ast_id: AstId },
-	MissingAstNode { proc_id: IdentId, ast_id: AstId },
-	MissingLoopBounds { proc_id: IdentId },
 }
 
 #[derive(Debug, Default, Clone)]

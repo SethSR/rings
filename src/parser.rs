@@ -433,13 +433,10 @@ fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, Error>
 		TKind::Carrot   => BinaryOp::BinXor,
 		TKind::Carrot2  => BinaryOp::LogXor,
 		TKind::Dash     => BinaryOp::Sub,
-		TKind::Dot      => BinaryOp::Access,
 		TKind::Eq2      => BinaryOp::CmpEQ,
 		TKind::LArr     => BinaryOp::CmpLT,
 		TKind::LArr2    => BinaryOp::ShL,
 		TKind::LArrEq   => BinaryOp::CmpLE,
-		TKind::OBracket => BinaryOp::Index,
-		TKind::OParen   => BinaryOp::Call,
 		TKind::Percent  => BinaryOp::Mod,
 		TKind::Plus     => BinaryOp::Add,
 		TKind::RArr     => BinaryOp::CmpGT,
@@ -455,7 +452,6 @@ fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, Error>
 
 fn binding_power(op: &BinaryOp) -> usize {
 	match op {
-		BinaryOp::Call   | BinaryOp::Index => 10,
 		BinaryOp::Add    | BinaryOp::Sub   => 20,
 		BinaryOp::Mul    | BinaryOp::Div   | BinaryOp::Mod    => 30,
 		BinaryOp::ShL    | BinaryOp::ShR   => 40,
@@ -464,7 +460,6 @@ fn binding_power(op: &BinaryOp) -> usize {
 		BinaryOp::CmpEQ  | BinaryOp::CmpNE |
 		BinaryOp::CmpGE  | BinaryOp::CmpGT |
 		BinaryOp::CmpLE  | BinaryOp::CmpLT => 70,
-		BinaryOp::Access => 80,
 	}
 }
 
