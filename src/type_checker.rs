@@ -2,8 +2,9 @@
 use std::collections::hash_map::Entry;
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
-use crate::identifier::{Id as IdentId};
 use crate::error;
+use crate::identifier::{Id as IdentId};
+use crate::operators::{BinaryOp, UnaryOp};
 use crate::rings_type::Meet;
 use crate::{Data, ProcData, Type};
 
@@ -11,8 +12,8 @@ enum Error {
 	InternalValue,
 	AlreadyDefined(IdentId),
 	MismatchedTypes(Type, Type),
-	InvalidBinOp(crate::BinaryOp, Type, Type),
-	InvalidUnOp(crate::UnaryOp, Type),
+	InvalidBinOp(BinaryOp, Type, Type),
+	InvalidUnOp(UnaryOp, Type),
 	TooManyLoopVariables,
 	NegativeLoopRange,
 	MissingLoopBounds,
@@ -283,30 +284,30 @@ fn check_assign(proc_data: &ProcData,
 
 fn check_binop(proc_data: &mut ProcData,
 	ast_id: AstId,
-	op: crate::BinaryOp, left_id: &AstId, right_id: &AstId, proc_type: Type,
+	op: BinaryOp, left_id: &AstId, right_id: &AstId, proc_type: Type,
 ) -> Result<(), Error> {
 	check_stmt(proc_data, *left_id, proc_type)?;
 	check_stmt(proc_data, *right_id, proc_type)?;
 	match op {
-		crate::BinaryOp::Add |
-		crate::BinaryOp::Sub |
-		crate::BinaryOp::Mul |
-		crate::BinaryOp::Div |
-		crate::BinaryOp::Mod |
-		crate::BinaryOp::ShL |
-		crate::BinaryOp::ShR |
-		crate::BinaryOp::BinAnd |
-		crate::BinaryOp::BinOr |
-		crate::BinaryOp::BinXor |
-		crate::BinaryOp::LogAnd |
-		crate::BinaryOp::LogOr |
-		crate::BinaryOp::LogXor |
-		crate::BinaryOp::CmpEQ |
-		crate::BinaryOp::CmpNE |
-		crate::BinaryOp::CmpGE |
-		crate::BinaryOp::CmpGT |
-		crate::BinaryOp::CmpLE |
-		crate::BinaryOp::CmpLT => {
+		BinaryOp::Add |
+		BinaryOp::Sub |
+		BinaryOp::Mul |
+		BinaryOp::Div |
+		BinaryOp::Mod |
+		BinaryOp::ShL |
+		BinaryOp::ShR |
+		BinaryOp::BinAnd |
+		BinaryOp::BinOr |
+		BinaryOp::BinXor |
+		BinaryOp::LogAnd |
+		BinaryOp::LogOr |
+		BinaryOp::LogXor |
+		BinaryOp::CmpEQ |
+		BinaryOp::CmpNE |
+		BinaryOp::CmpGE |
+		BinaryOp::CmpGT |
+		BinaryOp::CmpLE |
+		BinaryOp::CmpLT => {
 			let left_type = proc_data.ast_to_type[left_id];
 			let right_type = proc_data.ast_to_type[right_id];
 			match left_type.meet(&right_type) {
@@ -323,7 +324,7 @@ fn check_binop(proc_data: &mut ProcData,
 
 fn check_unop(proc_data: &mut ProcData,
 	ast_id: AstId,
-	op: crate::UnaryOp, right: &AstId,
+	op: UnaryOp, right: &AstId,
 ) -> Result<(), Error> {
 	let right_type = proc_data.ast_to_type[right];
 	if !matches!(right_type, Type::S8(_)) {

@@ -1,27 +1,42 @@
 
+use crate::discovery::ExprKind;
 use crate::identifier;
+use crate::operators::{BinaryOp, UnaryOp};
 use crate::token;
 use crate::{Data, Span};
+use crate::token::Kind;
 
 pub enum Error {
 	ExpectedToken { expected: String, found: token::Id },
 	Expected { span: Span<usize>, expected: String, found: String },
+	InvalidBinOp { span: Span<token::Id>, op: BinaryOp, lhs: ExprKind, rhs: ExprKind },
+	InvalidUnOp { span: Span<token::Id>, op: UnaryOp, rhs: ExprKind },
 }
 
 impl Error {
-	pub fn into_comp_error(self, db: &Data) -> crate::error::Error {
+	pub fn into_comp_error(self, db: &Data) -> crate::Error {
 		match self {
-			Error::ExpectedToken { expected, found: token_id } => {
+			Self::ExpectedToken { expected, found: token_id } => {
 				let found = db.tok_list[token_id];
-				let message = if let token::Kind::Identifier(ident_id) = found {
+				let message = if let Kind::Identifier(ident_id) = found {
 					format!("Expected {expected}, found '{}'", db.text(&ident_id))
 				} else {
 					format!("Expected {expected}, found {found:?}")
 				};
 				crate::Error::new(db.token_source(token_id), message)
 			}
-			Error::Expected { span, expected, found } => {
+			Self::Expected { span, expected, found } => {
 				crate::Error::new(span, format!("Expected {expected}, found {found}"))
+			}
+			Self::InvalidBinOp { span, op, lhs, rhs } => {
+				let start = db.tok_pos[span.start];
+				let end = db.tok_pos[span.end];
+				crate::Error::new((start..end).into(), format!("Unable to apply '{op}' to '{lhs:?}' and '{rhs:?}'"))
+			}
+			Self::InvalidUnOp { span, op, rhs } => {
+				let start = db.tok_pos[span.start];
+				let end = db.tok_pos[span.end];
+				crate::Error::new((start..end).into(), format!("Unable to apply '{op}' to '{rhs:?}'"))
 			}
 		}
 	}
@@ -43,18 +58,18 @@ impl Cursor {
 		self.0 += 1;
 	}
 
-	pub fn peek(&self, data: &Data, offset: usize) -> token::Kind {
+	pub fn peek(&self, data: &Data, offset: usize) -> Kind {
 		data.tok_list
 			.get(self.0 + offset)
 			.copied()
-			.unwrap_or(token::Kind::Eof)
+			.unwrap_or(Kind::Eof)
 	}
 
-	pub fn current(&self, data: &Data) -> token::Kind {
+	pub fn current(&self, data: &Data) -> Kind {
 		self.peek(data, 0)
 	}
 
-	pub fn expect(&mut self, data: &Data, expected: token::Kind) -> Result<(), Error> {
+	pub fn expect(&mut self, data: &Data, expected: Kind) -> Result<(), Error> {
 		if self.current(data) == expected {
 			self.advance();
 			Ok(())
@@ -66,7 +81,7 @@ impl Cursor {
 	pub fn expect_identifier(&mut self, data: &Data,
 		expected: &str,
 	) -> Result<identifier::Id, Error> {
-		if let token::Kind::Identifier(ident_id) = self.current(data) {
+		if let Kind::Identifier(ident_id) = self.current(data) {
 			self.advance();
 			Ok(ident_id)
 		} else {
@@ -77,7 +92,7 @@ impl Cursor {
 	pub fn expect_integer(&mut self, data: &Data,
 		expected: &str,
 	) -> Result<i64, Error> {
-		if let token::Kind::Integer(num) = self.current(data) {
+		if let Kind::Integer(num) = self.current(data) {
 			self.advance();
 			Ok(num)
 		} else {
@@ -97,7 +112,7 @@ impl Cursor {
 	pub fn expect_type(&mut self, data: &Data) -> Result<crate::Type, Error> {
 		let result = match self.current(data) {
 			#[cfg(feature="ready")]
-			token::Kind::Identifier(ident_id) => {
+			Kind::Identifier(ident_id) => {
 				if data.records.contains_key(&ident_id) {
 					Ok(crate::Type::Record(ident_id))
 				} else if data.tables.contains_key(&ident_id) {
@@ -107,22 +122,49 @@ impl Cursor {
 				}
 			}
 			#[cfg(feature="ready")]
-			token::Kind::Bool => Ok(crate::Type::Bool),
+			Kind::Bool => Ok(crate::Type::Bool),
 			#[cfg(feature="ready")]
-			token::Kind::U8 => Ok(crate::Type::U8),
-			token::Kind::S8 => Ok(crate::Type::s8_top()),
+			Kind::U8 => Ok(crate::Type::U8),
+			Kind::S8 => Ok(crate::Type::s8_top()),
 			#[cfg(feature="ready")]
-			token::Kind::U16 => Ok(crate::Type::U16),
+			Kind::U16 => Ok(crate::Type::U16),
 			#[cfg(feature="ready")]
-			token::Kind::S16 => Ok(crate::Type::S16),
+			Kind::S16 => Ok(crate::Type::S16),
 			#[cfg(feature="ready")]
-			token::Kind::U32 => Ok(crate::Type::U32),
+			Kind::U32 => Ok(crate::Type::U32),
 			#[cfg(feature="ready")]
-			token::Kind::S32 => Ok(crate::Type::S32),
+			Kind::S32 => Ok(crate::Type::S32),
 			_ => return Err(self.expected_token("type-specifier")),
 		};
 		self.advance();
 		result
+	}
+
+	pub fn expect_bin_op(&mut self, data: &mut Data) -> Result<BinaryOp, Error> {
+		let op = match self.current(data) {
+			Kind::Amp      => BinaryOp::BinAnd,
+			Kind::Amp2     => BinaryOp::LogAnd,
+			Kind::BangEq   => BinaryOp::CmpNE,
+			Kind::Bar      => BinaryOp::BinOr,
+			Kind::Bar2     => BinaryOp::LogOr,
+			Kind::Carrot   => BinaryOp::BinXor,
+			Kind::Carrot2  => BinaryOp::LogXor,
+			Kind::Dash     => BinaryOp::Sub,
+			Kind::Eq2      => BinaryOp::CmpEQ,
+			Kind::LArr     => BinaryOp::CmpLT,
+			Kind::LArr2    => BinaryOp::ShL,
+			Kind::LArrEq   => BinaryOp::CmpLE,
+			Kind::Percent  => BinaryOp::Mod,
+			Kind::Plus     => BinaryOp::Add,
+			Kind::RArr     => BinaryOp::CmpGT,
+			Kind::RArr2    => BinaryOp::ShR,
+			Kind::RArrEq   => BinaryOp::CmpGE,
+			Kind::Slash    => BinaryOp::Div,
+			Kind::Star     => BinaryOp::Mul,
+			_ => return Err(self.expected_token("binary operator")),
+		};
+		self.advance();
+		Ok(op)
 	}
 
 	pub fn expected_token(&self, expected: impl Into<String>) -> Error {

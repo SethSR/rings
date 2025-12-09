@@ -9,6 +9,7 @@ mod discovery;
 mod error;
 mod identifier;
 mod lexer;
+mod operators;
 mod parser;
 mod rings_type;
 mod span;
@@ -369,12 +370,13 @@ impl fmt::Display for Data {
 		}
 
 		if !self.task_queue.is_empty() {
-			writeln!(f, "{:<32} | {:<11} | {:<10} | PREV READY COUNT",
-				"PROC-TASK", "START TOKEN", "PREV TOKEN")?;
-			writeln!(f, "{:-<32} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "")?;
+			writeln!(f, "{:<32} | {:<11} | {:<11} | {:<10} | PREV READY COUNT",
+				"TASK", "KIND", "START TOKEN", "PREV TOKEN")?;
+			writeln!(f, "{:-<32} | {:-<11} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "", "")?;
 			for task in &self.task_queue {
-				writeln!(f, "{:<32} | {:<11} | {:<10} | {}",
-					task.name(self),
+				writeln!(f, "{:<32} | {:<11?} | {:<11} | {:<10} | {}",
+					self.text(&task.name_id),
+					task.kind,
 					task.tok_start.index(),
 					task.prev_furthest_token.index(),
 					task.prev_ready_proc_count,
@@ -446,70 +448,6 @@ impl fmt::Display for Data {
 		}
 
 		Ok(())
-	}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOp {
-	Add,
-	Sub,
-	Mul,
-	Div,
-	Mod,
-	ShL,
-	ShR,
-	BinAnd,
-	BinOr,
-	BinXor,
-	LogAnd,
-	LogOr,
-	LogXor,
-	CmpEQ,
-	CmpNE,
-	CmpGE,
-	CmpGT,
-	CmpLE,
-	CmpLT,
-}
-
-impl fmt::Display for BinaryOp {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Add => write!(f, "+"),
-			Self::Sub => write!(f, "-"),
-			Self::Mul => write!(f, "*"),
-			Self::Div => write!(f, "/"),
-			Self::Mod => write!(f, "%"),
-			Self::ShL => write!(f, "<<"),
-			Self::ShR => write!(f, ">>"),
-			Self::BinAnd => write!(f, "&"),
-			Self::BinOr => write!(f, "|"),
-			Self::BinXor => write!(f, "^"),
-			Self::LogAnd => write!(f, "&&"),
-			Self::LogOr => write!(f, "||"),
-			Self::LogXor => write!(f, "^^"),
-			Self::CmpEQ => write!(f, "=="),
-			Self::CmpNE => write!(f, "!="),
-			Self::CmpGE => write!(f, ">="),
-			Self::CmpGT => write!(f, ">"),
-			Self::CmpLE => write!(f, "<="),
-			Self::CmpLT => write!(f, "<"),
-		}
-	}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnaryOp {
-	Neg,
-	Not,
-}
-
-impl fmt::Display for UnaryOp {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Neg => write!(f, "-"),
-			Self::Not => write!(f, "!"),
-		}
 	}
 }
 

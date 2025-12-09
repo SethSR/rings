@@ -1,10 +1,11 @@
 
-use crate::ast::{ Block as AstBlock, Id as AstId, Kind as AKind, PathSegment };
+use crate::ast::{Block as AstBlock, Id as AstId, Kind as AKind, PathSegment};
 use crate::cursor::{Cursor, Error};
 use crate::error;
 use crate::identifier::{Id as IdentId};
+use crate::operators::{BinaryOp, UnaryOp};
 use crate::token::{ Id as TokenId, Kind as TKind };
-use crate::{ BinaryOp, Bounds, Data, ProcData, UnaryOp };
+use crate::{Bounds, Data, ProcData};
 
 type ParseResult = Result<AstId, Error>;
 
@@ -37,7 +38,7 @@ pub fn eval(data: &mut Data) {
 
 			Ok(proc_data) => {
 				// We finished. Add us to the 'done' list, so dependent procedures can progress.
-				data.proc_db.insert(task.name_id(), proc_data);
+				data.proc_db.insert(task.name_id, proc_data);
 				//data.variable_tables.insert(task.proc_name, var_table);
 			}
 		}
@@ -360,10 +361,10 @@ fn parse_expr_sub(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData
 	if end_tokens.contains(&cursor.current(data)) {
 		return Ok(left);
 	}
-	let Ok(op) = parse_bin_op(cursor, data) else {
+	let Ok(op) = cursor.expect_bin_op(data) else {
 		return Ok(left);
 	};
-	let op_binding_power = binding_power(&op);
+	let op_binding_power = op.binding_power();
 	let tok_start_inner = cursor.index();
 	let right = parse_primary(cursor, data, proc_data)?;
 	let right = if min_binding_power <= op_binding_power {
@@ -420,46 +421,6 @@ fn parse_primary(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 		Ok(proc_data.add_ast(AKind::UnOp(op, node), tok_range))
 	} else {
 		Ok(node)
-	}
-}
-
-fn parse_bin_op(cursor: &mut Cursor, data: &mut Data) -> Result<BinaryOp, Error> {
-	let op = match cursor.current(data) {
-		TKind::Amp      => BinaryOp::BinAnd,
-		TKind::Amp2     => BinaryOp::LogAnd,
-		TKind::BangEq   => BinaryOp::CmpNE,
-		TKind::Bar      => BinaryOp::BinOr,
-		TKind::Bar2     => BinaryOp::LogOr,
-		TKind::Carrot   => BinaryOp::BinXor,
-		TKind::Carrot2  => BinaryOp::LogXor,
-		TKind::Dash     => BinaryOp::Sub,
-		TKind::Eq2      => BinaryOp::CmpEQ,
-		TKind::LArr     => BinaryOp::CmpLT,
-		TKind::LArr2    => BinaryOp::ShL,
-		TKind::LArrEq   => BinaryOp::CmpLE,
-		TKind::Percent  => BinaryOp::Mod,
-		TKind::Plus     => BinaryOp::Add,
-		TKind::RArr     => BinaryOp::CmpGT,
-		TKind::RArr2    => BinaryOp::ShR,
-		TKind::RArrEq   => BinaryOp::CmpGE,
-		TKind::Slash    => BinaryOp::Div,
-		TKind::Star     => BinaryOp::Mul,
-		_ => return Err(cursor.expected_token("binary operator")),
-	};
-	cursor.advance();
-	Ok(op)
-}
-
-fn binding_power(op: &BinaryOp) -> usize {
-	match op {
-		BinaryOp::Add    | BinaryOp::Sub   => 20,
-		BinaryOp::Mul    | BinaryOp::Div   | BinaryOp::Mod    => 30,
-		BinaryOp::ShL    | BinaryOp::ShR   => 40,
-		BinaryOp::LogAnd | BinaryOp::LogOr | BinaryOp::LogXor => 50,
-		BinaryOp::BinAnd | BinaryOp::BinOr | BinaryOp::BinXor => 60,
-		BinaryOp::CmpEQ  | BinaryOp::CmpNE |
-		BinaryOp::CmpGE  | BinaryOp::CmpGT |
-		BinaryOp::CmpLE  | BinaryOp::CmpLT => 70,
 	}
 }
 

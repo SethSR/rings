@@ -3,8 +3,9 @@ use index_vec::define_index_type;
 use index_vec::IndexVec;
 
 use crate::identifier::Id as IdentId;
+use crate::operators::{BinaryOp, UnaryOp};
 use crate::token;
-use crate::{BinaryOp, Bounds, Span, UnaryOp};
+use crate::{Bounds, Span};
 
 define_index_type! {
 	pub struct Id = usize;

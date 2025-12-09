@@ -2,7 +2,8 @@
 use crate::ast::{Block as ABlock, Id as AstId, Kind};
 use crate::error;
 use crate::identifier::Id as IdentId;
-use crate::{BinaryOp, Bounds, Data, ProcData, UnaryOp};
+use crate::operators::{BinaryOp, UnaryOp};
+use crate::{Bounds, Data, ProcData};
 
 
 type TempId = u32; // Temporary variable ID
@@ -122,11 +123,11 @@ pub fn eval(data: &mut Data) -> Result<(), crate::Error> {
 		match section.lower(proc_data) {
 			Ok(_) => {
 				proc_data.tac_data = Some(section);
-			},
+			}
 			Err(e) => {
 				result = Err(e.into_comp_error(data));
 				break;
-			},//.into_comp_error(data, proc_data)),
+			}
 		}
 	}
 	result
