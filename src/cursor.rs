@@ -1,7 +1,6 @@
 
-use crate::discovery::ExprKind;
 use crate::identifier;
-use crate::operators::{BinaryOp, UnaryOp};
+use crate::operators::BinaryOp;
 use crate::token;
 use crate::{Data, Span};
 use crate::token::Kind;
@@ -9,8 +8,6 @@ use crate::token::Kind;
 pub enum Error {
 	ExpectedToken { expected: String, found: token::Id },
 	Expected { span: Span<usize>, expected: String, found: String },
-	InvalidBinOp { span: Span<token::Id>, op: BinaryOp, lhs: ExprKind, rhs: ExprKind },
-	InvalidUnOp { span: Span<token::Id>, op: UnaryOp, rhs: ExprKind },
 }
 
 impl Error {
@@ -27,16 +24,6 @@ impl Error {
 			}
 			Self::Expected { span, expected, found } => {
 				crate::Error::new(span, format!("Expected {expected}, found {found}"))
-			}
-			Self::InvalidBinOp { span, op, lhs, rhs } => {
-				let start = db.tok_pos[span.start];
-				let end = db.tok_pos[span.end];
-				crate::Error::new((start..end).into(), format!("Unable to apply '{op}' to '{lhs:?}' and '{rhs:?}'"))
-			}
-			Self::InvalidUnOp { span, op, rhs } => {
-				let start = db.tok_pos[span.start];
-				let end = db.tok_pos[span.end];
-				crate::Error::new((start..end).into(), format!("Unable to apply '{op}' to '{rhs:?}'"))
 			}
 		}
 	}

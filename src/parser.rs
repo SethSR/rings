@@ -45,6 +45,8 @@ pub fn eval(data: &mut Data) {
 	}
 }
 
+// TODO - srenshaw - We need to add parsing Value tasks.
+
 fn parse(data: &mut Data, start_token: TokenId) -> Result<ProcData, TokenId> {
 	let mut cursor = Cursor::new(start_token);
 	let cursor = &mut cursor;
