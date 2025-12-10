@@ -17,6 +17,7 @@ mod tac;
 mod task;
 mod token;
 mod type_checker;
+mod value;
 
 use error::Error;
 use rings_type::Type;
@@ -370,8 +371,8 @@ impl fmt::Display for Data {
 		}
 
 		if !self.task_queue.is_empty() {
-			writeln!(f, "{:<32} | {:<11} | {:<11} | {:<10} | PREV READY COUNT",
-				"TASK", "KIND", "START TOKEN", "PREV TOKEN")?;
+			writeln!(f, "{:<32} | {:<11} | {:<11} | {:<10} | PREV QUEUE LENGTH",
+				"TASK", "KIND", "START TOKEN", "LATEST TOKEN")?;
 			writeln!(f, "{:-<32} | {:-<11} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "", "")?;
 			for task in &self.task_queue {
 				writeln!(f, "{:<32} | {:<11?} | {:<11} | {:<10} | {}",
@@ -379,7 +380,7 @@ impl fmt::Display for Data {
 					task.kind,
 					task.tok_start.index(),
 					task.prev_furthest_token.index(),
-					task.prev_ready_proc_count,
+					task.prev_queue_length,
 				)?;
 			}
 			writeln!(f)?;

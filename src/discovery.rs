@@ -2,7 +2,6 @@
 use crate::cursor::{Cursor, Error};
 use crate::error;
 use crate::identifier::{self, Id as IdentId, Identifier};
-use crate::operators::{BinaryOp, UnaryOp};
 use crate::token::{Id as TokenId, Kind};
 use crate::{Data, Task, Type};
 
@@ -16,9 +15,6 @@ pub type RecordMap = identifier::Map<Record>;
 pub type TableMap = identifier::Map<Table>;
 
 pub type Param = (IdentId, Type);
-
-// TODO - srenshaw - At some point, we'll want the discovery phase to use a work queue to allow
-// out-of-order type recognition.
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
@@ -160,19 +156,20 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
 				"indexes not yet implemented",
 				cursor.index())),
 
-			Kind::Identifier(name_id) => {
+			Kind::Value => {
 				cursor.advance();
-				cursor.expect(data, Kind::Colon2)?;
+				let name_id = cursor.expect_identifier(data, "value name")?;
+				cursor.expect(data, Kind::Eq)?;
 				let tok_start = cursor.index();
-				let expr = discover_expression(cursor, data, &[Kind::Semicolon])?;
+				let expr = crate::value::value_expression(cursor, data, &[Kind::Semicolon], false)?;
 				match expr.kind {
-					ExprKind::Int(num) => {
+					crate::value::Kind::Int(num) => {
 						data.values.insert(name_id, Value::Integer(num));
 					}
-					ExprKind::Dec(num) => {
+					crate::value::Kind::Dec(num) => {
 						data.values.insert(name_id, Value::Decimal(num));
 					}
-					ExprKind::Unfinished => {
+					crate::value::Kind::Unfinished => {
 						data.task_queue.push_back(Task::new_value(name_id, tok_start));
 					}
 				}
@@ -184,144 +181,6 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
 	}
 
 	Ok(())
-}
-
-#[derive(Debug)]
-pub enum ExprKind {
-	Int(i64),
-	Dec(f64),
-
-	Unfinished,
-}
-
-struct Expr {
-	kind: ExprKind,
-	loc: crate::Span<TokenId>,
-}
-
-fn discover_expression(cursor: &mut Cursor, data: &mut Data,
-	end_tokens: &[Kind],
-) -> DiscResult<Expr> {
-	discover_expr_main(cursor, data, 0, end_tokens)
-}
-
-fn discover_expr_main(cursor: &mut Cursor, data: &mut Data,
-	min_binding_power: usize, end_tokens: &[Kind],
-) -> DiscResult<Expr> {
-	let left = discover_primary(cursor, data)?;
-	discover_expr_sub(cursor, data, min_binding_power, left, end_tokens)
-}
-
-fn discover_expr_sub(cursor: &mut Cursor, data: &mut Data,
-	min_binding_power: usize, left: Expr,
-	end_tokens: &[Kind],
-) -> DiscResult<Expr> {
-	if end_tokens.contains(&cursor.current(data)) {
-		cursor.advance();
-		return Ok(left);
-	}
-
-	let Ok(op) = cursor.expect_bin_op(data) else {
-		return Ok(left);
-	};
-	let op_binding_power = op.binding_power();
-
-	let right = discover_primary(cursor, data)?;
-
-	if min_binding_power <= op_binding_power {
-		let right = discover_expr_sub(cursor, data, op_binding_power,
-			right, end_tokens)?;
-
-		let kind = match (left.kind, right.kind) {
-			(ExprKind::Unfinished, _) | (_, ExprKind::Unfinished) => ExprKind::Unfinished,
-
-			(ExprKind::Int(a), ExprKind::Int(b)) => match op {
-				BinaryOp::Add => ExprKind::Int(a + b),
-				BinaryOp::Sub => ExprKind::Int(a - b),
-				BinaryOp::Mul => ExprKind::Int(a * b),
-				BinaryOp::Div => ExprKind::Int(a / b),
-				BinaryOp::Mod => ExprKind::Int(a % b),
-				BinaryOp::BinAnd => ExprKind::Int(a & b),
-				BinaryOp::BinOr  => ExprKind::Int(a | b),
-				BinaryOp::BinXor => ExprKind::Int(a ^ b),
-				BinaryOp::CmpEQ => ExprKind::Int((a == b) as i64),
-				BinaryOp::CmpGE => ExprKind::Int((a >= b) as i64),
-				BinaryOp::CmpGT => ExprKind::Int((a >  b) as i64),
-				BinaryOp::CmpLE => ExprKind::Int((a <= b) as i64),
-				BinaryOp::CmpLT => ExprKind::Int((a <  b) as i64),
-				BinaryOp::CmpNE => ExprKind::Int((a != b) as i64),
-				BinaryOp::LogAnd => ExprKind::Int((a != 0 && b != 0) as i64),
-				BinaryOp::LogOr  => ExprKind::Int((a != 0 || b != 0) as i64),
-				BinaryOp::LogXor => ExprKind::Int(((a != 0) ^ (b != 0)) as i64),
-				BinaryOp::ShL => ExprKind::Int(a << b),
-				BinaryOp::ShR => ExprKind::Int(a >> b),
-			}
-
-			(ExprKind::Dec(a), ExprKind::Dec(b)) => match op {
-				BinaryOp::Add => ExprKind::Dec(a + b),
-				BinaryOp::Sub => ExprKind::Dec(a - b),
-				BinaryOp::Mul => ExprKind::Dec(a * b),
-				BinaryOp::Div => ExprKind::Dec(a / b),
-				BinaryOp::Mod => ExprKind::Dec(a % b),
-				BinaryOp::CmpEQ => ExprKind::Int((a == b) as i64),
-				BinaryOp::CmpGE => ExprKind::Int((a >= b) as i64),
-				BinaryOp::CmpGT => ExprKind::Int((a >  b) as i64),
-				BinaryOp::CmpLE => ExprKind::Int((a <= b) as i64),
-				BinaryOp::CmpLT => ExprKind::Int((a <  b) as i64),
-				BinaryOp::CmpNE => ExprKind::Int((a != b) as i64),
-				BinaryOp::LogAnd => ExprKind::Int((a != 0. && b != 0.) as i64),
-				BinaryOp::LogOr  => ExprKind::Int((a != 0. || b != 0.) as i64),
-				BinaryOp::LogXor => ExprKind::Int(((a != 0.) ^ (b != 0.)) as i64),
-				_ => ExprKind::Unfinished,
-			}
-
-			_ => ExprKind::Unfinished,
-		};
-
-		Ok(Expr { kind, loc: left.loc + right.loc })
-	} else {
-		Ok(right)
-	}
-}
-
-fn discover_primary(cursor: &mut Cursor, data: &mut Data,
-) -> DiscResult<Expr> {
-	let unary_op = match cursor.current(data) {
-		Kind::Dash => { cursor.advance(); Some(UnaryOp::Neg) }
-		Kind::Bang => { cursor.advance(); Some(UnaryOp::Not) }
-		_ => None,
-	};
-
-	let tok_start = cursor.index();
-	let mut kind = match cursor.current(data) {
-		Kind::Identifier(_) => { cursor.advance(); ExprKind::Unfinished }
-		Kind::Integer(num) => { cursor.advance(); ExprKind::Int(num) }
-		Kind::Decimal(num) => { cursor.advance(); ExprKind::Dec(num) }
-		Kind::True          => { cursor.advance(); ExprKind::Int(1) }
-		Kind::False         => { cursor.advance(); ExprKind::Int(0) }
-		Kind::OParen => {
-			cursor.advance();
-			let expr = discover_expression(cursor, data, &[Kind::CParen])?;
-			expr.kind
-		}
-		_ => return Err(cursor.expected_token("identifier or number")),
-	};
-
-	if let Some(op) = unary_op {
-		kind = match (op, kind) {
-			(_, ExprKind::Unfinished) => ExprKind::Unfinished,
-			(UnaryOp::Neg, ExprKind::Int(num)) => ExprKind::Int(-num),
-			(UnaryOp::Neg, ExprKind::Dec(num)) => ExprKind::Dec(-num),
-			(UnaryOp::Not, ExprKind::Int(num)) => ExprKind::Int(!num),
-			// This is technically an error, but it should be picked up by the Parser phase
-			(UnaryOp::Not, ExprKind::Dec(_)) => ExprKind::Unfinished,
-		};
-	}
-
-	Ok(Expr {
-		kind,
-		loc: (tok_start..cursor.index()).into(),
-	})
 }
 
 fn check_braces(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
@@ -451,7 +310,7 @@ mod can_parse {
 
 	#[test]
 	fn constant_values() {
-		let data = setup("a :: 3; b :: 4.2;");
+		let data = setup("value a = 3; value b = 4.2;");
 		assert_eq!(data.values.len(), 2);
 		assert_eq!(data.values[&"a".id()], Value::Integer(3), "{data}");
 		assert_eq!(data.values[&"b".id()], Value::Decimal(4.2), "{data}");
@@ -459,11 +318,11 @@ mod can_parse {
 
 	#[test]
 	fn procedures() {
-		let data = setup("a :: 5; proc b() {}");
+		let data = setup("value a = 5; proc b() {}");
 		assert_eq!(data.task_queue.len(), 1);
 		assert_eq!(data.task_queue[0], Task::new_proc(
 			"b".id(),
-			TokenId::new(8),
+			TokenId::new(9),
 		));
 		assert_eq!(data.procedures.len(), 1);
 		assert_eq!(data.procedures[&"b".id()], ProcType {

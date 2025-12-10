@@ -1,6 +1,6 @@
 
 use crate::identifier;
-use crate::operators::BinaryOp;
+use crate::operators::{BinaryOp, UnaryOp};
 use crate::token;
 use crate::{Data, Span};
 use crate::token::Kind;
@@ -128,30 +128,36 @@ impl Cursor {
 	}
 
 	pub fn expect_bin_op(&mut self, data: &mut Data) -> Result<BinaryOp, Error> {
-		let op = match self.current(data) {
-			Kind::Amp      => BinaryOp::BinAnd,
-			Kind::Amp2     => BinaryOp::LogAnd,
-			Kind::BangEq   => BinaryOp::CmpNE,
-			Kind::Bar      => BinaryOp::BinOr,
-			Kind::Bar2     => BinaryOp::LogOr,
-			Kind::Carrot   => BinaryOp::BinXor,
-			Kind::Carrot2  => BinaryOp::LogXor,
-			Kind::Dash     => BinaryOp::Sub,
-			Kind::Eq2      => BinaryOp::CmpEQ,
-			Kind::LArr     => BinaryOp::CmpLT,
-			Kind::LArr2    => BinaryOp::ShL,
-			Kind::LArrEq   => BinaryOp::CmpLE,
-			Kind::Percent  => BinaryOp::Mod,
-			Kind::Plus     => BinaryOp::Add,
-			Kind::RArr     => BinaryOp::CmpGT,
-			Kind::RArr2    => BinaryOp::ShR,
-			Kind::RArrEq   => BinaryOp::CmpGE,
-			Kind::Slash    => BinaryOp::Div,
-			Kind::Star     => BinaryOp::Mul,
-			_ => return Err(self.expected_token("binary operator")),
-		};
-		self.advance();
-		Ok(op)
+		match self.current(data) {
+			Kind::Amp     => { self.advance(); Ok(BinaryOp::BinAnd) }
+			Kind::Amp2    => { self.advance(); Ok(BinaryOp::LogAnd) }
+			Kind::BangEq  => { self.advance(); Ok(BinaryOp::CmpNE) }
+			Kind::Bar     => { self.advance(); Ok(BinaryOp::BinOr) }
+			Kind::Bar2    => { self.advance(); Ok(BinaryOp::LogOr) }
+			Kind::Carrot  => { self.advance(); Ok(BinaryOp::BinXor) }
+			Kind::Carrot2 => { self.advance(); Ok(BinaryOp::LogXor) }
+			Kind::Dash    => { self.advance(); Ok(BinaryOp::Sub) }
+			Kind::Eq2     => { self.advance(); Ok(BinaryOp::CmpEQ) }
+			Kind::LArr    => { self.advance(); Ok(BinaryOp::CmpLT) }
+			Kind::LArr2   => { self.advance(); Ok(BinaryOp::ShL) }
+			Kind::LArrEq  => { self.advance(); Ok(BinaryOp::CmpLE) }
+			Kind::Percent => { self.advance(); Ok(BinaryOp::Mod) }
+			Kind::Plus    => { self.advance(); Ok(BinaryOp::Add) }
+			Kind::RArr    => { self.advance(); Ok(BinaryOp::CmpGT) }
+			Kind::RArr2   => { self.advance(); Ok(BinaryOp::ShR) }
+			Kind::RArrEq  => { self.advance(); Ok(BinaryOp::CmpGE) }
+			Kind::Slash   => { self.advance(); Ok(BinaryOp::Div) }
+			Kind::Star    => { self.advance(); Ok(BinaryOp::Mul) }
+			_ => Err(self.expected_token("binary operator")),
+		}
+	}
+
+	pub fn expect_unary_op(&mut self, data: &Data) -> Option<UnaryOp> {
+		match self.current(data) {
+			Kind::Dash => { self.advance(); Some(UnaryOp::Neg) }
+			Kind::Bang => { self.advance(); Some(UnaryOp::Not) }
+			_ => None,
+		}
 	}
 
 	pub fn expected_token(&self, expected: impl Into<String>) -> Error {

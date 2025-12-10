@@ -14,7 +14,7 @@ pub struct Task {
 	pub name_id: IdentId,
 	pub tok_start: TokenId,
 	pub prev_furthest_token: TokenId,
-	pub prev_ready_proc_count: usize,
+	pub prev_queue_length: usize,
 }
 
 impl Task {
@@ -24,7 +24,8 @@ impl Task {
 			name_id,
 			tok_start,
 			prev_furthest_token: TokenId::default(),
-			prev_ready_proc_count: 0,
+			// Initialized to 0, but will be reset at the start of the Parser phase
+			prev_queue_length: 0,
 		}
 	}
 
@@ -34,7 +35,8 @@ impl Task {
 			name_id,
 			tok_start,
 			prev_furthest_token: TokenId::default(),
-			prev_ready_proc_count: 0,
+			// Initialized to 0, but will be reset at the start of the Parser phase
+			prev_queue_length: 0,
 		}
 	}
 }
