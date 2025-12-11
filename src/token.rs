@@ -43,6 +43,9 @@ pub enum Kind {
 	Table,
 	Value,
 
+	// Keywords
+	Mark,
+	Free,
 	Let,
 	Return,
 	True,
@@ -57,6 +60,8 @@ pub enum Kind {
 	At,
 	Semicolon,
 	Comma,
+
+	// Operators
 	OParen,   CParen,
 	OBrace,   CBrace,
 	OBracket, CBracket,
@@ -103,7 +108,9 @@ impl Kind {
 
 			Self::Bool => 4,
 			Self::Else => 4,
+			Self::Free => 4,
 			Self::Main => 4,
+			Self::Mark => 4,
 			Self::Proc => 4,
 			Self::True => 4,
 

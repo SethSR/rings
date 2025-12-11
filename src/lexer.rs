@@ -81,6 +81,8 @@ impl Lexer {
 					"true" => token::Kind::True,
 					"where" => token::Kind::Where,
 					"while" => token::Kind::While,
+					"mark" => token::Kind::Mark,
+					"free" => token::Kind::Free,
 
 					text => {
 						let ident_id = text.id();
