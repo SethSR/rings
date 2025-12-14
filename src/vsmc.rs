@@ -26,8 +26,12 @@ pub fn eval(data: &mut Data) -> Result<(), crate::Error> {
 	result
 }
 
+/// Virtual Stack-Machine Code
+///
+/// This is the debug output for now. Output targets will act as a stack-machine regardless of the
+/// actual architecture.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Tac {
+pub enum Vsmc {
 	// Basic operations
 	/// Pushes a value on the stack
 	Push(i32),
@@ -62,48 +66,48 @@ pub enum Tac {
 	Comment(String),
 }
 
-impl Tac {
+impl Vsmc {
 	pub fn to_text(&self, _data: &Data) -> String {
 		match self {
-			Tac::Push(value) => {
+			Vsmc::Push(value) => {
 				format!("PUSH  {value}")
 			}
-			Tac::BinOp(op) => {
+			Vsmc::BinOp(op) => {
 				format!("BINOP {op}")
 			}
-			Tac::UnOp(op) => {
+			Vsmc::UnOp(op) => {
 				format!("UNOP  {op}")
 			}
-			Tac::Load(offset) => {
+			Vsmc::Load(offset) => {
 				format!("LOAD  {offset}")
 			}
-			Tac::Store(offset) => {
+			Vsmc::Store(offset) => {
 				format!("STORE {offset}")
 			}
-			Tac::Label(label_id) => {
+			Vsmc::Label(label_id) => {
 				format!("label_{label_id}:")
 			}
-			Tac::Jump(label_id) => {
+			Vsmc::Jump(label_id) => {
 				format!("JMP   label_{label_id}")
 			}
-			Tac::JumpIf(target) => {
+			Vsmc::JumpIf(target) => {
 				format!("JIF   label_{target}")
 			}
 			#[cfg(feature="ready")]
-			Tac::Call { name, args, dst: Some(dst) } => {
+			Vsmc::Call { name, args, dst: Some(dst) } => {
 				format!("CALL  {}({}) -> {dst}", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
 			#[cfg(feature="ready")]
-			Tac::Call { name, args, ..} => {
+			Vsmc::Call { name, args, ..} => {
 				format!("CALL  {}({})", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
-			Tac::Return(with_value) => {
+			Vsmc::Return(with_value) => {
 				format!("RET   {with_value}")
 			}
 			#[cfg(feature="ready")]
-			Tac::Comment(msg) => {
+			Vsmc::Comment(msg) => {
 				format!("; {msg}")
 			}
 		}
@@ -116,7 +120,7 @@ pub struct Section {
 	pub locals: Vec<(IdentId, crate::Type)>,
 	//pub variables: HashMap<IdentId, usize>,
 	pub stack: Vec<i32>,
-	pub instructions: Vec<Tac>,
+	pub instructions: Vec<Vsmc>,
 	pub next_temp: TempId,
 	pub next_label: LabelId,
 }
@@ -143,7 +147,7 @@ impl Section {
 		match kind {
 			Kind::Int(value) => {
 				// TODO - srenshaw - Ensure value is within u32
-				self.emit(Tac::Push(*value as i32));
+				self.emit(Vsmc::Push(*value as i32));
 				Ok(None)
 			}
 
@@ -155,7 +159,7 @@ impl Section {
 				let idx = self.locals.iter()
 						.position(|(local_id,_)| local_id == ident_id)
 						.unwrap();
-				self.emit(Tac::Load(idx));
+				self.emit(Vsmc::Load(idx));
 				Ok(Some(*ident_id))
 			},
 
@@ -173,7 +177,7 @@ impl Section {
 				let Some(ident_id) = self.lower_node(var_id, proc_data)? else {
 					return Err(Error::missing_ast_node(self.name, *var_id));
 				};
-				if matches!(self.instructions.last(), Some(Tac::Load(_))) {
+				if matches!(self.instructions.last(), Some(Vsmc::Load(_))) {
 					self.instructions.pop();
 				}
 
@@ -182,7 +186,7 @@ impl Section {
 				let idx = self.locals.iter()
 						.position(|(local_id,_)| local_id == &ident_id)
 						.unwrap();
-				self.emit(Tac::Store(idx));
+				self.emit(Vsmc::Store(idx));
 
 				Ok(None)
 			}
@@ -190,22 +194,22 @@ impl Section {
 			Kind::BinOp(op, left_id, right_id) => {
 				self.lower_node(left_id, proc_data)?;
 				self.lower_node(right_id, proc_data)?;
-				self.emit(Tac::BinOp(*op));
+				self.emit(Vsmc::BinOp(*op));
 				Ok(None)
 			}
 
 			Kind::UnOp(op, right_id) => {
 				self.lower_node(right_id, proc_data)?;
-				self.emit(Tac::UnOp(*op));
+				self.emit(Vsmc::UnOp(*op));
 				Ok(None)
 			}
 
 			Kind::Return(maybe_expr) => {
 				if let Some(expr_id) = maybe_expr {
 					self.lower_node(expr_id, proc_data)?;
-					self.emit(Tac::Return(true));
+					self.emit(Vsmc::Return(true));
 				} else {
-					self.emit(Tac::Return(false));
+					self.emit(Vsmc::Return(false));
 				}
 				Ok(None)
 			}
@@ -224,23 +228,23 @@ impl Section {
 				let end_label = self.alloc_label();
 
 				// if !cond goto else
-				self.emit(Tac::UnOp(UnaryOp::Not));
-				self.emit(Tac::JumpIf(else_label));
+				self.emit(Vsmc::UnOp(UnaryOp::Not));
+				self.emit(Vsmc::JumpIf(else_label));
 
 				// then block
 				for stmt_id in &then_block.0 {
 					self.lower_node(stmt_id, proc_data)?;
 				}
-				self.emit(Tac::Jump(end_label));
+				self.emit(Vsmc::Jump(end_label));
 
 				// else block
-				self.emit(Tac::Label(else_label));
+				self.emit(Vsmc::Label(else_label));
 				for stmt_id in &else_block.0 {
 					self.lower_node(stmt_id, proc_data)?;
 				}
 
 				// end
-				self.emit(Tac::Label(end_label));
+				self.emit(Vsmc::Label(end_label));
 				Ok(None)
 			}
 
@@ -249,10 +253,10 @@ impl Section {
 				let loop_label = self.alloc_label();
 
 				// goto check
-				self.emit(Tac::Jump(cond_label));
+				self.emit(Vsmc::Jump(cond_label));
 
 				// loop:
-				self.emit(Tac::Label(loop_label));
+				self.emit(Vsmc::Label(loop_label));
 
 				// body
 				for stmt_id in &body_block.0 {
@@ -260,11 +264,11 @@ impl Section {
 				}
 
 				// check:
-				self.emit(Tac::Label(cond_label));
+				self.emit(Vsmc::Label(cond_label));
 
 				// if cond goto loop
 				self.lower_node(cond_id, proc_data)?;
-				self.emit(Tac::JumpIf(loop_label));
+				self.emit(Vsmc::JumpIf(loop_label));
 
 				Ok(None)
 			}
@@ -302,7 +306,7 @@ impl Section {
 					panic!("'{}' is not a Record or Table", proc_data.text(base_id));
 				};
 
-				self.emit(Tac::Copy {
+				self.emit(Vsmc::Copy {
 					src: Location::Constant(address),
 					dst: temp.clone(),
 				});
@@ -327,7 +331,7 @@ impl Section {
 								None => unreachable!(),
 							}?;
 
-							self.emit(Tac::BinOp {
+							self.emit(Vsmc::BinOp {
 								op: BinaryOp::Add,
 								left: Location::Constant(field_offset),
 								right: temp.clone(),
@@ -354,7 +358,7 @@ impl Section {
 								None => unreachable!(),
 							}?;
 
-							self.emit(Tac::BinOp {
+							self.emit(Vsmc::BinOp {
 								op: BinaryOp::Add,
 								left: Location::Constant(column_offset),
 								right: temp.clone(),
@@ -370,7 +374,7 @@ impl Section {
 
 							// t0 = expr * field_size
 							let t0 = self.alloc_temp();
-							self.emit(Tac::BinOp {
+							self.emit(Vsmc::BinOp {
 								op: BinaryOp::Mul,
 								left: Location::Constant(field_size),
 								right: expr,
@@ -378,7 +382,7 @@ impl Section {
 							});
 
 							// temp = temp + t0
-							self.emit(Tac::BinOp {
+							self.emit(Vsmc::BinOp {
 								op: BinaryOp::Add,
 								left: temp.clone(),
 								right: Location::Temp(t0),
@@ -419,17 +423,17 @@ impl Section {
 			let index_idx = self.locals.len() - 1;
 
 			// i = start
-			self.emit(Tac::Push(*start as i32));
-			self.emit(Tac::Store(index_idx));
+			self.emit(Vsmc::Push(*start as i32));
+			self.emit(Vsmc::Store(index_idx));
 
 			// start:
-			self.emit(Tac::Label(start_label));
+			self.emit(Vsmc::Label(start_label));
 
 			// if i >= end goto end
-			self.emit(Tac::Load(index_idx));
-			self.emit(Tac::Push(*end as i32));
-			self.emit(Tac::BinOp(BinaryOp::CmpGE));
-			self.emit(Tac::JumpIf(end_label));
+			self.emit(Vsmc::Load(index_idx));
+			self.emit(Vsmc::Push(*end as i32));
+			self.emit(Vsmc::BinOp(BinaryOp::CmpGE));
+			self.emit(Vsmc::JumpIf(end_label));
 
 			// body
 			for stmt_id in &body_block.0 {
@@ -437,23 +441,23 @@ impl Section {
 			}
 
 			// i = i + 1
-			self.emit(Tac::Load(index_idx));
-			self.emit(Tac::Push(1));
-			self.emit(Tac::BinOp(BinaryOp::Add));
-			self.emit(Tac::Store(index_idx));
+			self.emit(Vsmc::Load(index_idx));
+			self.emit(Vsmc::Push(1));
+			self.emit(Vsmc::BinOp(BinaryOp::Add));
+			self.emit(Vsmc::Store(index_idx));
 
 			// goto start
-			self.emit(Tac::Jump(start_label));
+			self.emit(Vsmc::Jump(start_label));
 
 			// end:
-			self.emit(Tac::Label(end_label));
+			self.emit(Vsmc::Label(end_label));
 		}
 
 		// TODO - srenshaw - Handle table iteration, multiple variables, etc.
 		Ok(())
 	}
 
-	fn emit(&mut self, instr: Tac) {
+	fn emit(&mut self, instr: Vsmc) {
 		self.instructions.push(instr);
 	}
 
@@ -549,7 +553,7 @@ mod tests {
 			.as_ref()
 			.expect("existing tac-data");
 		assert_eq!(section.instructions, [
-			Tac::Return(false),
+			Vsmc::Return(false),
 		]);
 	}
 
@@ -564,10 +568,10 @@ mod tests {
 			.as_ref()
 			.expect("existing tac-data");
 		assert_eq!(section.instructions, [
-			Tac::Push(100),
-			Tac::Push(200),
-			Tac::BinOp(BinaryOp::Sub),
-			Tac::Return(true),
+			Vsmc::Push(100),
+			Vsmc::Push(200),
+			Vsmc::BinOp(BinaryOp::Sub),
+			Vsmc::Return(true),
 		]);
 	}
 
@@ -593,26 +597,26 @@ mod tests {
 			("c".id(), Type::s8_top()),
 		]);
 		assert_eq!(tac.instructions, [
-			Tac::Push(5),
-			Tac::Store(0),
-			Tac::Push(3),
-			Tac::Store(1),
-			Tac::Load(0),
-			Tac::Push(10),
-			Tac::BinOp(BinaryOp::CmpLT),
-			Tac::UnOp(UnaryOp::Not),
-			Tac::JumpIf(0),
-			Tac::Push(2),
-			Tac::Store(1),
-			Tac::Jump(1),
-			Tac::Label(0),
-			Tac::Push(1),
-			Tac::Store(0),
-			Tac::Label(1),
-			Tac::Load(0),
-			Tac::Load(1),
-			Tac::BinOp(BinaryOp::Add),
-			Tac::Return(true),
+			Vsmc::Push(5),
+			Vsmc::Store(0),
+			Vsmc::Push(3),
+			Vsmc::Store(1),
+			Vsmc::Load(0),
+			Vsmc::Push(10),
+			Vsmc::BinOp(BinaryOp::CmpLT),
+			Vsmc::UnOp(UnaryOp::Not),
+			Vsmc::JumpIf(0),
+			Vsmc::Push(2),
+			Vsmc::Store(1),
+			Vsmc::Jump(1),
+			Vsmc::Label(0),
+			Vsmc::Push(1),
+			Vsmc::Store(0),
+			Vsmc::Label(1),
+			Vsmc::Load(0),
+			Vsmc::Load(1),
+			Vsmc::BinOp(BinaryOp::Add),
+			Vsmc::Return(true),
 		]);
 	}
 
@@ -632,20 +636,20 @@ mod tests {
 			("b".id(), Type::s8_top()),
 		]);
 		assert_eq!(tac.instructions, [
-			Tac::Push(5),
-			Tac::Store(0),
-			Tac::Jump(0),
-			Tac::Label(1),
-			Tac::Load(0),
-			Tac::Push(1),
-			Tac::BinOp(BinaryOp::Sub),
-			Tac::Store(0),
-			Tac::Label(0),
-			Tac::Load(0),
-			Tac::Push(0),
-			Tac::BinOp(BinaryOp::CmpGT),
-			Tac::JumpIf(1),
-			Tac::Return(false),
+			Vsmc::Push(5),
+			Vsmc::Store(0),
+			Vsmc::Jump(0),
+			Vsmc::Label(1),
+			Vsmc::Load(0),
+			Vsmc::Push(1),
+			Vsmc::BinOp(BinaryOp::Sub),
+			Vsmc::Store(0),
+			Vsmc::Label(0),
+			Vsmc::Load(0),
+			Vsmc::Push(0),
+			Vsmc::BinOp(BinaryOp::CmpGT),
+			Vsmc::JumpIf(1),
+			Vsmc::Return(false),
 		]);
 	}
 
@@ -668,33 +672,33 @@ mod tests {
 			("i".id(), Type::int()),
 		]);
 		assert_eq!(tac.instructions, [
-			Tac::Push(4),
-			Tac::Store(0),
-			Tac::Push(0),
-			Tac::Store(1),
+			Vsmc::Push(4),
+			Vsmc::Store(0),
+			Vsmc::Push(0),
+			Vsmc::Store(1),
 			// Loop head
-			Tac::Push(0),
-			Tac::Store(2),
-			Tac::Label(0),
-			Tac::Load(2),
-			Tac::Push(10),
-			Tac::BinOp(BinaryOp::CmpGE),
-			Tac::JumpIf(1),
+			Vsmc::Push(0),
+			Vsmc::Store(2),
+			Vsmc::Label(0),
+			Vsmc::Load(2),
+			Vsmc::Push(10),
+			Vsmc::BinOp(BinaryOp::CmpGE),
+			Vsmc::JumpIf(1),
 			// Loop body
-			Tac::Load(1),
-			Tac::Load(0),
-			Tac::Push(2),
-			Tac::BinOp(BinaryOp::Mul),
-			Tac::BinOp(BinaryOp::Add),
-			Tac::Store(1),
-			Tac::Load(2),
-			Tac::Push(1),
-			Tac::BinOp(BinaryOp::Add),
-			Tac::Store(2),
-			Tac::Jump(0),
+			Vsmc::Load(1),
+			Vsmc::Load(0),
+			Vsmc::Push(2),
+			Vsmc::BinOp(BinaryOp::Mul),
+			Vsmc::BinOp(BinaryOp::Add),
+			Vsmc::Store(1),
+			Vsmc::Load(2),
+			Vsmc::Push(1),
+			Vsmc::BinOp(BinaryOp::Add),
+			Vsmc::Store(2),
+			Vsmc::Jump(0),
 			// Loop end
-			Tac::Label(1),
-			Tac::Return(false),
+			Vsmc::Label(1),
+			Vsmc::Return(false),
 		]);
 	}
 
@@ -711,15 +715,15 @@ mod tests {
 			("a".id(), Type::s8_top()),
 		]);
 		assert_eq!(tac.instructions, [
-			Tac::Push(2),
-			Tac::Push(3),
-			Tac::BinOp(BinaryOp::Add),
-			Tac::Push(4),
-			Tac::Push(5),
-			Tac::BinOp(BinaryOp::Sub),
-			Tac::BinOp(BinaryOp::Mul),
-			Tac::Store(0),
-			Tac::Return(false),
+			Vsmc::Push(2),
+			Vsmc::Push(3),
+			Vsmc::BinOp(BinaryOp::Add),
+			Vsmc::Push(4),
+			Vsmc::Push(5),
+			Vsmc::BinOp(BinaryOp::Sub),
+			Vsmc::BinOp(BinaryOp::Mul),
+			Vsmc::Store(0),
+			Vsmc::Return(false),
 		]);
 	}
 }

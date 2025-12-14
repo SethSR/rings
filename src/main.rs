@@ -13,11 +13,11 @@ mod operators;
 mod parser;
 mod rings_type;
 mod span;
-mod tac;
 mod task;
 mod token;
 mod type_checker;
 mod value;
+mod vsmc;
 
 use error::Error;
 use rings_type::Type;
@@ -45,7 +45,7 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	discovery::eval(&mut data);
 	parser::eval(&mut data);
 	type_checker::eval(&mut data);
-	tac::eval(&mut data)
+	vsmc::eval(&mut data)
 			.map_err(|e| panic!("{e:?}"))
 			.unwrap();
 	data
@@ -96,7 +96,7 @@ pub struct ProcData {
 	ast_to_type: HashMap<ast::Id, Type>,
 	ident_to_type: identifier::Map<Type>,
 	/* Lowering TAC */
-	tac_data: Option<tac::Section>,
+	tac_data: Option<vsmc::Section>,
 }
 
 impl ProcData {
