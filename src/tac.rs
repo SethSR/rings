@@ -5,8 +5,43 @@ use crate::identifier::Id as IdentId;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::{Bounds, Data, ProcData};
 
+pub type LabelId = u32;
+pub type TempId = u32; // Temporary variable ID
 
-type TempId = u32; // Temporary variable ID
+pub fn eval(data: &mut Data) -> Result<(), crate::Error> {
+	let mut result = Ok(());
+	for (proc_id, proc_data) in &mut data.proc_db {
+		let mut section = Section::default();
+		section.name = *proc_id;
+		match section.lower(proc_data) {
+			Ok(_) => {
+				proc_data.tac_data = Some(section);
+			}
+			Err(e) => {
+				result = Err(e.into_comp_error(data));
+				break;
+			}
+		}
+	}
+	result
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Location {
+	Temp(TempId),      // Temporary variable
+	Variable(IdentId), // Named variable
+	Constant(i64),     // Immediate constant
+}
+
+impl Location {
+	fn to_text(&self, data: &Data) -> String {
+		match self {
+			Self::Temp(temp_id) => format!("?{temp_id}"),
+			Self::Variable(ident_id) => data.text(ident_id).to_string(),
+			Self::Constant(num) => num.to_string(),
+		}
+	}
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tac {
@@ -96,43 +131,6 @@ impl Tac {
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Location {
-	Temp(TempId),      // Temporary variable
-	Variable(IdentId), // Named variable
-	Constant(u32),     // Immediate constant
-}
-
-impl Location {
-	fn to_text(&self, data: &Data) -> String {
-		match self {
-			Self::Temp(temp_id) => format!("?{temp_id}"),
-			Self::Variable(ident_id) => data.text(ident_id).to_string(),
-			Self::Constant(num) => num.to_string(),
-		}
-	}
-}
-
-pub type LabelId = u32;
-
-pub fn eval(data: &mut Data) -> Result<(), crate::Error> {
-	let mut result = Ok(());
-	for (proc_id, proc_data) in &mut data.proc_db {
-		let mut section = Section::default();
-		section.name = *proc_id;
-		match section.lower(proc_data) {
-			Ok(_) => {
-				proc_data.tac_data = Some(section);
-			}
-			Err(e) => {
-				result = Err(e.into_comp_error(data));
-				break;
-			}
-		}
-	}
-	result
-}
-
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Section {
 	pub name: IdentId,
@@ -165,7 +163,7 @@ impl Section {
 		match kind {
 			Kind::Int(value) => {
 				// TODO - srenshaw - Ensure value is within u32
-				Ok(Some(Location::Constant(*value as u32)))
+				Ok(Some(Location::Constant(*value)))
 			}
 
 			Kind::Dec(_value) => {
@@ -225,7 +223,11 @@ impl Section {
 
 				let (left, right) = match (left, right) {
 					(Location::Constant(_), Location::Constant(_)) => (left, right),
-					(_, Location::Constant(_)) => (right, left),
+					(_, Location::Constant(_)) if matches!(op,
+						BinaryOp::Add | BinaryOp::Mul |
+						BinaryOp::BinAnd | BinaryOp::BinOr | BinaryOp::BinXor |
+						BinaryOp::CmpEQ | BinaryOp::CmpNE
+					) => (right, left),
 					_ => (left, right),
 				};
 
@@ -478,7 +480,7 @@ impl Section {
 
 			// i = start
 			self.emit(Tac::Copy {
-				src: Location::Constant(*start),
+				src: Location::Constant(*start as i64),
 				dst: Location::Variable(index_var),
 			});
 
@@ -489,7 +491,7 @@ impl Section {
 			let temp = self.alloc_temp();
 			self.emit(Tac::BinOp {
 				op: BinaryOp::CmpLT,
-				left: Location::Constant(*end),
+				left: Location::Constant(*end as i64),
 				right: Location::Variable(index_var),
 				dst: Location::Temp(temp),
 			});
@@ -673,7 +675,7 @@ mod tests {
 		assert_eq!(tac.instructions, [
 			Tac::Copy { src: Location::Constant(5), dst: Location::Variable("b".id()) },
 			Tac::Copy { src: Location::Constant(3), dst: Location::Variable("c".id()) },
-			Tac::BinOp { op: BinaryOp::CmpLT, left: Location::Constant(10), right: Location::Variable("b".id()), dst: Location::Temp(0) },
+			Tac::BinOp { op: BinaryOp::CmpLT, left: Location::Variable("b".id()), right: Location::Constant(10), dst: Location::Temp(0) },
 			Tac::JumpIfNot { cond: Location::Temp(0), target: 0 },
 			Tac::Copy { src: Location::Constant(2), dst: Location::Variable("c".id()) },
 			Tac::Jump(1),
@@ -704,10 +706,10 @@ mod tests {
 			Tac::Copy { src: Location::Constant(5), dst: Location::Variable("b".id()) },
 			Tac::Jump(0),
 			Tac::Label(1),
-			Tac::BinOp { op: BinaryOp::Sub, left: Location::Constant(1), right: Location::Variable("b".id()), dst: Location::Temp(0) },
+			Tac::BinOp { op: BinaryOp::Sub, left: Location::Variable("b".id()), right: Location::Constant(1), dst: Location::Temp(0) },
 			Tac::Copy { src: Location::Temp(0), dst: Location::Variable("b".id()) },
 			Tac::Label(0),
-			Tac::BinOp { op: BinaryOp::CmpGT, left: Location::Constant(0), right: Location::Variable("b".id()), dst: Location::Temp(1) },
+			Tac::BinOp { op: BinaryOp::CmpGT, left: Location::Variable("b".id()), right: Location::Constant(0), dst: Location::Temp(1) },
 			Tac::JumpIf { cond: Location::Temp(1), target: 1 },
 			Tac::Return(None),
 		]);

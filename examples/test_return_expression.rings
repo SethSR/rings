@@ -1,6 +1,6 @@
 
 proc test_return_expression() -> s8 {
-	return 100 - 200;
+	return (3 * 100) - 200;
 }
 
 main {}

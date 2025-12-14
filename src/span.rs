@@ -1,7 +1,7 @@
 
 use std::ops::Range;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span<T> {
 	pub start: T,
 	pub end: T,

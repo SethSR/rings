@@ -63,10 +63,12 @@ pub struct Data {
 	// stores the position of each newline (\n) character in the source
 	line_pos: token::PosList,
 	errors: Vec<Error>,
+
 	/* Lexer */
 	tok_list: token::KindList,
 	tok_pos: token::PosList,
 	identifiers: identifier::Map<Span<SrcPos>>,
+
 	/* Discovery */
 	procedures: discovery::ProcMap,
 	values: discovery::ValueMap,
@@ -76,8 +78,11 @@ pub struct Data {
 	records: discovery::RecordMap,
 	#[cfg(feature="ready")]
 	tables: discovery::TableMap,
+
 	/* Parsing */
+	regions: Vec<Span<usize>>,
 	task_queue: VecDeque<Task>,
+
 	/* Backend Procedure Data */
 	proc_db: identifier::Map<ProcData>,
 }
@@ -140,6 +145,10 @@ impl Data {
 		Self {
 			source_file,
 			source,
+			regions: vec![
+				// 8192 bytes @ 0x0000_0000
+				(0..0x1000).into(),
+			],
 			..Default::default()
 		}
 	}
