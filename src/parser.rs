@@ -184,7 +184,8 @@ fn parse_let_statement(cursor: &mut Cursor, data: &mut Data, proc_data: &mut Pro
 	cursor.expect(data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
 	let ident = proc_data.add_ast(AKind::Ident(ident_id), tok_ident_range);
-	Ok(proc_data.add_ast(AKind::Define(ident, var_type, ast_id), tok_range))
+	let define = proc_data.add_ast(AKind::Define(ident, var_type), tok_range.clone());
+	Ok(proc_data.add_ast(AKind::Assign(define, ast_id), tok_range))
 }
 
 fn parse_access(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,

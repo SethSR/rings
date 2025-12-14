@@ -97,18 +97,15 @@ fn check_stmt(proc_data: &mut ProcData,
 			Ok(())
 		}
 
-		Kind::Define(lvalue_id, var_type, expr_id) => {
-			if proc_data.ast_nodes.get(expr_id).is_none() {
-				todo!("expression with no ast node: {expr_id:?}")
-			}
-			check_stmt(proc_data, expr_id, ret_type)?;
-			check_define(proc_data, lvalue_id, expr_id, var_type)
+		Kind::Define(lvalue_id, var_type) => {
+			check_define(proc_data, lvalue_id, var_type)
 		}
 
 		Kind::Assign(lvalue_id, expr_id) => {
 			if proc_data.ast_nodes.get(expr_id).is_none() {
 				todo!("expression with no ast node: {expr_id:?}")
 			}
+			check_stmt(proc_data, lvalue_id, ret_type)?;
 			check_stmt(proc_data, expr_id, ret_type)?;
 			check_assign(proc_data, lvalue_id, expr_id)
 		}
@@ -233,40 +230,31 @@ fn check_ident(proc_data: &mut ProcData,
 }
 
 fn check_define(proc_data: &mut ProcData,
-	lvalue_id: AstId, expr_id: AstId,
-	var_type: Type,
+	lvalue_id: AstId, var_type: Type,
 ) -> Result<(), Error> {
 	let Kind::Ident(ident_id) = proc_data.ast_nodes[lvalue_id] else {
 		return Err(Error::InternalValue);
 	};
 
-	match proc_data.ident_to_type.entry(ident_id) {
-		Entry::Occupied(_) => {
-			Err(Error::AlreadyDefined(ident_id))
-		}
-		Entry::Vacant(e) => {
-			let Some(expr_type) = proc_data.ast_to_type.get(&expr_id) else {
-				return Err(Error::NoType { msg: "define expression", ast_id: expr_id});
-			};
-			match expr_type.meet(&var_type) {
-				Type::Bot => {
-					Err(Error::MismatchedTypes(var_type, *expr_type))
-				}
-				new_type => {
-					proc_data.ast_to_type.insert(lvalue_id, new_type);
-					e.insert(new_type);
-					Ok(())
-				}
-			}
-		}
-	}
+	let Entry::Vacant(e) = proc_data.ident_to_type.entry(ident_id) else {
+		return Err(Error::AlreadyDefined(ident_id));
+	};
+
+	e.insert(var_type);
+	proc_data.ast_to_type.insert(lvalue_id, var_type);
+	Ok(())
 }
 
 fn check_assign(proc_data: &ProcData,
 	lvalue_id: AstId, ast_id: AstId,
 ) -> Result<(), Error> {
-	let Kind::Ident(ident_id) = proc_data.ast_nodes[lvalue_id] else {
-		todo!("missing ident for lvalue: {lvalue_id:?}")
+	let ident_id = match proc_data.ast_nodes[lvalue_id] {
+		Kind::Ident(id) => id,
+		Kind::Define(def_id, _) => match proc_data.ast_nodes[def_id] {
+			Kind::Ident(id) => id,
+			_ => todo!("missing ident for lvalue: {lvalue_id:?}"),
+		}
+		_ => todo!("missing ident for lvalue: {lvalue_id:?}"),
 	};
 	let Some(lvalue_type) = proc_data.ident_to_type.get(&ident_id) else {
 		return Err(Error::NoType { msg: "lvalue", ast_id: lvalue_id });

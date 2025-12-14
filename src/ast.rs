@@ -28,7 +28,7 @@ pub enum Kind {
 	Ident(IdentId),
 	Int(i64),
 	Dec(f64),
-	Define(Id, crate::Type, Id),
+	Define(Id, crate::Type),
 	Assign(Id, Id),
 	BinOp(BinaryOp, Id, Id),
 	UnOp(UnaryOp, Id),

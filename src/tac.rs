@@ -26,48 +26,36 @@ pub fn eval(data: &mut Data) -> Result<(), crate::Error> {
 	result
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Location {
-	Temp(TempId),      // Temporary variable
-	Variable(IdentId), // Named variable
-	Constant(i64),     // Immediate constant
-}
-
-impl Location {
-	fn to_text(&self, data: &Data) -> String {
-		match self {
-			Self::Temp(temp_id) => format!("?{temp_id}"),
-			Self::Variable(ident_id) => data.text(ident_id).to_string(),
-			Self::Constant(num) => num.to_string(),
-		}
-	}
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tac {
 	// Basic operations
-	Copy { src: Location,  dst: Location },
+	/// Pushes a value on the stack
+	Push(i32),
 
 	// Arithmetic
-	BinOp { op: BinaryOp, left: Location, right: Location, dst: Location },
-	UnOp { op: UnaryOp, src: Location, dst: Location },
+	/// Pop x2, perform op, and push
+	BinOp(BinaryOp),
+	/// Pop, perform op, and push
+	UnOp(UnaryOp),
 
 	// Memory access (for table/variable access)
-	#[cfg(feature="ready")]
-	Load { address: Location, offset: i32, dst: TempId },
-	#[cfg(feature="ready")]
-	Store { src: Location, address: Location, offset: i32 },
+	/// Load the value in stack-offset `usize` and push
+	Load(usize),
+	/// Pop and store the value in stack-offset `usize`
+	Store(usize),
 
 	// Control Flow
 	Label(LabelId),
+	/// Jump unconditionally to LabelId
 	Jump(LabelId),
-	JumpIf { cond: Location, target: LabelId },
-	JumpIfNot { cond: Location, target: LabelId },
+	/// Pop stack and jump to LabelId if > 0
+	JumpIf(LabelId),
 
 	// Procedure related
 	#[cfg(feature="ready")]
 	Call { name: IdentId, args: Vec<Location>, dst: Option<TempId> },
-	Return(Option<Location>),
+	/// Returns with output in stack-offset 0 if needed
+	Return(bool),
 
 	// Comments/debug
 	#[cfg(feature="ready")]
@@ -75,37 +63,31 @@ pub enum Tac {
 }
 
 impl Tac {
-	pub fn to_text(&self, data: &Data) -> String {
+	pub fn to_text(&self, _data: &Data) -> String {
 		match self {
-			Tac::Copy { src, dst } => {
-				format!("COPY  {} -> {}", src.to_text(data), dst.to_text(data))
+			Tac::Push(value) => {
+				format!("PUSH  {value}")
 			}
-			Tac::BinOp { op, left, right, dst } => {
-				format!("BINOP {} {op} {} -> {}",
-					left.to_text(data), right.to_text(data), dst.to_text(data))
+			Tac::BinOp(op) => {
+				format!("BINOP {op}")
 			}
-			Tac::UnOp { op, src, dst } => {
-				format!("UNOP  {op}{} -> {}", src.to_text(data), dst.to_text(data))
+			Tac::UnOp(op) => {
+				format!("UNOP  {op}")
 			}
-			#[cfg(feature="ready")]
-			Tac::Load { address, offset, dst } => {
-				format!("LOAD  ({} + {offset}) -> ?{dst}", address.to_text(data))
+			Tac::Load(offset) => {
+				format!("LOAD  {offset}")
 			}
-			#[cfg(feature="ready")]
-			Tac::Store { src, address, offset } => {
-				format!("STORE {} -> ({} + {offset})", src.to_text(data), address.to_text(data))
+			Tac::Store(offset) => {
+				format!("STORE {offset}")
 			}
 			Tac::Label(label_id) => {
 				format!("label_{label_id}:")
 			}
 			Tac::Jump(label_id) => {
-				format!("JUMP  label_{label_id}")
+				format!("JMP   label_{label_id}")
 			}
-			Tac::JumpIf { cond, target } => {
-				format!("JIF   {} => label_{target}", cond.to_text(data))
-			}
-			Tac::JumpIfNot { cond, target } => {
-				format!("JIF  !{} => label_{target}", cond.to_text(data))
+			Tac::JumpIf(target) => {
+				format!("JIF   label_{target}")
 			}
 			#[cfg(feature="ready")]
 			Tac::Call { name, args, dst: Some(dst) } => {
@@ -117,11 +99,8 @@ impl Tac {
 				format!("CALL  {}({})", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
-			Tac::Return(Some(address)) => {
-				format!("RET   {}", address.to_text(data))
-			}
-			Tac::Return(None) => {
-				"RET".to_string()
+			Tac::Return(with_value) => {
+				format!("RET   {with_value}")
 			}
 			#[cfg(feature="ready")]
 			Tac::Comment(msg) => {
@@ -134,15 +113,16 @@ impl Tac {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Section {
 	pub name: IdentId,
-	// pub params: Vec<IdentId>,
 	pub locals: Vec<(IdentId, crate::Type)>,
+	//pub variables: HashMap<IdentId, usize>,
+	pub stack: Vec<i32>,
 	pub instructions: Vec<Tac>,
 	pub next_temp: TempId,
 	pub next_label: LabelId,
 }
 
 impl Section {
-	fn lower(&mut self, proc_data: &mut ProcData) -> Result<(), Error> {
+	fn lower(&mut self, proc_data: &ProcData) -> Result<(), Error> {
 		let proc_start = proc_data.ast_start;
 
 		if let Err(err) = self.lower_node(&proc_start, proc_data) {
@@ -155,7 +135,7 @@ impl Section {
 	}
 
 	fn lower_node(&mut self, id: &AstId, proc_data: &ProcData,
-	) -> Result<Option<Location>, Error> {
+	) -> Result<Option<IdentId>, Error> {
 		let Some(kind) = proc_data.ast_nodes.get(*id) else {
 			return Err(Error::missing_ast_node(self.name, *id));
 		};
@@ -163,7 +143,8 @@ impl Section {
 		match kind {
 			Kind::Int(value) => {
 				// TODO - srenshaw - Ensure value is within u32
-				Ok(Some(Location::Constant(*value)))
+				self.emit(Tac::Push(*value as i32));
+				Ok(None)
 			}
 
 			Kind::Dec(_value) => {
@@ -171,103 +152,61 @@ impl Section {
 			}
 
 			Kind::Ident(ident_id) => {
-				Ok(Some(Location::Variable(*ident_id)))
-			}
+				let idx = self.locals.iter()
+						.position(|(local_id,_)| local_id == ident_id)
+						.unwrap();
+				self.emit(Tac::Load(idx));
+				Ok(Some(*ident_id))
+			},
 
-			Kind::Define(var_id, type_kind, expr_id) => {
+			Kind::Define(var_id, type_kind) => {
 				let Kind::Ident(ident_id) = &proc_data.ast_nodes[*var_id] else {
 					return Err(Error::missing_ast_node(self.name, *var_id));
 				};
 
-				// Get initializer value
-				let Some(init_value) = self.lower_node(expr_id, proc_data)? else {
-					return Ok(None);
-				};
-
 				// Add to locals
 				self.locals.push((*ident_id, *type_kind));
-
-				// Emit assignment
-				self.emit(Tac::Copy {
-					src: init_value,
-					dst: Location::Variable(*ident_id),
-				});
-
-				Ok(None)
+				Ok(Some(*ident_id))
 			}
 
 			Kind::Assign(var_id, expr_id) => {
-				let Some(lvalue) = self.lower_node(var_id, proc_data)? else {
-					todo!("unknown assign L-Value '{:?}'", proc_data.ast_nodes.get(*var_id));
+				let Some(ident_id) = self.lower_node(var_id, proc_data)? else {
+					return Err(Error::missing_ast_node(self.name, *var_id));
 				};
+				if matches!(self.instructions.last(), Some(Tac::Load(_))) {
+					self.instructions.pop();
+				}
 
-				let Some(rvalue) = self.lower_node(expr_id, proc_data)? else {
-					return Ok(None);
-				};
+				self.lower_node(expr_id, proc_data)?;
 
-				self.emit(Tac::Copy {
-					src: rvalue,
-					dst: lvalue,
-				});
+				let idx = self.locals.iter()
+						.position(|(local_id,_)| local_id == &ident_id)
+						.unwrap();
+				self.emit(Tac::Store(idx));
 
 				Ok(None)
 			}
 
 			Kind::BinOp(op, left_id, right_id) => {
-				let Some(left) = self.lower_node(left_id, proc_data)? else {
-					return Ok(None);
-				};
-				let Some(right) = self.lower_node(right_id, proc_data)? else {
-					return Ok(None);
-				};
-
-				let (left, right) = match (left, right) {
-					(Location::Constant(_), Location::Constant(_)) => (left, right),
-					(_, Location::Constant(_)) if matches!(op,
-						BinaryOp::Add | BinaryOp::Mul |
-						BinaryOp::BinAnd | BinaryOp::BinOr | BinaryOp::BinXor |
-						BinaryOp::CmpEQ | BinaryOp::CmpNE
-					) => (right, left),
-					_ => (left, right),
-				};
-
-				// Allocation temporary for result
-				let temp = self.alloc_temp();
-
-				self.emit(Tac::BinOp {
-					op: *op,
-					left,
-					right,
-					dst: Location::Temp(temp),
-				});
-
-				Ok(Some(Location::Temp(temp)))
+				self.lower_node(left_id, proc_data)?;
+				self.lower_node(right_id, proc_data)?;
+				self.emit(Tac::BinOp(*op));
+				Ok(None)
 			}
 
 			Kind::UnOp(op, right_id) => {
-				let Some(node) = self.lower_node(right_id, proc_data)? else {
-					return Ok(None);
-				};
-
-				let temp = self.alloc_temp();
-
-				self.emit(Tac::UnOp {
-					op: *op,
-					src: node,
-					dst: Location::Temp(temp),
-				});
-
-				Ok(Some(Location::Temp(temp)))
+				self.lower_node(right_id, proc_data)?;
+				self.emit(Tac::UnOp(*op));
+				Ok(None)
 			}
 
 			Kind::Return(maybe_expr) => {
-				let value = if let Some(expr_id) = maybe_expr {
-					self.lower_node(expr_id, proc_data)?
+				if let Some(expr_id) = maybe_expr {
+					self.lower_node(expr_id, proc_data)?;
+					self.emit(Tac::Return(true));
 				} else {
-					None
-				};
-
-				self.emit(Tac::Return(value));
+					self.emit(Tac::Return(false));
+				}
 				Ok(None)
 			}
 
@@ -279,15 +218,14 @@ impl Section {
 			}
 
 			Kind::If(cond_id, then_block, else_block) => {
-				let Some(cond) = self.lower_node(cond_id, proc_data)? else {
-					return Ok(None);
-				};
+				self.lower_node(cond_id, proc_data)?;
 
 				let else_label = self.alloc_label();
 				let end_label = self.alloc_label();
 
 				// if !cond goto else
-				self.emit(Tac::JumpIfNot { cond, target: else_label });
+				self.emit(Tac::UnOp(UnaryOp::Not));
+				self.emit(Tac::JumpIf(else_label));
 
 				// then block
 				for stmt_id in &then_block.0 {
@@ -310,9 +248,10 @@ impl Section {
 				let cond_label = self.alloc_label();
 				let loop_label = self.alloc_label();
 
+				// goto check
 				self.emit(Tac::Jump(cond_label));
 
-				// start:
+				// loop:
 				self.emit(Tac::Label(loop_label));
 
 				// body
@@ -320,14 +259,12 @@ impl Section {
 					self.lower_node(stmt_id, proc_data)?;
 				}
 
-				// goto start
+				// check:
 				self.emit(Tac::Label(cond_label));
 
-				// if !cond goto end
-				let Some(cond) = self.lower_node(cond_id, proc_data)? else {
-					return Ok(None);
-				};
-				self.emit(Tac::JumpIf { cond, target: loop_label });
+				// if cond goto loop
+				self.lower_node(cond_id, proc_data)?;
+				self.emit(Tac::JumpIf(loop_label));
 
 				Ok(None)
 			}
@@ -469,7 +406,7 @@ impl Section {
 	) -> Result<(), Error> {
 		// Simple case: for i in 0..N
 		if iter_vars.len() == 1 && table_id.is_none() {
-			let index_var = iter_vars[0];
+			let index_id = iter_vars[0];
 
 			let start_label = self.alloc_label();
 			let end_label = self.alloc_label();
@@ -478,28 +415,21 @@ impl Section {
 				return Err(Error::missing_loop_bounds(self.name, *ast_id));
 			};
 
+			self.locals.push((index_id, crate::Type::Int));
+			let index_idx = self.locals.len() - 1;
+
 			// i = start
-			self.emit(Tac::Copy {
-				src: Location::Constant(*start as i64),
-				dst: Location::Variable(index_var),
-			});
+			self.emit(Tac::Push(*start as i32));
+			self.emit(Tac::Store(index_idx));
 
 			// start:
 			self.emit(Tac::Label(start_label));
 
 			// if i >= end goto end
-			let temp = self.alloc_temp();
-			self.emit(Tac::BinOp {
-				op: BinaryOp::CmpLT,
-				left: Location::Constant(*end as i64),
-				right: Location::Variable(index_var),
-				dst: Location::Temp(temp),
-			});
-
-			self.emit(Tac::JumpIfNot {
-				cond: Location::Temp(temp),
-				target: end_label,
-			});
+			self.emit(Tac::Load(index_idx));
+			self.emit(Tac::Push(*end as i32));
+			self.emit(Tac::BinOp(BinaryOp::CmpGE));
+			self.emit(Tac::JumpIf(end_label));
 
 			// body
 			for stmt_id in &body_block.0 {
@@ -507,12 +437,10 @@ impl Section {
 			}
 
 			// i = i + 1
-			self.emit(Tac::BinOp {
-				op: BinaryOp::Add,
-				left: Location::Constant(1),
-				right: Location::Variable(index_var),
-				dst: Location::Variable(index_var),
-			});
+			self.emit(Tac::Load(index_idx));
+			self.emit(Tac::Push(1));
+			self.emit(Tac::BinOp(BinaryOp::Add));
+			self.emit(Tac::Store(index_idx));
 
 			// goto start
 			self.emit(Tac::Jump(start_label));
@@ -527,11 +455,6 @@ impl Section {
 
 	fn emit(&mut self, instr: Tac) {
 		self.instructions.push(instr);
-	}
-
-	fn alloc_temp(&mut self) -> TempId {
-		self.next_temp += 1;
-		self.next_temp - 1
 	}
 
 	fn alloc_label(&mut self) -> LabelId {
@@ -626,7 +549,7 @@ mod tests {
 			.as_ref()
 			.expect("existing tac-data");
 		assert_eq!(section.instructions, [
-			Tac::Return(None),
+			Tac::Return(false),
 		]);
 	}
 
@@ -641,13 +564,10 @@ mod tests {
 			.as_ref()
 			.expect("existing tac-data");
 		assert_eq!(section.instructions, [
-			Tac::BinOp {
-				op: BinaryOp::Sub,
-				left: Location::Constant(100),
-				right: Location::Constant(200),
-				dst: Location::Temp(0),
-			},
-			Tac::Return(Some(Location::Temp(0))),
+			Tac::Push(100),
+			Tac::Push(200),
+			Tac::BinOp(BinaryOp::Sub),
+			Tac::Return(true),
 		]);
 	}
 
@@ -673,17 +593,26 @@ mod tests {
 			("c".id(), Type::s8_top()),
 		]);
 		assert_eq!(tac.instructions, [
-			Tac::Copy { src: Location::Constant(5), dst: Location::Variable("b".id()) },
-			Tac::Copy { src: Location::Constant(3), dst: Location::Variable("c".id()) },
-			Tac::BinOp { op: BinaryOp::CmpLT, left: Location::Variable("b".id()), right: Location::Constant(10), dst: Location::Temp(0) },
-			Tac::JumpIfNot { cond: Location::Temp(0), target: 0 },
-			Tac::Copy { src: Location::Constant(2), dst: Location::Variable("c".id()) },
+			Tac::Push(5),
+			Tac::Store(0),
+			Tac::Push(3),
+			Tac::Store(1),
+			Tac::Load(0),
+			Tac::Push(10),
+			Tac::BinOp(BinaryOp::CmpLT),
+			Tac::UnOp(UnaryOp::Not),
+			Tac::JumpIf(0),
+			Tac::Push(2),
+			Tac::Store(1),
 			Tac::Jump(1),
 			Tac::Label(0),
-			Tac::Copy { src: Location::Constant(1), dst: Location::Variable("b".id()) },
+			Tac::Push(1),
+			Tac::Store(0),
 			Tac::Label(1),
-			Tac::BinOp { op: BinaryOp::Add, left: Location::Variable("b".id()), right: Location::Variable("c".id()), dst: Location::Temp(1) },
-			Tac::Return(Some(Location::Temp(1))),
+			Tac::Load(0),
+			Tac::Load(1),
+			Tac::BinOp(BinaryOp::Add),
+			Tac::Return(true),
 		]);
 	}
 
@@ -703,15 +632,20 @@ mod tests {
 			("b".id(), Type::s8_top()),
 		]);
 		assert_eq!(tac.instructions, [
-			Tac::Copy { src: Location::Constant(5), dst: Location::Variable("b".id()) },
+			Tac::Push(5),
+			Tac::Store(0),
 			Tac::Jump(0),
 			Tac::Label(1),
-			Tac::BinOp { op: BinaryOp::Sub, left: Location::Variable("b".id()), right: Location::Constant(1), dst: Location::Temp(0) },
-			Tac::Copy { src: Location::Temp(0), dst: Location::Variable("b".id()) },
+			Tac::Load(0),
+			Tac::Push(1),
+			Tac::BinOp(BinaryOp::Sub),
+			Tac::Store(0),
 			Tac::Label(0),
-			Tac::BinOp { op: BinaryOp::CmpGT, left: Location::Variable("b".id()), right: Location::Constant(0), dst: Location::Temp(1) },
-			Tac::JumpIf { cond: Location::Temp(1), target: 1 },
-			Tac::Return(None),
+			Tac::Load(0),
+			Tac::Push(0),
+			Tac::BinOp(BinaryOp::CmpGT),
+			Tac::JumpIf(1),
+			Tac::Return(false),
 		]);
 	}
 
@@ -731,59 +665,61 @@ mod tests {
 		assert_eq!(tac.locals, [
 			("b".id(), Type::s8_top()),
 			("c".id(), Type::s8_top()),
+			("i".id(), Type::int()),
 		]);
 		assert_eq!(tac.instructions, [
-			Tac::Copy {
-				src: Location::Constant(4),
-				dst: Location::Variable("b".id()),
-			},
-			Tac::Copy {
-				src: Location::Constant(0),
-				dst: Location::Variable("c".id()),
-			},
+			Tac::Push(4),
+			Tac::Store(0),
+			Tac::Push(0),
+			Tac::Store(1),
 			// Loop head
-			Tac::Copy {
-				src: Location::Constant(0),
-				dst: Location::Variable("i".id()),
-			},
+			Tac::Push(0),
+			Tac::Store(2),
 			Tac::Label(0),
-			Tac::BinOp {
-				op: BinaryOp::CmpLT,
-				left: Location::Constant(10),
-				right: Location::Variable("i".id()),
-				dst: Location::Temp(0),
-			},
-			Tac::JumpIfNot {
-				cond: Location::Temp(0),
-				target: 1,
-			},
+			Tac::Load(2),
+			Tac::Push(10),
+			Tac::BinOp(BinaryOp::CmpGE),
+			Tac::JumpIf(1),
 			// Loop body
-			Tac::BinOp {
-				op: BinaryOp::Mul,
-				left: Location::Constant(2),
-				right: Location::Variable("b".id()),
-				dst: Location::Temp(1),
-			},
-			Tac::BinOp {
-				op: BinaryOp::Add,
-				left: Location::Variable("c".id()),
-				right: Location::Temp(1),
-				dst: Location::Temp(2),
-			},
-			Tac::Copy {
-				src: Location::Temp(2),
-				dst: Location::Variable("c".id()),
-			},
-			Tac::BinOp {
-				op: BinaryOp::Add,
-				left: Location::Constant(1),
-				right: Location::Variable("i".id()),
-				dst: Location::Variable("i".id()),
-			},
+			Tac::Load(1),
+			Tac::Load(0),
+			Tac::Push(2),
+			Tac::BinOp(BinaryOp::Mul),
+			Tac::BinOp(BinaryOp::Add),
+			Tac::Store(1),
+			Tac::Load(2),
+			Tac::Push(1),
+			Tac::BinOp(BinaryOp::Add),
+			Tac::Store(2),
 			Tac::Jump(0),
 			// Loop end
 			Tac::Label(1),
-			Tac::Return(None),
+			Tac::Return(false),
+		]);
+	}
+
+	#[test]
+	fn proc_internal_sub_expressions() {
+		let db = setup("main {
+			let a: s8 = (2 + 3) * (4 - 5);
+		}");
+		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
+		let proc_data = &db.proc_db[&"main".id()];
+		let tac = proc_data.tac_data.as_ref()
+			.expect("existing tac-data");
+		assert_eq!(tac.locals, [
+			("a".id(), Type::s8_top()),
+		]);
+		assert_eq!(tac.instructions, [
+			Tac::Push(2),
+			Tac::Push(3),
+			Tac::BinOp(BinaryOp::Add),
+			Tac::Push(4),
+			Tac::Push(5),
+			Tac::BinOp(BinaryOp::Sub),
+			Tac::BinOp(BinaryOp::Mul),
+			Tac::Store(0),
+			Tac::Return(false),
 		]);
 	}
 }
