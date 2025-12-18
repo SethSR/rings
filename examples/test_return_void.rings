@@ -1,4 +1,4 @@
 proc test_return_void() {
-    x: s8 = 10;
-    return;
+	let x: s8 = 10;
+	return;
 }

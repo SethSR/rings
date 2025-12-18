@@ -45,9 +45,7 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	discovery::eval(&mut data);
 	parser::eval(&mut data);
 	type_checker::eval(&mut data);
-	vsmc::eval(&mut data)
-			.map_err(|e| panic!("{e:?}"))
-			.unwrap();
+	vsmc::eval(&mut data);
 	data
 }
 

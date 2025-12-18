@@ -8,8 +8,7 @@ use crate::{Bounds, Data, ProcData};
 pub type LabelId = u32;
 pub type TempId = u32; // Temporary variable ID
 
-pub fn eval(data: &mut Data) -> Result<(), crate::Error> {
-	let mut result = Ok(());
+pub fn eval(data: &mut Data) {
 	for (proc_id, proc_data) in &mut data.proc_db {
 		let mut section = Section::default();
 		section.name = *proc_id;
@@ -18,12 +17,11 @@ pub fn eval(data: &mut Data) -> Result<(), crate::Error> {
 				proc_data.tac_data = Some(section);
 			}
 			Err(e) => {
-				result = Err(e.into_comp_error(data));
+				data.errors.push(e.into_comp_error(data));
 				break;
 			}
 		}
 	}
-	result
 }
 
 /// Virtual Stack-Machine Code
@@ -156,12 +154,15 @@ impl Section {
 			}
 
 			Kind::Ident(ident_id) => {
-				let idx = self.locals.iter()
+				if let Some(idx) = self.locals.iter()
 						.position(|(local_id,_)| local_id == ident_id)
-						.unwrap();
-				self.emit(Vsmc::Load(idx));
-				Ok(Some(*ident_id))
-			},
+				{
+					self.emit(Vsmc::Load(idx));
+					Ok(Some(*ident_id))
+				} else {
+					Err(Error::unknown_ident(self.name, *ident_id))
+				}
+			}
 
 			Kind::Define(var_id, type_kind) => {
 				let Kind::Ident(ident_id) = &proc_data.ast_nodes[*var_id] else {
@@ -468,14 +469,14 @@ impl Section {
 }
 
 enum ErrorKind {
-	MissingAstNode,
-	MissingLoopBounds,
+	MissingAstNode(AstId),
+	MissingLoopBounds(AstId),
+	UnknownIdentifier(IdentId),
 }
 
 struct Error {
 	kind: ErrorKind,
 	proc_id: IdentId,
-	ast_id: AstId,
 }
 
 impl Error {
@@ -484,9 +485,8 @@ impl Error {
 		ast_id: AstId,
 	) -> Self {
 		Self {
-			kind: ErrorKind::MissingAstNode,
+			kind: ErrorKind::MissingAstNode(ast_id),
 			proc_id,
-			ast_id,
 		}
 	}
 
@@ -495,30 +495,50 @@ impl Error {
 		ast_id: AstId,
 	) -> Self {
 		Self {
-			kind: ErrorKind::MissingLoopBounds,
+			kind: ErrorKind::MissingLoopBounds(ast_id),
 			proc_id,
-			ast_id,
+		}
+	}
+
+	fn unknown_ident(
+		proc_id: IdentId,
+		ident_id: IdentId,
+	) -> Self {
+		Self {
+			kind: ErrorKind::UnknownIdentifier(ident_id),
+			proc_id,
 		}
 	}
 
 	fn into_comp_error(self, db: &Data) -> crate::Error {
 		let proc_data = &db.proc_db[&self.proc_id];
-		let ast_pos = proc_data.ast_pos_tok[self.ast_id];
-		let start = db.tok_pos[ast_pos.start];
-		let end = db.tok_pos[ast_pos.end];
-		let location = crate::Span { start, end };
 
-		let message = match self.kind {
-			ErrorKind::MissingAstNode => {
-				format!("{} not found in procedure '{}'", self.ast_id, db.text(&self.proc_id))
+		let (location, message) = match self.kind {
+			ErrorKind::MissingAstNode(ast_id) => {
+				let ast_pos = proc_data.ast_pos_tok[ast_id];
+				let start = db.tok_pos[ast_pos.start];
+				let end = db.tok_pos[ast_pos.end];
+				let location = crate::Span { start, end };
+				let message = format!("{} not found in procedure '{}'", ast_id, db.text(&self.proc_id));
+				(location, message)
 			}
-			ErrorKind::MissingLoopBounds => {
-				format!("type-checker missed a bounds check in {}", db.text(&self.proc_id))
+			ErrorKind::MissingLoopBounds(ast_id) => {
+				let ast_pos = proc_data.ast_pos_tok[ast_id];
+				let start = db.tok_pos[ast_pos.start];
+				let end = db.tok_pos[ast_pos.end];
+				let location = crate::Span { start, end };
+				let message = format!("type-checker missed a bounds check in {}", db.text(&self.proc_id));
+				(location, message)
+			}
+			ErrorKind::UnknownIdentifier(ident_id) => {
+				let location = db.identifiers[&ident_id];
+				let message = format!("Unknown identifier '{}' in procedure '{}'", db.text(&ident_id), db.text(&self.proc_id));
+				(location, message)
 			}
 		};
 
 		crate::Error::new(location, message)
-			.with_kind(error::Kind::LoweringTAC)
+				.with_kind(error::Kind::LoweringTAC)
 	}
 }
 
@@ -536,9 +556,8 @@ mod tests {
 		discovery::eval(&mut data);
 		parser::eval(&mut data);
 		type_checker::eval(&mut data);
-		eval(&mut data)
-				.map_err(|e| panic!("{e:?}"))
-				.unwrap();
+		eval(&mut data);
+		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		data
 	}
 
@@ -547,7 +566,6 @@ mod tests {
 		let data = setup("proc a() {
 			return;
 		}");
-		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		assert_eq!(data.proc_db.len(), 1);
 		let section = data.proc_db[&"a".id()].tac_data
 			.as_ref()
@@ -562,7 +580,6 @@ mod tests {
 		let data = setup("proc a() -> s8 {
 			return 100 - 200;
 		}");
-		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		assert_eq!(data.proc_db.len(), 1);
 		let section = data.proc_db[&"a".id()].tac_data
 			.as_ref()
@@ -587,7 +604,6 @@ mod tests {
 			}
 			return b + c;
 		}");
-		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		let proc_data = &data.proc_db[&"a".id()];
 		let tac = proc_data.tac_data
 			.as_ref()
@@ -628,7 +644,6 @@ mod tests {
 				b -= 1;
 			}
 		}");
-		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		let proc_data = &data.proc_db[&"a".id()];
 		let tac = proc_data.tac_data.as_ref()
 			.expect("existing tac-data");
@@ -662,7 +677,6 @@ mod tests {
 				c += b * 2;
 			}
 		}");
-		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		let proc_data = &data.proc_db[&"main".id()];
 		let tac = proc_data.tac_data.as_ref()
 			.expect("existing tac-data");
@@ -707,7 +721,6 @@ mod tests {
 		let db = setup("main {
 			let a: s8 = (2 + 3) * (4 - 5);
 		}");
-		assert!(db.errors.is_empty(), "{}", db.errors_to_string());
 		let proc_data = &db.proc_db[&"main".id()];
 		let tac = proc_data.tac_data.as_ref()
 			.expect("existing tac-data");
