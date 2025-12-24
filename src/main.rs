@@ -43,17 +43,18 @@ fn main() {
 
 	let mut out_data: HashMap<Target, Vec<asm::Data>> = HashMap::new();
 	for (_, asm_data) in data.asm_db {
-		match asm_data {
-			asm::Data::Z80(_) => out_data.entry(Target::Z80)
-				.or_default()
-				.push(asm_data),
-		}
+		let target_entry = match asm_data {
+			asm::Data::M68k(_) => out_data.entry(Target::M68k),
+			asm::Data::Z80(_) => out_data.entry(Target::Z80),
+		};
+		target_entry.or_default().push(asm_data);
 	}
 
 	for (target, data) in out_data {
 		use std::io::Write;
 
 		let out_path = match target {
+			Target::M68k => out_path.with_extension("m68k"),
 			Target::Z80 => out_path.with_extension("z80"),
 		};
 
@@ -82,7 +83,7 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Target {
-	//M68k,
+	M68k,
 	//SH2,
 	//X86_64,
 	Z80,
