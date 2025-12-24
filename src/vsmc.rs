@@ -462,9 +462,13 @@ impl Section {
 		self.instructions.push(instr);
 	}
 
-	fn alloc_label(&mut self) -> LabelId {
+	pub fn alloc_label(&mut self) -> LabelId {
 		self.next_label += 1;
 		self.next_label - 1
+	}
+
+	pub fn inner_label(&mut self, name: &str) -> String {
+		format!("{name}_{}", self.alloc_label())
 	}
 }
 

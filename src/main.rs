@@ -1,8 +1,11 @@
 
 use std::{env, fmt, fs};
 use std::collections::{HashMap, VecDeque};
+use std::fs::File;
 use std::ops::Range;
+use std::path::PathBuf;
 
+mod asm;
 mod ast;
 mod cursor;
 mod discovery;
@@ -30,11 +33,38 @@ fn main() {
 
 	let file_path = args.next()
 		.expect("expected source file");
+	let mut out_path = PathBuf::from(&file_path);
+	out_path.set_extension("");
 	let source = fs::read_to_string(&file_path)
 		.expect("unable to read source file");
 
 	let data = compile(file_path, source.into());
-	println!("{data}")
+	println!("{data}");
+
+	let mut out_data: HashMap<Target, Vec<asm::Data>> = HashMap::new();
+	for (_, asm_data) in data.asm_db {
+		match asm_data {
+			asm::Data::Z80(_) => out_data.entry(Target::Z80)
+				.or_default()
+				.push(asm_data),
+		}
+	}
+
+	for (target, data) in out_data {
+		use std::io::Write;
+
+		let out_path = match target {
+			Target::Z80 => out_path.with_extension("z80"),
+		};
+
+		let out_file = File::create(out_path.with_added_extension("asm"))
+			.expect("unable to create output file");
+
+		for out in data {
+			writeln!(&out_file, "{out}")
+				.expect("unable to write to output file");
+		}
+	}
 }
 
 type SrcPos = usize;
@@ -46,7 +76,16 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	parser::eval(&mut data);
 	type_checker::eval(&mut data);
 	vsmc::eval(&mut data);
+	asm::eval(&mut data);
 	data
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Target {
+	//M68k,
+	//SH2,
+	//X86_64,
+	Z80,
 }
 
 // TODO - srenshaw - Need to add Table location calculations.
@@ -83,10 +122,12 @@ pub struct Data {
 
 	/* Backend Procedure Data */
 	proc_db: identifier::Map<ProcData>,
+	asm_db: identifier::Map<asm::Data>,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct ProcData {
+	target: Option<Target>,
 	ast_start: ast::Id,
 	ast_nodes: ast::KindList,
 	ast_pos_tok: ast::LocList,
@@ -152,8 +193,16 @@ impl Data {
 	}
 
 	pub fn text(&self, ident_id: &identifier::Id) -> &str {
-		let Span { start, end } = self.identifiers[ident_id];
-		&self.source[start..end]
+		Self::text_internal(&self.source, &self.identifiers, ident_id)
+	}
+
+	pub fn text_internal<'a>(
+		source: &'a str,
+		identifiers: &identifier::Map<Span<SrcPos>>,
+		ident_id: &identifier::Id,
+	) -> &'a str {
+		let Span { start, end } = identifiers[ident_id];
+		&source[start..end]
 	}
 
 	pub fn token_source(&self, token_id: token::Id) -> Span<usize> {
