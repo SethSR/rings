@@ -144,6 +144,7 @@ impl Display for Sz {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Data { D0, D1, D2, D3, D4, D5, D6, D7 }
 impl Display for Data {
@@ -152,6 +153,7 @@ impl Display for Data {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Addr { A0, A1, A2, A3, A4, A5, A6, A7 }
 impl Display for Addr {
@@ -160,6 +162,7 @@ impl Display for Addr {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum EA {
 	/// Data Register Direct
@@ -225,6 +228,7 @@ impl Display for Cond {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Asm {
 	Label(String),

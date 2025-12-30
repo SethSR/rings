@@ -328,6 +328,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 	data
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum R8 { A, B, C, D, E, H, L }
 impl Display for R8 {
@@ -336,6 +337,7 @@ impl Display for R8 {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum R16 { BC, DE, HL }
 impl Display for R16 {
@@ -344,6 +346,7 @@ impl Display for R16 {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Cond { NC, NZ, C, Z, PO, PE, P, M }
 impl Display for Cond {
@@ -352,6 +355,7 @@ impl Display for Cond {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum RstTgt { H00, H08, H10, H18, H20, H28, H30, H38 }
 impl Display for RstTgt {
@@ -369,6 +373,7 @@ impl Display for RstTgt {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Asm {
 	Label(String),

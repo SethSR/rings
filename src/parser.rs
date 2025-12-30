@@ -14,11 +14,11 @@ type ParseResult<T> = Result<T, Error>;
 pub fn eval(data: &mut Data) {
 	let queue_start_len = data.task_queue.len();
 	for task in &mut data.task_queue {
-		task.prev_queue_length = queue_start_len;
+		task.prev_queue_length = Some(queue_start_len);
 	}
 
 	fn refresh_task_queue(data: &mut Data, task: &mut Task, err_len: usize) {
-		task.prev_queue_length = data.task_queue.len();
+		task.prev_queue_length = Some(data.task_queue.len());
 
 		// Remove previously generated errors, since we will retry parsing.
 		data.errors.truncate(err_len);
@@ -34,7 +34,7 @@ pub fn eval(data: &mut Data) {
 				task.prev_furthest_token = token_id;
 				refresh_task_queue(data, &mut task, err_len);
 				data.task_queue.push_back(task);
-			} else if task.prev_queue_length > data.task_queue.len() {
+			} else if task.prev_queue_length > Some(data.task_queue.len()) {
 				// ...but someone else made progress, so maybe a different dependency will finish. Re-queue
 				// and try again.
 				refresh_task_queue(data, &mut task, err_len);

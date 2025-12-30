@@ -14,29 +14,21 @@ pub struct Task {
 	pub name_id: IdentId,
 	pub tok_start: TokenId,
 	pub prev_furthest_token: TokenId,
-	pub prev_queue_length: usize,
+	pub prev_queue_length: Option<usize>,
 }
 
 impl Task {
-	pub fn new_proc(name_id: IdentId, tok_start: TokenId) -> Self {
+	pub fn new(
+		kind: Kind,
+		name_id: IdentId,
+		tok_start: TokenId,
+	) -> Self {
 		Self {
-			kind: Kind::Proc,
+			kind,
 			name_id,
 			tok_start,
 			prev_furthest_token: TokenId::default(),
-			// Initialized to 0, but will be reset at the start of the Parser phase
-			prev_queue_length: 0,
-		}
-	}
-
-	pub fn new_value(name_id: IdentId, tok_start: TokenId) -> Self {
-		Self {
-			kind: Kind::Value,
-			name_id,
-			tok_start,
-			prev_furthest_token: TokenId::default(),
-			// Initialized to 0, but will be reset at the start of the Parser phase
-			prev_queue_length: 0,
+			prev_queue_length: None,
 		}
 	}
 }

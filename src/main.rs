@@ -174,7 +174,6 @@ pub struct Data {
 	/* Discovery */
 	procedures: discovery::ProcMap,
 	values: discovery::ValueMap,
-	#[cfg(feature="ready")]
 	regions: discovery::RegionMap,
 	#[cfg(feature="ready")]
 	records: discovery::RecordMap,
@@ -182,7 +181,6 @@ pub struct Data {
 	tables: discovery::TableMap,
 
 	/* Parsing */
-	regions: Vec<Span<usize>>,
 	task_queue: VecDeque<Task>,
 
 	/* Backend Procedure Data */
@@ -219,7 +217,6 @@ impl ProcData {
 	}
 }
 
-#[cfg(feature="ready")]
 fn fmt_size(size: usize) -> String {
 	let mut buffer = [size,0,0,0];
 	for idx in 0..3 {
@@ -249,10 +246,6 @@ impl Data {
 		Self {
 			source_file,
 			source,
-			regions: vec![
-				// 8192 bytes @ 0x0000_0000
-				(0..0x1000).into(),
-			],
 			..Default::default()
 		}
 	}
@@ -405,18 +398,14 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
-		#[cfg(feature="ready")]
 		writeln!(f, "{:<16} | {:<9} | {:<9}", "REGION", "ADDRESS", "SIZE")?;
-		#[cfg(feature="ready")]
 		writeln!(f, "{:-<16} | {:-<9} | {:-<9}", "", "", "")?;
-		#[cfg(feature="ready")]
 		for (ident_id, data) in self.regions.iter() {
 			let name = self.text(ident_id);
-			let address = data.address;
-			let size = fmt_size(data.byte_count as usize);
+			let address = data.start;
+			let size = fmt_size((data.end - data.start) as usize);
 			writeln!(f, "{name:<16} | #{address:0>8X} | {size:<8}")?;
 		}
-		#[cfg(feature="ready")]
 		writeln!(f)?;
 
 		#[cfg(feature="ready")]
@@ -496,25 +485,13 @@ impl fmt::Display for Data {
 				"TASK", "KIND", "START TOKEN", "LATEST TOKEN")?;
 			writeln!(f, "{:-<32} | {:-<11} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "", "")?;
 			for task in &self.task_queue {
-				writeln!(f, "{:<32} | {:<11?} | {:<11} | {:<10} | {}",
+				writeln!(f, "{:<32} | {:<11?} | {:<11} | {:<10} | {:?}",
 					self.text(&task.name_id),
 					task.kind,
 					task.tok_start.index(),
 					task.prev_furthest_token.index(),
 					task.prev_queue_length,
 				)?;
-			}
-			writeln!(f)?;
-		}
-
-		#[cfg(feature="ready")]
-		if !self.completed_procs.is_empty() {
-			writeln!(f, "{:<32} | AST-NODE-COUNT",
-				"PROCEDURE")?;
-			writeln!(f, "{:-<32} | {:-<16}", "", "")?;
-			for (ident_id, &proc_start) in &self.completed_procs {
-				let node_count = self.ast_nodes[proc_start..].len();
-				writeln!(f, "{:<32} | {node_count}", self.text(ident_id))?;
 			}
 			writeln!(f)?;
 		}
