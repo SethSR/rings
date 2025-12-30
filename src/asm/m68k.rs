@@ -133,6 +133,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 	data
 }
 
+#[derive(Debug)]
 pub enum Sz { W, L }
 impl Display for Sz {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -159,6 +160,7 @@ impl Display for Addr {
 	}
 }
 
+#[derive(Debug)]
 pub enum EA {
 	/// Data Register Direct
 	/// - Dn
@@ -208,6 +210,7 @@ impl Display for EA {
 	}
 }
 
+#[derive(Debug)]
 pub enum Cond { EQ, NE, GE, GT, LE, LT }
 impl Display for Cond {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -222,6 +225,7 @@ impl Display for Cond {
 	}
 }
 
+#[derive(Debug)]
 pub enum Asm {
 	Label(String),
 

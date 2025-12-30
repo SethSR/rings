@@ -50,6 +50,7 @@ fn output(data: Data) {
 	for (_, asm_data) in data.asm_db {
 		let target_entry = match asm_data {
 			asm::Data::M68k(_) => out_data.entry(Target::M68k),
+			asm::Data::SH2(_) => out_data.entry(Target::SH2),
 			asm::Data::X86(_) => out_data.entry(Target::X86_64),
 			asm::Data::Z80(_) => out_data.entry(Target::Z80),
 		};
@@ -61,6 +62,7 @@ fn output(data: Data) {
 
 		let out_path = match target {
 			Target::M68k => out_path.with_extension("m68k"),
+			Target::SH2 => out_path.with_extension("sh2"),
 			Target::X86_64 => out_path.with_extension("x64"),
 			Target::Z80 => out_path.with_extension("z80"),
 		};
@@ -69,18 +71,29 @@ fn output(data: Data) {
 		let out_file = File::create(&out_path)
 				.expect("unable to create output file");
 
+		if target == Target::SH2 {
+			writeln!(&out_file, "include 'sh2.inc'")
+					.expect("unable to write to sh2 file");
+		}
+
 		for out in data {
 			writeln!(&out_file, "{out}")
-					.expect("unable to write to output file");
+				.expect("unable to write to output file");
 		}
 
 		let output = match target {
 			Target::M68k => {
 				Command::new("./vasmm68k_std")
-						.arg(&out_path)
-						.arg("-o")
-						.arg(out_path.with_extension("out"))
-						.output()
+					.arg(&out_path)
+					.arg("-o")
+					.arg(out_path.with_extension("o"))
+					.output()
+			}
+			Target::SH2 => {
+				Command::new("./fasmg")
+					.arg(&out_path)
+					.arg(out_path.with_extension("bin"))
+					.output()
 			}
 			Target::X86_64 => {
 				let output = Command::new("./vasmx86_std")
@@ -105,17 +118,17 @@ fn output(data: Data) {
 			}
 			Target::Z80 => {
 				Command::new("./vasmz80_std")
-						.arg(&out_path)
-						.arg("-o")
-						.arg(out_path.with_extension("out"))
-						.output()
+					.arg(&out_path)
+					.arg("-o")
+					.arg(out_path.with_extension("o"))
+					.output()
 			}
 		};
 
 		match output {
 			Err(e) => eprintln!("{e}"),
 			Ok(out) if out.status.success() => {}
-			Ok(out) => eprintln!("{out:?}"),
+			Ok(out) => eprintln!("{:?}", out.stderr),
 		}
 	}
 }
@@ -135,7 +148,7 @@ pub fn compile(file_path: String, source: Box<str>) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Target {
 	M68k,
-	//SH2,
+	SH2,
 	X86_64,
 	Z80,
 }

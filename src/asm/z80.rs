@@ -352,6 +352,7 @@ impl Display for Cond {
 	}
 }
 
+#[derive(Debug)]
 pub enum RstTgt { H00, H08, H10, H18, H20, H28, H30, H38 }
 impl Display for RstTgt {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -368,6 +369,7 @@ impl Display for RstTgt {
 	}
 }
 
+#[derive(Debug)]
 pub enum Asm {
 	Label(String),
 
