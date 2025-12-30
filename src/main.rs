@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::ops::Range;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
 mod asm;
 mod ast;
@@ -33,18 +34,23 @@ fn main() {
 
 	let file_path = args.next()
 		.expect("expected source file");
-	let mut out_path = PathBuf::from(&file_path);
-	out_path.set_extension("");
 	let source = fs::read_to_string(&file_path)
 		.expect("unable to read source file");
 
-	let data = compile(file_path, source.into());
-	println!("{data}");
+	compile(file_path, source.into());
+}
+
+type SrcPos = usize;
+
+fn output(data: Data) {
+	let mut out_path = PathBuf::from(&data.source_file);
+	out_path.set_extension("");
 
 	let mut out_data: HashMap<Target, Vec<asm::Data>> = HashMap::new();
 	for (_, asm_data) in data.asm_db {
 		let target_entry = match asm_data {
 			asm::Data::M68k(_) => out_data.entry(Target::M68k),
+			asm::Data::X86(_) => out_data.entry(Target::X86_64),
 			asm::Data::Z80(_) => out_data.entry(Target::Z80),
 		};
 		target_entry.or_default().push(asm_data);
@@ -55,22 +61,66 @@ fn main() {
 
 		let out_path = match target {
 			Target::M68k => out_path.with_extension("m68k"),
+			Target::X86_64 => out_path.with_extension("x64"),
 			Target::Z80 => out_path.with_extension("z80"),
 		};
 
-		let out_file = File::create(out_path.with_added_extension("asm"))
-			.expect("unable to create output file");
+		let out_path = out_path.with_added_extension("asm");
+		let out_file = File::create(&out_path)
+				.expect("unable to create output file");
 
 		for out in data {
 			writeln!(&out_file, "{out}")
-				.expect("unable to write to output file");
+					.expect("unable to write to output file");
+		}
+
+		let output = match target {
+			Target::M68k => {
+				Command::new("./vasmm68k_std")
+						.arg(&out_path)
+						.arg("-o")
+						.arg(out_path.with_extension("out"))
+						.output()
+			}
+			Target::X86_64 => {
+				let output = Command::new("./vasmx86_std")
+					.arg("-m64")
+					.arg("-Felf")
+					.arg(&out_path)
+					.arg("-o")
+					.arg(out_path.with_extension("o"))
+					.stdin(Stdio::piped())
+					.output();
+				match output {
+					Err(e) => panic!("{e}"),
+					Ok(out) if out.status.success() => {
+						Command::new("ld")
+							.arg(out_path.with_extension("o"))
+							.arg("-o")
+							.arg(out_path.with_extension(""))
+							.output()
+					}
+					Ok(out) => panic!("{out:?}"),
+				}
+			}
+			Target::Z80 => {
+				Command::new("./vasmz80_std")
+						.arg(&out_path)
+						.arg("-o")
+						.arg(out_path.with_extension("out"))
+						.output()
+			}
+		};
+
+		match output {
+			Err(e) => eprintln!("{e}"),
+			Ok(out) if out.status.success() => {}
+			Ok(out) => eprintln!("{out:?}"),
 		}
 	}
 }
 
-type SrcPos = usize;
-
-pub fn compile(file_path: String, source: Box<str>) -> Data {
+pub fn compile(file_path: String, source: Box<str>) {
 	let mut data = Data::new(file_path, source);
 	lexer::eval(&mut data);
 	discovery::eval(&mut data);
@@ -78,14 +128,15 @@ pub fn compile(file_path: String, source: Box<str>) -> Data {
 	type_checker::eval(&mut data);
 	vsmc::eval(&mut data);
 	asm::eval(&mut data);
-	data
+	println!("{data}");
+	output(data);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Target {
 	M68k,
 	//SH2,
-	//X86_64,
+	X86_64,
 	Z80,
 }
 

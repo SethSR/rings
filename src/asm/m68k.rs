@@ -144,7 +144,7 @@ impl Display for Sz {
 }
 
 #[derive(Debug)]
-pub enum Data { D0, D1 }
+pub enum Data { D0, D1, D2, D3, D4, D5, D6, D7 }
 impl Display for Data {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		write!(f, "{self:?}")
@@ -152,9 +152,9 @@ impl Display for Data {
 }
 
 #[derive(Debug)]
-pub enum Addr { A6, A7 }
+pub enum Addr { A0, A1, A2, A3, A4, A5, A6, A7 }
 impl Display for Addr {
-	fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+	fn fmt(&self, f: &mut Formatter) -> Result {
 		write!(f, "{self:?}")
 	}
 }

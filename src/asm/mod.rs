@@ -6,7 +6,7 @@ use crate::{Data as MainDB, Target};
 
 mod m68k;
 //mod sh2;
-//mod x86_64;
+mod x86_64;
 mod z80;
 
 pub fn eval(db: &mut MainDB) {
@@ -17,10 +17,10 @@ pub fn eval(db: &mut MainDB) {
 		let proc_name = MainDB::text_internal(source, identifiers, proc_id).to_owned();
 
 		let data = match proc_data.target {
-			None => Data::M68k(m68k::lower(&proc_name, proc_data)),
+			None |
+			Some(Target::X86_64) => Data::X86(x86_64::lower(&proc_name, proc_data)),
 			//Some(Target::SH2) => Data::SH2(sh2::lower(&proc_name, proc_data)),
 			Some(Target::M68k) => Data::M68k(m68k::lower(&proc_name, proc_data)),
-			//Some(Target::X86_64) => Data::X86(x86_64::lower(&proc_name, proc_data)),
 			Some(Target::Z80) => Data::Z80(z80::lower(&proc_name, proc_data)),
 		};
 
@@ -38,7 +38,7 @@ pub fn eval(db: &mut MainDB) {
 pub enum Data {
 	M68k(Vec<m68k::Asm>),
 	//SH2(Vec<sh2::Asm>),
-	//X86(Vec<x86_64::Asm>),
+	X86(Vec<x86_64::Asm>),
 	Z80(Vec<z80::Asm>),
 }
 
@@ -57,16 +57,12 @@ impl Display for Data {
 					out.push(asm.to_string());
 				}
 			}
+			*/
 			Self::X86(data) => {
-				out.push(".global _start".to_string());
-				out.push(".section .data".to_string());
-				out.push("buf: .byte 0, 128".to_string());
-				out.push(".section .text".to_string());
 				for asm in data {
 					out.push(asm.to_string());
 				}
 			}
-			*/
 			Self::Z80(data) => {
 				for asm in data {
 					out.push(asm.to_string());
