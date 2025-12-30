@@ -175,9 +175,9 @@ pub struct Data {
 	procedures: discovery::ProcMap,
 	values: discovery::ValueMap,
 	regions: discovery::RegionMap,
-	#[cfg(feature="ready")]
+	#[cfg(feature="record")]
 	records: discovery::RecordMap,
-	#[cfg(feature="ready")]
+	#[cfg(feature="table")]
 	tables: discovery::TableMap,
 
 	/* Parsing */
@@ -278,15 +278,15 @@ impl Data {
 
 	fn type_text(&self, ring_type: &Type) -> String {
 		match ring_type {
-			#[cfg(feature="ready")]
+			#[cfg(feature="record")]
 			Type::Record(ident_id) => self.text(&ident_id).to_string(),
-			#[cfg(feature="ready")]
+			#[cfg(feature="table")]
 			Type::Table(ident_id) => self.text(&ident_id).to_string(),
 			_ => format!("{ring_type:?}"),
 		}
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(all(feature="record", feature="table"))]
 	fn type_size(&self, ring_type: &Type) -> u32 {
 		match ring_type {
 			#[cfg(feature="ready")]
@@ -361,7 +361,7 @@ impl fmt::Display for Data {
 		writeln!(f, "=== Rings Compiler ===")?;
 		writeln!(f)?;
 
-		#[cfg(feature="ready")]
+		#[cfg(any(feature="record", feature="table"))]
 		fn fields_to_str(data: &Data, fields: &[(identifier::Id, Type)]) -> String {
 			fields.iter()
 				.map(|(field_id, field_type)| {
@@ -408,12 +408,12 @@ impl fmt::Display for Data {
 		}
 		writeln!(f)?;
 
-		#[cfg(feature="ready")]
+		#[cfg(feature="record")]
 		writeln!(f, "{:<16} | {:<8} | {:<9} | FIELDS",
 			"RECORD", "SIZE", "ADDRESS")?;
-		#[cfg(feature="ready")]
+		#[cfg(feature="record")]
 		writeln!(f, "{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "")?;
-		#[cfg(feature="ready")]
+		#[cfg(feature="record")]
 		for (ident_id, record) in self.records.iter() {
 			let name = self.text(ident_id);
 			let size = record.size(self);
@@ -423,15 +423,15 @@ impl fmt::Display for Data {
 			let field_str = fields_to_str(self, &record.fields);
 			writeln!(f, "{name:<16} | {size:<8} | {address:9} | {field_str}")?;
 		}
-		#[cfg(feature="ready")]
+		#[cfg(feature="record")]
 		writeln!(f)?;
 
-		#[cfg(feature="ready")]
+		#[cfg(feature="table")]
 		writeln!(f, "{:<16} | {:<10} | {:<8} | {:<9} | {:<9} | COLUMNS",
 			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT", "ADDRESS")?;
-		#[cfg(feature="ready")]
+		#[cfg(feature="table")]
 		writeln!(f, "{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<9} | {:-<16}", "", "", "", "", "", "")?;
-		#[cfg(feature="ready")]
+		#[cfg(feature="table")]
 		for (ident_id, table) in self.tables.iter() {
 			let name = self.text(ident_id);
 			let size = table.size(self);
@@ -442,7 +442,7 @@ impl fmt::Display for Data {
 			let field_str = fields_to_str(self, &table.column_spec);
 			writeln!(f, "{name:<16} | {size:<10} | {row_size:<8} | {:<9} | {address:9} | {field_str}", table.row_count)?;
 		}
-		#[cfg(feature="ready")]
+		#[cfg(feature="table")]
 		writeln!(f)?;
 
 		if !self.procedures.is_empty() {
@@ -557,7 +557,7 @@ pub enum Bounds {
 	To { end: u32 },
 }
 
-#[cfg(feature="ready")]
+#[cfg(feature="forloop")]
 impl Bounds {
 	fn get_start(&self) -> u32 {
 		match self {

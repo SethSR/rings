@@ -6,7 +6,7 @@ pub fn error(data: &Data, message: &str, token_id: TokenId) -> Error {
 	Error::new(data.token_source(token_id), message)
 }
 
-#[cfg(feature="ready")]
+#[cfg(feature="notes")]
 pub fn error_with_notes(data: &Data, message: &str, token_id: TokenId,
 	notes: &[(&str, TokenId)],
 ) -> Error {
@@ -38,10 +38,6 @@ pub enum Kind {
 	Parser,
 	Checker,
 	LoweringTAC,
-	#[cfg(feature="ready")]
-	LoweringMachine,
-	#[cfg(feature="ready")]
-	Assembler,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -70,7 +66,7 @@ impl Error {
 		self
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="notes")]
 	pub fn with_note(&mut self, message: impl Into<String>) {
 		self.notes.push(Note {
 			location: None,
@@ -78,7 +74,7 @@ impl Error {
 		});
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="notes")]
 	pub fn with_note_at(
 		&mut self,
 		location: Span,

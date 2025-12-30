@@ -38,14 +38,14 @@ pub enum Kind {
 	While(Id, Block),
 	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Block),
 	Call(IdentId, Vec<Id>),
-	#[cfg(feature="ready")]
+	#[cfg(feature="access")]
 	Access(IdentId, Vec<PathSegment>),
 }
 
 pub type KindList = IndexVec<Id, Kind>;
 pub type LocList = IndexVec<Id, Span<token::Id>>;
 
-#[cfg(feature="ready")]
+#[cfg(feature="optimize")]
 #[derive(Debug, Default)]
 pub struct Graph {
 	node_kinds: Vec<Kind>,

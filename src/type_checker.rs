@@ -136,7 +136,7 @@ fn check_stmt(proc_data: &mut ProcData,
 		}
 
 		Kind::For(_vars, Some(_), _, _) => { todo!() }
-		#[cfg(feature="ready")]
+		#[cfg(feature="forloop")]
 		Kind::For(vars, Some(table_id), range, block) => {
 			let table = &proc_data.tables[table_id];
 			debug_assert!(vars.len() <= table.column_spec.len());
@@ -195,7 +195,7 @@ fn check_stmt(proc_data: &mut ProcData,
 			todo!("procedure-call: {proc_id} {exprs:?}")
 		}
 
-		#[cfg(feature="ready")]
+		#[cfg(feature="access")]
 		Kind::Access(base_id, segments) => {
 			let mut curr_id = base_id;
 			for segment in segments {
@@ -319,7 +319,7 @@ fn check_unop(proc_data: &mut ProcData,
 		return Err(Error::InvalidUnOp(op, right_type));
 	};
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="types")]
 	if !matches!(rtype, T::Bool | T::U8 | T::S8 | T::U16 | T::S16 | T::U32 | T::S32) {
 		return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type.display(proc_data)));
 	}

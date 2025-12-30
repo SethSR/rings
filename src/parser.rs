@@ -218,7 +218,7 @@ fn parse_access(cursor: &mut Cursor, data: &mut Data, proc_data: &mut ProcData,
 	let kind = if accesses.is_empty() {
 		AKind::Ident(ident_id)
 	} else {
-		#[cfg(feature="ready")]
+		#[cfg(feature="access")]
 		AKind::Access(ident_id, accesses);
 		todo!()
 	};
@@ -577,7 +577,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"a".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="record")]
 	#[test]
 	fn with_record_param() {
 		let db = setup("main{} record a {} proc b(c:a) {}");
@@ -585,7 +585,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"b".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="record")]
 	#[test]
 	fn with_out_of_order_record_param() {
 		let db = setup("main{} proc b(c:a) {} record a {}");
@@ -593,7 +593,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"b".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="table")]
 	#[test]
 	fn with_table_param() {
 		let db = setup("main{} table a[0] {} proc b(c:a) {}");
@@ -615,7 +615,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_for_loop() {
 		let db = setup("main { for i in a {} }");
@@ -623,7 +623,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_index_for_loop() {
 		let db = setup("main { for i in a[0..10] {} }");
@@ -631,7 +631,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_from_for_loop() {
 		let db = setup("main { for i in a[0..] {} }");
@@ -639,7 +639,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_to_for_loop() {
 		let db = setup("main { for i in a[..10] {} }");
@@ -647,7 +647,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_full_for_loop() {
 		let db = setup("main { for i in a[..] {} }");
@@ -655,7 +655,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="index")]
 	#[test]
 	fn with_internal_table_index() {
 		let db = setup("main { return a[10].b; }");
@@ -663,7 +663,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="index")]
 	#[test]
 	fn with_internal_table_expression_indexing() {
 		let db = setup("main { return a[2 + 4].b; }");
@@ -706,7 +706,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="access")]
 	#[test]
 	fn with_internal_field_assign() {
 		let db = setup("main { a.b = 2; }");
@@ -714,7 +714,7 @@ mod can_parse_proc {
 		assert!(db.proc_db.contains_key(&"main".id()));
 	}
 
-	#[cfg(feature="ready")]
+	#[cfg(feature="access")]
 	#[test]
 	fn with_internal_table_assign() {
 		let db = setup("main { a[3].b = 2; }");

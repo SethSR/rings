@@ -198,7 +198,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 				data.push(Asm::AddI(4, FP));
 			}
 
-			#[cfg(feature="ready")]
+			#[cfg(feature="call")]
 			Vsmc::Call { name, args, dst } => {
 				todo!("call convention is not implemented yet: {}({}){}",
 					db.text(name),
@@ -209,11 +209,6 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 					}).collect::<Vec<_>>().join(", "),
 					dst.map(|x| format!(" -> {x}")).unwrap_or("".to_string()),
 				);
-			}
-
-			#[cfg(feature="ready")]
-			Vsmc::Comment(msg) => {
-				data.push(Asm::Comment(msg.clone()));
 			}
 		}
 	}

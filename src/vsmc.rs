@@ -54,14 +54,10 @@ pub enum Vsmc {
 	JumpIf(LabelId),
 
 	// Procedure related
-	#[cfg(feature="ready")]
+	#[cfg(feature="call")]
 	Call { name: IdentId, args: Vec<Location>, dst: Option<TempId> },
 	/// Returns with output in stack-offset 0 if needed
 	Return(bool),
-
-	// Comments/debug
-	#[cfg(feature="ready")]
-	Comment(String),
 }
 
 impl Vsmc {
@@ -91,22 +87,18 @@ impl Vsmc {
 			Vsmc::JumpIf(target) => {
 				format!("JIF   label_{target}")
 			}
-			#[cfg(feature="ready")]
+			#[cfg(feature="call")]
 			Vsmc::Call { name, args, dst: Some(dst) } => {
 				format!("CALL  {}({}) -> {dst}", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
-			#[cfg(feature="ready")]
+			#[cfg(feature="call")]
 			Vsmc::Call { name, args, ..} => {
 				format!("CALL  {}({})", data.text(name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
 			Vsmc::Return(with_value) => {
 				format!("RET   {with_value}")
-			}
-			#[cfg(feature="ready")]
-			Vsmc::Comment(msg) => {
-				format!("; {msg}")
 			}
 		}
 	}
@@ -296,7 +288,7 @@ impl Section {
 				todo!("lower proc-call")
 			}
 
-			#[cfg(feature="ready")]
+			#[cfg(feature="access")]
 			Kind::Access(base_id, segments) => {
 				let temp = Location::Temp(self.alloc_temp());
 				let address = if let Some(record) = proc_data.records.get(base_id) {

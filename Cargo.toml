@@ -7,4 +7,12 @@ edition = "2024"
 index_vec = "0.1.4"
 
 [features]
-ready=[]
+record=[]
+table=[]
+index=[]
+forloop=[]
+call=[]
+access=[]
+optimize=[]
+types=[]
+notes=[]
