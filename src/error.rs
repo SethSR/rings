@@ -1,6 +1,6 @@
 
-use crate::token::Id as TokenId;
-use crate::{Data, Span};
+use crate::token::{Id as TokenId, PosList};
+use crate::{Data, Span, SrcPos};
 
 pub fn error(data: &Data, message: &str, token_id: TokenId) -> Error {
 	Error::new(data.token_source(token_id), message)
@@ -37,7 +37,7 @@ pub enum Kind {
 	Discovery,
 	Parser,
 	Checker,
-	LoweringTAC,
+	LoweringVSMC,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -86,12 +86,11 @@ impl Error {
 		});
 	}
 
-	pub fn display(&self, data: &Data) -> String {
+	pub fn display(&self, source_file: &str, source: &str, pos_list: &PosList) -> String {
 		let mut output = vec![];
 
 		// Main error header
-		let file = &data.source_file;
-		let (line, col) = data.lookup_position(self.location.start);
+		let (line, col) = lookup_position(&source, pos_list, self.location.start);
 		let line_num_digit_count = line.to_string().len();
 
 		let message = if let Some(kind) = &self.kind {
@@ -102,13 +101,13 @@ impl Error {
 
 		output.push(header(&error_lead(), &message));
 		output.push(location(line_num_digit_count,
-			file, line, col));
+			&source_file, line, col));
 		output.push(vbar_empty(line_num_digit_count));
 		output.push(vbar_text(line_num_digit_count,
-			line, &data.get_line(line)));
+			line, &get_line(&source, pos_list, line)));
 
 		// Highlight underline
-		let (end_line, end_col) = data.lookup_position(self.location.end);
+		let (end_line, end_col) = lookup_position(&source, pos_list, self.location.end);
 		let underline_len = if line == end_line {
 			end_col.saturating_sub(col).max(1) // Single line highlight
 		} else {
@@ -122,15 +121,14 @@ impl Error {
 			if let Some(note_loc) = &note.location {
 				// TODO - srenshaw - Eventually, we'll want to change this to allow more than one source
 				// file.
-				let note_file = &data.source_file;
-				let (note_line, note_col) = data.lookup_position(note_loc.start);
+				let (note_line, note_col) = lookup_position(&source, pos_list, note_loc.start);
 
 				output.push(header(&note_lead(), &note.message));
 				output.push(location(line_num_digit_count,
-					note_file, note_line, note_col));
+					&source_file, note_line, note_col));
 				output.push(vbar_empty(line_num_digit_count));
 				output.push(vbar_text(line_num_digit_count,
-					note_line, &data.get_line(note_line)));
+					note_line, &get_line(&source, pos_list, note_line)));
 				output.push(vbar_highlight(line_num_digit_count,
 					note_col - 1, 1));
 			} else {
@@ -141,6 +139,43 @@ impl Error {
 
 		output.join("\n")
 	}
+}
+
+fn get_line_text<'a>(source: &'a str, pos_list: &PosList, line_number: usize) -> &'a str {
+	if !(1..=pos_list.len()).contains(&line_number) {
+		return "";
+	}
+
+	let start = pos_list[line_number - 1] + 1;
+	let end = if line_number < pos_list.len() {
+		pos_list[line_number]
+	} else {
+		source.len()
+	};
+
+	&source[start..end]
+}
+
+/// Get the text of a specific line
+pub fn get_line(source: &str, pos_list: &PosList, line_number: usize) -> String {
+	get_line_text(source, pos_list, line_number).replace('\t', "  ")
+}
+
+/// Convert byte offset to line and column
+pub fn lookup_position(source: &str, pos_list: &PosList, tok_pos: SrcPos) -> (usize, usize) {
+	let line = pos_list.binary_search(&tok_pos)
+			.unwrap_or_else(|line| line - 1);
+
+	let line_pos = pos_list.get(line)
+			.unwrap_or_else(|| panic!("missing position for line number {line}"));
+	assert!(tok_pos >= *line_pos, "tok({tok_pos}) line({line_pos})");
+	let column = tok_pos - line_pos;
+	let line_text = get_line_text(source, pos_list, line.index() + 1);
+	let tab_count = line_text.chars()
+			.filter(|ch| *ch == '\t')
+			.count();
+
+	(line.index() + 1, column + tab_count + 1)
 }
 
 fn error_lead() -> String {

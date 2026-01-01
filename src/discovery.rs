@@ -85,9 +85,12 @@ impl Table {
 	}
 }
 
-pub fn eval(mut data: Data) -> Result<Data, error::Error> {
+pub fn eval(mut data: Data) -> Result<Data, String> {
 	eval_loop(&mut Cursor::default(), &mut data)
-		.map_err(|e| e.into_comp_error(&data).with_kind(error::Kind::Discovery))
+		.map_err(|e| {
+			data.errors.push(e.into_comp_error(&data).with_kind(error::Kind::Discovery));
+			data.errors_to_string()
+		})
 		.map(|_| data)
 }
 
@@ -345,7 +348,7 @@ mod can_parse {
 		data.DEBUG_show_tokens = true;
 		let data = lexer::eval(data)
 			.and_then(eval)
-			.unwrap_or_else(|e| panic!("{e:?}"));
+			.unwrap_or_else(|msg| panic!("{msg}"));
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		data
 	}

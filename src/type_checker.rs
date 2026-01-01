@@ -56,7 +56,7 @@ impl Error {
 	}
 }
 
-pub fn eval(mut data: Data) -> Result<Data, Vec<crate::Error>> {
+pub fn eval(mut data: Data) -> Result<Data, String> {
 	// Check for 'main' procedure
 	if !data.proc_db.contains_key(&"main".id()) {
 		let err = error::error(&data, "missing 'main' procedure", TokenId::default());
@@ -109,7 +109,7 @@ pub fn eval(mut data: Data) -> Result<Data, Vec<crate::Error>> {
 			let err = error::error(&data, &err.to_string(&data), range.start)
 				.with_kind(error::Kind::Checker);
 			data.errors.push(err);
-			return Err(data.errors);
+			return Err(data.errors_to_string());
 		}
 		data.proc_db.entry(proc_id)
 			.and_modify(|data| *data = proc_data);

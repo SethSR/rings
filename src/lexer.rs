@@ -6,7 +6,7 @@ use crate::identifier::Identifier;
 use crate::token;
 use crate::{Data, SrcPos};
 
-pub fn eval(mut data: Data) -> Result<Data, Error> {
+pub fn eval(mut data: Data) -> Result<Data, String> {
 	let mut lexer = Lexer { pos: 0 };
 
 	// Add the initial line
@@ -17,7 +17,10 @@ pub fn eval(mut data: Data) -> Result<Data, Error> {
 		match lexer.next(&mut data) {
 			Ok(true) => {}
 			Ok(false) => return Ok(data), // all done!
-			Err(e) => return Err(e.with_kind(error::Kind::Lexer)),
+			Err(e) => {
+				data.errors.push(e.with_kind(error::Kind::Lexer));
+				return Err(data.errors_to_string());
+			}
 		}
 
 		lexer.skip_whitespace_and_comments(&mut data);
@@ -122,9 +125,12 @@ impl Lexer {
 				}
 
 				while let Some(c) = self.peek(data, 0) {
-					if !c.is_numeric() && c != '_' {
-						break;
-					}
+					let valid = match num_type {
+						NumType::Bin => ['0', '1', '_'].contains(&c),
+						NumType::Hex => c.is_ascii_hexdigit() || c == '_',
+						NumType::Dec => c.is_ascii_digit() || c == '_',
+					};
+					if !valid { break; }
 					self.advance(data);
 				}
 				let mut is_fractional = false;
@@ -361,7 +367,7 @@ mod can_lex {
 		let mut data = Data::new(file!().to_string(), source.into());
 		data.DEBUG_show_tokens = true;
 		eval(data)
-				.unwrap_or_else(|e| panic!("{e:?}"))
+			.unwrap_or_else(|msg| panic!("{msg}"))
 	}
 
 	#[test]

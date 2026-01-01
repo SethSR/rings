@@ -11,7 +11,7 @@ use crate::discovery::Value;
 
 type ParseResult<T> = Result<T, Error>;
 
-pub fn eval(mut data: Data) -> Result<Data, Vec<error::Error>> {
+pub fn eval(mut data: Data) -> Result<Data, String> {
 	let queue_start_len = data.task_queue.len();
 	for task in &mut data.task_queue {
 		task.prev_queue_length = Some(queue_start_len);
@@ -41,7 +41,7 @@ pub fn eval(mut data: Data) -> Result<Data, Vec<error::Error>> {
 				data.task_queue.push_back(task);
 			} else {
 				data.task_queue.push_back(task);
-				return Err(data.errors);
+				return Err(data.errors_to_string());
 			}
 		} else {
 			data.proc_db.entry(task.name_id)
@@ -482,9 +482,8 @@ mod can_parse_proc {
 		db.DEBUG_show_tokens = true;
 		lexer::eval(db)
 			.and_then(discovery::eval)
-			.map_err(|e| vec![e])
 			.and_then(super::eval)
-			.unwrap_or_else(|e| panic!("{e:?}"))
+			.unwrap_or_else(|msg| panic!("{msg}"))
 	}
 
 	#[test]

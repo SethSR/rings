@@ -8,7 +8,7 @@ use crate::{Bounds, Data, ProcData};
 pub type LabelId = u32;
 pub type TempId = u32; // Temporary variable ID
 
-pub fn eval(mut data: Data) -> Result<Data, Vec<error::Error>> {
+pub fn eval(mut data: Data) -> Result<Data, String> {
 	for (proc_id, proc_data) in &mut data.proc_db {
 		let mut section = Section::default();
 		section.name = *proc_id;
@@ -17,7 +17,9 @@ pub fn eval(mut data: Data) -> Result<Data, Vec<error::Error>> {
 				proc_data.tac_data = Some(section);
 			}
 			Err(e) => {
-				return Err(vec![e.into_comp_error(&data)]);
+				data.errors.push(e.into_comp_error(&data)
+						.with_kind(error::Kind::LoweringVSMC));
+				return Err(data.errors_to_string());
 			}
 		}
 	}
@@ -535,7 +537,7 @@ impl Error {
 		};
 
 		crate::Error::new(location, message)
-			.with_kind(error::Kind::LoweringTAC)
+			.with_kind(error::Kind::LoweringVSMC)
 	}
 }
 
@@ -553,12 +555,11 @@ mod tests {
 		source_str.push_str(source);
 
 		let data = lexer::eval(Data::new("lowering".into(), source_str.into()))
-				.and_then(discovery::eval)
-				.map_err(|e| vec![e])
-				.and_then(parser::eval)
-				.and_then(type_checker::eval)
-				.and_then(eval)
-				.unwrap_or_else(|e| panic!("{e:?}"));
+			.and_then(discovery::eval)
+			.and_then(parser::eval)
+			.and_then(type_checker::eval)
+			.and_then(eval)
+			.unwrap_or_else(|msg| panic!("{msg}"));
 
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		data

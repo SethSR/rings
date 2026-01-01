@@ -37,113 +37,26 @@ fn main() {
 	let source = fs::read_to_string(&file_path)
 		.expect("unable to read source file");
 
-	compile(file_path, source.into());
+	compile(file_path, &source);
 }
 
 type SrcPos = usize;
 
-fn output(data: Data) {
-	let mut out_path = PathBuf::from(&data.source_file);
-	out_path.set_extension("");
-
-	let mut out_data: HashMap<Target, Vec<asm::Data>> = HashMap::new();
-	for (_, asm_data) in data.asm_db {
-		let target_entry = match asm_data {
-			asm::Data::M68k(_) => out_data.entry(Target::M68k),
-			asm::Data::SH2(_) => out_data.entry(Target::SH2),
-			asm::Data::X86(_) => out_data.entry(Target::X86_64),
-			asm::Data::Z80(_) => out_data.entry(Target::Z80),
-		};
-		target_entry.or_default().push(asm_data);
-	}
-
-	for (target, data) in out_data {
-		use std::io::Write;
-
-		let out_path = match target {
-			Target::M68k => out_path.with_extension("m68k"),
-			Target::SH2 => out_path.with_extension("sh2"),
-			Target::X86_64 => out_path.with_extension("x64"),
-			Target::Z80 => out_path.with_extension("z80"),
-		};
-
-		let out_path = out_path.with_added_extension("asm");
-		let out_file = File::create(&out_path)
-				.expect("unable to create output file");
-
-		if target == Target::SH2 {
-			writeln!(&out_file, "include 'sh2.inc'")
-					.expect("unable to write to sh2 file");
-		}
-
-		for out in data {
-			writeln!(&out_file, "{out}")
-				.expect("unable to write to output file");
-		}
-
-		let output = match target {
-			Target::M68k => {
-				Command::new("./vasmm68k_std")
-					.arg(&out_path)
-					.arg("-o")
-					.arg(out_path.with_extension("o"))
-					.output()
-			}
-			Target::SH2 => {
-				Command::new("./fasmg")
-					.arg(&out_path)
-					.arg(out_path.with_extension("bin"))
-					.output()
-			}
-			Target::X86_64 => {
-				let output = Command::new("./vasmx86_std")
-					.arg("-m64")
-					.arg("-Felf")
-					.arg(&out_path)
-					.arg("-o")
-					.arg(out_path.with_extension("o"))
-					.stdin(Stdio::piped())
-					.output();
-				match output {
-					Err(e) => panic!("{e}"),
-					Ok(out) if out.status.success() => {
-						Command::new("ld")
-							.arg(out_path.with_extension("o"))
-							.arg("-o")
-							.arg(out_path.with_extension(""))
-							.output()
-					}
-					Ok(out) => panic!("{out:?}"),
-				}
-			}
-			Target::Z80 => {
-				Command::new("./vasmz80_std")
-					.arg(&out_path)
-					.arg("-o")
-					.arg(out_path.with_extension("o"))
-					.output()
-			}
-		};
-
-		match output {
-			Err(e) => eprintln!("{e}"),
-			Ok(out) if out.status.success() => {}
-			Ok(out) => eprintln!("{:?}", out.stderr),
-		}
-	}
-}
-
-pub fn compile(file_path: String, source: Box<str>) {
-	let data = lexer::eval(Data::new(file_path, source))
+pub fn compile(file_path: String, source: &str) {
+	let result = lexer::eval(Data::new(file_path, source.into()))
 		.and_then(discovery::eval)
-		.map_err(|e| vec![e])
+		.and_then(discovery::eval)
 		.and_then(parser::eval)
 		.and_then(type_checker::eval)
 		.and_then(vsmc::eval)
-		.and_then(asm::eval)
-		.unwrap_or_else(|e| panic!("{e:?}"));
-	println!("{data}");
-	output(data);
+		.map(asm::eval);
+	match result {
+		Ok(data) => {
+			println!("{data}");
+			output(data);
+		}
+		Err(msg) => eprintln!("{msg}"),
+	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -221,6 +134,97 @@ impl ProcData {
 		self.ast_nodes.push(kind);
 		self.ast_pos_tok.push(tok_range.into());
 		ast::Id::new(self.ast_nodes.len() - 1)
+	}
+}
+
+fn output(data: Data) {
+	let mut out_path = PathBuf::from(&data.source_file);
+	out_path.set_extension("");
+
+	let mut out_data: HashMap<Target, Vec<asm::Data>> = HashMap::new();
+	for (_, asm_data) in data.asm_db {
+		let target_entry = match asm_data {
+			asm::Data::M68k(_) => out_data.entry(Target::M68k),
+			asm::Data::SH2(_) => out_data.entry(Target::SH2),
+			asm::Data::X86(_) => out_data.entry(Target::X86_64),
+			asm::Data::Z80(_) => out_data.entry(Target::Z80),
+		};
+		target_entry.or_default().push(asm_data);
+	}
+
+	for (target, data) in out_data {
+		use std::io::Write;
+
+		let out_path = match target {
+			Target::M68k => out_path.with_extension("m68k"),
+			Target::SH2 => out_path.with_extension("sh2"),
+			Target::X86_64 => out_path.with_extension("x64"),
+			Target::Z80 => out_path.with_extension("z80"),
+		};
+
+		let out_path = out_path.with_added_extension("asm");
+		let out_file = File::create(&out_path)
+				.expect("unable to create output file");
+
+		if target == Target::SH2 {
+			writeln!(&out_file, "include 'sh2.inc'")
+					.expect("unable to write to sh2 file");
+		}
+
+		for out in data {
+			writeln!(&out_file, "{out}")
+					.expect("unable to write to output file");
+		}
+
+		let output = match target {
+			Target::M68k => {
+				Command::new("./vasmm68k_std")
+						.arg(&out_path)
+						.arg("-o")
+						.arg(out_path.with_extension("o"))
+						.output()
+			}
+			Target::SH2 => {
+				Command::new("./fasmg")
+						.arg(&out_path)
+						.arg(out_path.with_extension("bin"))
+						.output()
+			}
+			Target::X86_64 => {
+				let output = Command::new("./vasmx86_std")
+						.arg("-m64")
+						.arg("-Felf")
+						.arg(&out_path)
+						.arg("-o")
+						.arg(out_path.with_extension("o"))
+						.stdin(Stdio::piped())
+						.output();
+				match output {
+					Err(e) => panic!("{e}"),
+					Ok(out) if out.status.success() => {
+						Command::new("ld")
+								.arg(out_path.with_extension("o"))
+								.arg("-o")
+								.arg(out_path.with_extension(""))
+								.output()
+					}
+					Ok(out) => panic!("{out:?}"),
+				}
+			}
+			Target::Z80 => {
+				Command::new("./vasmz80_std")
+						.arg(&out_path)
+						.arg("-o")
+						.arg(out_path.with_extension("o"))
+						.output()
+			}
+		};
+
+		match output {
+			Err(e) => eprintln!("{e}"),
+			Ok(out) if out.status.success() => {}
+			Ok(out) => eprintln!("{:?}", out.stderr),
+		}
 	}
 }
 
@@ -318,46 +322,9 @@ impl Data {
 		}
 	}
 
-	// Get the text of a specific line
-	pub fn get_line(&self, line_number: usize) -> String {
-		self.get_line_text(line_number).replace('\t', "  ")
-	}
-
-	// Convert byte offset to line and column
-	pub fn lookup_position(&self, tok_pos: SrcPos) -> (usize, usize) {
-		let line = self.line_pos.binary_search(&tok_pos)
-			.unwrap_or_else(|line| line - 1);
-
-		let line_pos = self.line_pos.get(line)
-			.unwrap_or_else(|| panic!("missing position for line number {line}"));
-		assert!(tok_pos >= *line_pos, "tok({tok_pos}) line({line_pos})");
-		let column = tok_pos - line_pos;
-		let line_text = self.get_line_text(line.index() + 1);
-		let tab_count = line_text.chars()
-			.filter(|ch| *ch == '\t')
-			.count();
-
-		(line.index() + 1, column + tab_count + 1)
-	}
-
-	fn get_line_text(&self, line_number: usize) -> &str {
-		if !(1..=self.line_pos.len()).contains(&line_number) {
-			return "";
-		}
-
-		let start = self.line_pos[line_number - 1] + 1;
-		let end = if line_number < self.line_pos.len() {
-			self.line_pos[line_number]
-		} else {
-			self.source.len()
-		};
-
-		&self.source[start..end]
-	}
-
 	fn errors_to_string(&self) -> String {
 		format!("{}", self.errors.iter()
-			.map(|e| e.display(self))
+			.map(|e| e.display(&self.source_file, &self.source, &self.line_pos))
 			.collect::<Vec<_>>()
 			.join("\n\n"))
 	}
