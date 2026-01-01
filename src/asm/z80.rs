@@ -14,6 +14,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 		match asm {
 			Vsmc::Push(value) => {
 				data.push(Asm::Mov8(value as u8));
+				data.push(Asm::Dec16(R16::HL));
 				data.push(Asm::StIntoHL(R8::A));
 			}
 			Vsmc::BinOp(op) => {
