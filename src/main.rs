@@ -134,13 +134,14 @@ fn output(data: Data) {
 }
 
 pub fn compile(file_path: String, source: Box<str>) {
-	let mut data = Data::new(file_path, source);
-	lexer::eval(&mut data);
-	discovery::eval(&mut data);
-	parser::eval(&mut data);
-	type_checker::eval(&mut data);
-	vsmc::eval(&mut data);
-	asm::eval(&mut data);
+	let data = lexer::eval(Data::new(file_path, source))
+		.and_then(discovery::eval)
+		.map_err(|e| vec![e])
+		.and_then(parser::eval)
+		.and_then(type_checker::eval)
+		.and_then(vsmc::eval)
+		.and_then(asm::eval)
+		.unwrap_or_else(|e| panic!("{e:?}"));
 	println!("{data}");
 	output(data);
 }
@@ -152,6 +153,8 @@ pub enum Target {
 	X86_64,
 	Z80,
 }
+
+// TODO - srenshaw - We need to validate 'targets' for their respective consoles.
 
 // TODO - srenshaw - Determine how to get 'signed/unsigned' info to assembly arithmetic/comparison ops, and type size info to assembly storage ops.
 
@@ -460,15 +463,15 @@ impl fmt::Display for Data {
 							.collect::<Vec<_>>()
 							.join("\n");
 						(
-							format!("{name:<32} | {:<16?}", data.ret_type),
+							format!("{name:<32} | {:<16?} | {:<16?}", data.ret_type, data.target),
 							params,
 						)
 					})
 					.unzip();
 
-			writeln!(f, "{:<32} | RETURN-TYPE",
-				"PROCEDURE")?;
-			writeln!(f, "{:-<32} | {:-<16}", "", "")?;
+			writeln!(f, "{:<32} | {:<16} | TARGET",
+				"PROCEDURE", "RETURN-TYPE")?;
+			writeln!(f, "{:-<32} | {:-<16} | {:-<16}", "", "", "")?;
 			writeln!(f, "{}", types.join("\n"))?;
 			writeln!(f)?;
 

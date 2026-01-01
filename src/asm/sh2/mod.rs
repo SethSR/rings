@@ -34,8 +34,8 @@ fn build_constant(data: &mut Vec<Asm>, c: &i64) {
 
 pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 	const R0: Reg = 0;
-	const FP: Reg = 13; // Frame stack address
-	const SP: Reg = 15; // Global stack address
+	const FP: Reg = 13; // Data stack address
+	const SP: Reg = 15; // Call stack address
 
 	let mut data = vec![
 		Asm::Label(proc_name.to_owned()),

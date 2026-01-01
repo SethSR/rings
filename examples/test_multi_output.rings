@@ -1,0 +1,20 @@
+
+region Stack[0] @ 0;
+
+main {}
+
+m68k proc m68_proc() -> s8 {
+	return 6 + 8;
+}
+
+sh2 proc sh2_proc() -> s8 {
+	return 5 * 2;
+}
+
+x64 proc x64_proc() -> s8 {
+	return 64 - 32;
+}
+
+z80 proc z80_proc() -> s8 {
+	return 80 + 80;
+}

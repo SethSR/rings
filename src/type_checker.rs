@@ -56,10 +56,10 @@ impl Error {
 	}
 }
 
-pub fn eval(data: &mut Data) {
+pub fn eval(mut data: Data) -> Result<Data, Vec<crate::Error>> {
 	// Check for 'main' procedure
 	if !data.proc_db.contains_key(&"main".id()) {
-		let err = error::error(data, "missing 'main' procedure", TokenId::default());
+		let err = error::error(&data, "missing 'main' procedure", TokenId::default());
 		data.errors.push(err.with_kind(error::Kind::Checker));
 	}
 
@@ -69,7 +69,7 @@ pub fn eval(data: &mut Data) {
 	if let Some(stack_src_loc) = data.regions.get(&"Stack".id()) {
 		// call and data stack are combined, reject explicitly named regions
 		if has_call_stack || has_data_stack {
-			let err = error::error(data,
+			let err = error::error(&data,
 				"Combined Call/Data stack already defined",
 				(stack_src_loc.start as usize).into(),
 			);
@@ -78,13 +78,13 @@ pub fn eval(data: &mut Data) {
 	} else {
 		// no combined stack region, call and data stack are required
 		if !has_call_stack {
-			let err = error::error(data,
+			let err = error::error(&data,
 				"No combined Call/Data stack defined, declare a dedicated 'CallStack' region.",
 				TokenId::default(),
 			);
 			data.errors.push(err.with_kind(error::Kind::Checker));
 		} else if !has_data_stack {
-			let err = error::error(data,
+			let err = error::error(&data,
 				"No combined Call/Data stack defined, declare a dedicated 'DataStack' region.",
 				TokenId::default(),
 			);
@@ -106,13 +106,16 @@ pub fn eval(data: &mut Data) {
 
 		let ret_type = proc_type.ret_type;
 		if let Err(err) = check_stmt(&mut proc_data, proc_start, ret_type) {
-			data.errors.push(error::error(data, &err.to_string(data), range.start)
-				.with_kind(error::Kind::Checker));
-			return;
+			let err = error::error(&data, &err.to_string(&data), range.start)
+				.with_kind(error::Kind::Checker);
+			data.errors.push(err);
+			return Err(data.errors);
 		}
 		data.proc_db.entry(proc_id)
 			.and_modify(|data| *data = proc_data);
 	}
+	
+	Ok(data)
 }
 
 fn check_stmt(proc_data: &mut ProcData,

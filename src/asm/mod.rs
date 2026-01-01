@@ -1,15 +1,15 @@
 
 use std::collections::hash_map::Entry;
-use std::fmt::{Display, Formatter, Result};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use crate::{Data as MainDB, Target};
+use crate::{Data as MainDB, Error, Target};
 
 mod m68k;
 mod sh2;
 mod x86_64;
 mod z80;
 
-pub fn eval(db: &mut MainDB) {
+pub fn eval(mut db: MainDB) -> Result<MainDB, Vec<Error>> {
 	let source = &db.source;
 	let identifiers = &db.identifiers;
 
@@ -33,6 +33,8 @@ pub fn eval(db: &mut MainDB) {
 			}
 		}
 	}
+
+	Ok(db)
 }
 
 #[derive(Debug)]
@@ -44,7 +46,7 @@ pub enum Data {
 }
 
 impl Display for Data {
-	fn fmt(&self, f: &mut Formatter) -> Result {
+	fn fmt(&self, f: &mut Formatter) -> FmtResult {
 		let mut out = vec![];
 		match self {
 			Self::M68k(data) => {

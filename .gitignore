@@ -1,6 +1,13 @@
 
 /target
 Cargo.lock
+*.asm
+*.o
+*.bin
+*.m68k
+*.sh2
+*.x64
+*.z80
 
 .idea/
 

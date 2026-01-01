@@ -11,7 +11,7 @@ use crate::discovery::Value;
 
 type ParseResult<T> = Result<T, Error>;
 
-pub fn eval(data: &mut Data) {
+pub fn eval(mut data: Data) -> Result<Data, Vec<error::Error>> {
 	let queue_start_len = data.task_queue.len();
 	for task in &mut data.task_queue {
 		task.prev_queue_length = Some(queue_start_len);
@@ -27,24 +27,31 @@ pub fn eval(data: &mut Data) {
 	while let Some(mut task) = data.task_queue.pop_front() {
 		let err_len = data.errors.len();
 
-		if let Err(token_id) = parse(data, task.name_id, task.kind, task.tok_start) {
+		if let Err(token_id) = parse(&mut data, task.name_id, task.kind, task.tok_start) {
 			// We didn't finish...
 			if token_id > task.prev_furthest_token {
 				// ...but we made progress, so we're not stuck yet. Re-queue and try again.
 				task.prev_furthest_token = token_id;
-				refresh_task_queue(data, &mut task, err_len);
+				refresh_task_queue(&mut data, &mut task, err_len);
 				data.task_queue.push_back(task);
 			} else if task.prev_queue_length > Some(data.task_queue.len()) {
 				// ...but someone else made progress, so maybe a different dependency will finish. Re-queue
 				// and try again.
-				refresh_task_queue(data, &mut task, err_len);
+				refresh_task_queue(&mut data, &mut task, err_len);
 				data.task_queue.push_back(task);
 			} else {
 				data.task_queue.push_back(task);
-				return;
+				return Err(data.errors);
 			}
+		} else {
+			data.proc_db.entry(task.name_id)
+				.and_modify(|proc_data| {
+					proc_data.target = data.procedures[&task.name_id].target;
+				});
 		}
 	}
+
+	Ok(data)
 }
 
 fn parse(
@@ -468,15 +475,16 @@ mod can_parse_proc {
 	use crate::{ lexer, discovery, ast };
 	use crate::discovery::Value;
 	use crate::identifier::Identifier;
+	use crate::Data;
 
-	fn setup(source: &str) -> crate::Data {
-		let source_file = "parser".to_string();
-		let mut db = crate::Data::new(source_file, source.into());
+	fn setup(source: &str) -> Data {
+		let mut db = Data::new("parser".to_string(), source.into());
 		db.DEBUG_show_tokens = true;
-		lexer::eval(&mut db);
-		discovery::eval(&mut db);
-		super::eval(&mut db);
-		db
+		lexer::eval(db)
+			.and_then(discovery::eval)
+			.map_err(|e| vec![e])
+			.and_then(super::eval)
+			.unwrap_or_else(|e| panic!("{e:?}"))
 	}
 
 	#[test]

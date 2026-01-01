@@ -8,7 +8,7 @@ use crate::{Bounds, Data, ProcData};
 pub type LabelId = u32;
 pub type TempId = u32; // Temporary variable ID
 
-pub fn eval(data: &mut Data) {
+pub fn eval(mut data: Data) -> Result<Data, Vec<error::Error>> {
 	for (proc_id, proc_data) in &mut data.proc_db {
 		let mut section = Section::default();
 		section.name = *proc_id;
@@ -17,11 +17,12 @@ pub fn eval(data: &mut Data) {
 				proc_data.tac_data = Some(section);
 			}
 			Err(e) => {
-				data.errors.push(e.into_comp_error(data));
-				break;
+				return Err(vec![e.into_comp_error(&data)]);
 			}
 		}
 	}
+
+	Ok(data)
 }
 
 /// Virtual Stack-Machine Code
@@ -550,12 +551,15 @@ mod tests {
 		let mut source_str = String::new();
 		source_str.push_str("region Stack[0] @ 0;");
 		source_str.push_str(source);
-		let mut data = Data::new("lowering".into(), source_str.into());
-		lexer::eval(&mut data);
-		discovery::eval(&mut data);
-		parser::eval(&mut data);
-		type_checker::eval(&mut data);
-		eval(&mut data);
+
+		let data = lexer::eval(Data::new("lowering".into(), source_str.into()))
+				.and_then(discovery::eval)
+				.map_err(|e| vec![e])
+				.and_then(parser::eval)
+				.and_then(type_checker::eval)
+				.and_then(eval)
+				.unwrap_or_else(|e| panic!("{e:?}"));
+
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		data
 	}

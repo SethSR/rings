@@ -6,24 +6,21 @@ use crate::identifier::Identifier;
 use crate::token;
 use crate::{Data, SrcPos};
 
-pub fn eval(data: &mut Data) {
+pub fn eval(mut data: Data) -> Result<Data, Error> {
 	let mut lexer = Lexer { pos: 0 };
 
 	// Add the initial line
 	data.line_pos.push(lexer.pos);
 
-	lexer.skip_whitespace_and_comments(data);
+	lexer.skip_whitespace_and_comments(&mut data);
 	loop {
-		match lexer.next(data) {
+		match lexer.next(&mut data) {
 			Ok(true) => {}
-			Ok(false) => return, // all done!
-			Err(e) => {
-				data.errors.push(e.with_kind(error::Kind::Lexer));
-				return;
-			}
+			Ok(false) => return Ok(data), // all done!
+			Err(e) => return Err(e.with_kind(error::Kind::Lexer)),
 		}
 
-		lexer.skip_whitespace_and_comments(data);
+		lexer.skip_whitespace_and_comments(&mut data);
 	}
 }
 
@@ -74,15 +71,19 @@ impl Lexer {
 					"else" => token::Kind::Else,
 					"false" => token::Kind::False,
 					"for" => token::Kind::For,
+					"free" => token::Kind::Free,
 					"if" => token::Kind::If,
 					"in" => token::Kind::In,
 					"let" => token::Kind::Let,
+					"m68k" => token::Kind::M68k,
+					"mark" => token::Kind::Mark,
 					"return" => token::Kind::Return,
+					"sh2" => token::Kind::SH2,
 					"true" => token::Kind::True,
 					"where" => token::Kind::Where,
 					"while" => token::Kind::While,
-					"mark" => token::Kind::Mark,
-					"free" => token::Kind::Free,
+					"x64" => token::Kind::X64,
+					"z80" => token::Kind::Z80,
 
 					text => {
 						let ident_id = text.id();
@@ -359,8 +360,8 @@ mod can_lex {
 	fn setup(source: &str) -> Data {
 		let mut data = Data::new(file!().to_string(), source.into());
 		data.DEBUG_show_tokens = true;
-		eval(&mut data);
-		data
+		eval(data)
+				.unwrap_or_else(|e| panic!("{e:?}"))
 	}
 
 	#[test]

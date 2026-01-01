@@ -44,6 +44,10 @@ pub enum Kind {
 	Value,
 
 	// Keywords
+	M68k,
+	SH2,
+	X64,
+	Z80,
 	Mark,
 	Free,
 	Let,
@@ -109,6 +113,7 @@ impl Kind {
 			Self::Bool => 4,
 			Self::Else => 4,
 			Self::Free => 4,
+			Self::M68k => 4,
 			Self::Main => 4,
 			Self::Mark => 4,
 			Self::Proc => 4,
@@ -119,8 +124,11 @@ impl Kind {
 			Self::Sub => 3,
 			Self::S16 => 3,
 			Self::S32 => 3,
+			Self::SH2 => 3,
 			Self::U16 => 3,
 			Self::U32 => 3,
+			Self::X64 => 3,
+			Self::Z80 => 3,
 
 			Self::Amp2 => 2,
 			Self::At => 2,

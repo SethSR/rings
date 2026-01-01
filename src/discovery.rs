@@ -5,7 +5,7 @@ use crate::identifier::{self, Id as IdentId, Identifier};
 use crate::task::Kind as TaskKind;
 use crate::token::{Id as TokenId, Kind as TokenKind};
 use crate::value::Kind as ValueKind;
-use crate::{Data, Span, Task, Type};
+use crate::{Data, Span, Target, Task, Type};
 
 pub type ValueMap = identifier::Map<Value>;
 pub type RegionMap = identifier::Map<Span<u32>>;
@@ -27,6 +27,7 @@ pub enum Value {
 pub struct ProcType {
 	pub params: Vec<Param>,
 	pub ret_type: Type,
+	pub target: Option<Target>,
 }
 
 #[cfg(feature="record")]
@@ -84,12 +85,10 @@ impl Table {
 	}
 }
 
-pub fn eval(data: &mut Data) {
-	let mut cursor = Cursor::default();
-	if let Err(e) = eval_loop(&mut cursor, data) {
-		data.errors.push(e.into_comp_error(data)
-			.with_kind(error::Kind::Discovery));
-	}
+pub fn eval(mut data: Data) -> Result<Data, error::Error> {
+	eval_loop(&mut Cursor::default(), &mut data)
+		.map_err(|e| e.into_comp_error(&data).with_kind(error::Kind::Discovery))
+		.map(|_| data)
 }
 
 type DiscResult<T> = Result<T, Error>;
@@ -98,27 +97,51 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
 	loop {
 		match cursor.current(data) {
 			TokenKind::Main => {
-				cursor.advance();
-				let tok_start = cursor.index();
-				check_braces(cursor, data)?;
-				data.task_queue.push_back(Task::new(TaskKind::Proc, "main".id(), tok_start));
-				data.procedures.insert("main".id(), ProcType { params: vec![], ret_type: Type::Unit });
+				let tok_start = discover_init_proc(cursor, data)?;
+				let name_id = "main".id();
+				data.task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				data.procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
 			}
 
 			TokenKind::Sub => {
-				cursor.advance();
-				let tok_start = cursor.index();
-				check_braces(cursor, data)?;
-				data.task_queue.push_back(Task::new(TaskKind::Proc, "sub".id(), tok_start));
-				data.procedures.insert("sub".id(), ProcType { params: vec![], ret_type: Type::Unit });
+				let tok_start = discover_init_proc(cursor, data)?;
+				let name_id = "sub".id();
+				data.task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				data.procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
 			}
 
 			TokenKind::Proc => {
-				cursor.advance();
-				let name_id = cursor.expect_identifier(data, "procedure name")?;
-				let (params, ret_type, tok_start) = discover_proc(cursor, data)?;
+				let (name_id, tok_start, params, ret_type) = discover_proc(cursor, data)?;
 				data.task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
-				data.procedures.insert(name_id, ProcType { params, ret_type });
+				data.procedures.insert(name_id, ProcType { params, ret_type, target: None });
+			}
+
+			TokenKind::M68k => {
+				cursor.advance();
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(cursor, data)?;
+				data.task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				data.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::M68k) });
+			}
+
+			TokenKind::SH2 => {
+				cursor.advance();
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(cursor, data)?;
+				data.task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				data.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::SH2) });
+			}
+
+			TokenKind::X64 => {
+				cursor.advance();
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(cursor, data)?;
+				data.task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				data.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::X86_64) });
+			}
+
+			TokenKind::Z80 => {
+				cursor.advance();
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(cursor, data)?;
+				data.task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				data.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::Z80) });
 			}
 
 			TokenKind::Region => {
@@ -176,7 +199,8 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
 	Ok(())
 }
 
-fn check_braces(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
+fn check_braces(cursor: &mut Cursor, data: &Data,
+) -> DiscResult<()> {
 	cursor.expect(data, TokenKind::OBrace)?;
 	let mut brace_count = 1;
 	while brace_count > 0 && cursor.current(data) != TokenKind::Eof {
@@ -194,8 +218,18 @@ fn check_braces(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
 	Ok(())
 }
 
-fn discover_proc(cursor: &mut Cursor, data: &mut Data,
-) -> DiscResult<(Vec<Param>, Type, TokenId)> {
+fn discover_init_proc(cursor: &mut Cursor, data: &Data,
+) -> DiscResult<TokenId> {
+	cursor.advance();
+	let tok_start = cursor.index();
+	check_braces(cursor, data)?;
+	Ok(tok_start)
+}
+
+fn discover_proc(cursor: &mut Cursor, data: &Data,
+) -> DiscResult<(IdentId, TokenId, Vec<Param>, Type)> {
+	cursor.expect(data, TokenKind::Proc)?;
+	let name_id = cursor.expect_identifier(data, "procedure name")?;
 	cursor.expect(data, TokenKind::OParen)?;
 	let params = discover_fields(cursor, data, TokenKind::CParen)?;
 	cursor.expect(data, TokenKind::CParen)?;
@@ -206,10 +240,23 @@ fn discover_proc(cursor: &mut Cursor, data: &mut Data,
 	};
 	let tok_start = cursor.index();
 	check_braces(cursor, data)?;
-	Ok((params, ret_type, tok_start))
+	Ok((name_id, tok_start, params, ret_type))
 }
 
-fn discover_fields(cursor: &mut Cursor, data: &mut Data,
+fn discover_target_proc(cursor: &mut Cursor, data: &Data,
+) -> DiscResult<(IdentId, TokenId, Vec<Param>, Type)> {
+	Ok(match cursor.current(data) {
+		TokenKind::Main => {
+			("main".id(), discover_init_proc(cursor, data)?, vec![], Type::Unit)
+		}
+		TokenKind::Sub => {
+			("sub".id(), discover_init_proc(cursor, data)?, vec![], Type::Unit)
+		}
+		_ => discover_proc(cursor, data)?,
+	})
+}
+
+fn discover_fields(cursor: &mut Cursor, data: &Data,
 	end_token: TokenKind,
 ) -> DiscResult<Vec<Param>> {
 	let mut fields = Vec::default();
@@ -226,7 +273,7 @@ fn discover_fields(cursor: &mut Cursor, data: &mut Data,
 	Ok(fields)
 }
 
-fn discover_region(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Span<u32>> {
+fn discover_region(cursor: &mut Cursor, data: &Data) -> DiscResult<Span<u32>> {
 	cursor.expect(data, TokenKind::OBracket)?;
 	let byte_count = cursor.expect_u32(data, "region size")?;
 	cursor.expect(data, TokenKind::CBracket)?;
@@ -287,15 +334,18 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Table> {
 
 #[cfg(test)]
 mod can_parse {
+	use crate::lexer;
 	use identifier::Identifier;
+	use crate::Type;
 
 	use super::*;
 
 	fn setup(source: &str) -> Data {
 		let mut data = Data::new(file!().to_string(), source.into());
 		data.DEBUG_show_tokens = true;
-		crate::lexer::eval(&mut data);
-		eval(&mut data);
+		let data = lexer::eval(data)
+			.and_then(eval)
+			.unwrap_or_else(|e| panic!("{e:?}"));
 		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
 		data
 	}
@@ -321,6 +371,7 @@ mod can_parse {
 		assert_eq!(data.procedures[&"b".id()], ProcType {
 			params: vec![],
 			ret_type: Type::Unit,
+			target: None,
 		});
 	}
 
@@ -340,6 +391,7 @@ mod can_parse {
 				("c".id(), Type::s8_top()),
 			],
 			ret_type: Type::Unit,
+			target: None,
 		});
 	}
 
@@ -356,6 +408,53 @@ mod can_parse {
 		assert_eq!(data.procedures[&"a".id()], ProcType {
 			params: vec![],
 			ret_type: Type::s8_top(),
+			target: None,
+		});
+	}
+
+	#[test]
+	fn procedure_with_target() {
+		let data = setup("sh2 proc a() {}");
+		assert_eq!(data.task_queue.len(), 1);
+		assert_eq!(data.task_queue[0], Task::new(
+			TaskKind::Proc,
+			"a".id(),
+			TokenId::new(5),
+		));
+		assert_eq!(data.procedures.len(), 1);
+		assert_eq!(data.procedures[&"a".id()], ProcType {
+			params: vec![],
+			ret_type: Type::Unit,
+			target: Some(Target::SH2),
+		});
+	}
+
+	#[test]
+	fn init_procedure_with_target() {
+		let data = setup("sh2 main {} z80 sub {}");
+		assert_eq!(data.task_queue.len(), 2);
+		assert_eq!(data.task_queue, [
+			Task::new(
+				TaskKind::Proc,
+				"main".id(),
+				TokenId::new(2),
+			),
+			Task::new(
+				TaskKind::Proc,
+				"sub".id(),
+				TokenId::new(6),
+			),
+		]);
+		assert_eq!(data.procedures.len(), 2);
+		assert_eq!(data.procedures[&"main".id()], ProcType {
+			params: vec![],
+			ret_type: Type::Unit,
+			target: Some(Target::SH2),
+		});
+		assert_eq!(data.procedures[&"sub".id()], ProcType {
+			params: vec![],
+			ret_type: Type::Unit,
+			target: Some(Target::Z80),
 		});
 	}
 
@@ -388,7 +487,7 @@ mod can_parse {
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data), 1);
 		assert_eq!(record.address, None);
-		assert_eq!(record.fields, [("b".id(), crate::Type::U8)]);
+		assert_eq!(record.fields, [("b".id(), Type::U8)]);
 	}
 
 	#[cfg(feature="record")]
@@ -399,7 +498,7 @@ mod can_parse {
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data), 1);
 		assert_eq!(record.address, None);
-		assert_eq!(record.fields, [("b".id(), crate::Type::U8)]);
+		assert_eq!(record.fields, [("b".id(), Type::U8)]);
 	}
 
 	#[cfg(feature="record")]
@@ -411,8 +510,8 @@ mod can_parse {
 		assert_eq!(record.size(&data), 3);
 		assert_eq!(record.address, None);
 		assert_eq!(record.fields, [
-			("b".id(), crate::Type::U8),
-			("c".id(), crate::Type::S16),
+			("b".id(), Type::U8),
+			("c".id(), Type::S16),
 		]);
 	}
 
@@ -425,7 +524,7 @@ mod can_parse {
 		assert_eq!(record.size(&data), 0);
 		assert_eq!(record.address, None);
 		assert_eq!(record.fields, [
-			("c".id(), crate::Type::Record("a".id())),
+			("c".id(), Type::Record("a".id())),
 		]);
 	}
 
@@ -459,7 +558,7 @@ mod can_parse {
 		assert_eq!(data.tables.len(), 1);
 		let table = &data.tables[&"a".id()];
 		assert_eq!(table.row_count, 10);
-		assert_eq!(table.column_spec, [("b".id(), crate::Type::U32)]);
+		assert_eq!(table.column_spec, [("b".id(), Type::U32)]);
 		assert_eq!(table.size(&data), 40);
 		assert_eq!(table.address, None);
 	}
@@ -472,8 +571,8 @@ mod can_parse {
 		let table = &data.tables[&"a".id()];
 		assert_eq!(table.row_count, 10);
 		assert_eq!(table.column_spec, [
-			("b".id(), crate::Type::U32),
-			("c".id(), crate::Type::S16),
+			("b".id(), Type::U32),
+			("c".id(), Type::S16),
 		]);
 		assert_eq!(table.size(&data), 60);
 		assert_eq!(table.address, None);
@@ -487,7 +586,7 @@ mod can_parse {
 		let table = &data.tables[&"b".id()];
 		assert_eq!(table.row_count, 10);
 		assert_eq!(table.column_spec, [
-			("b1".id(), crate::Type::Record("a".id())),
+			("b1".id(), Type::Record("a".id())),
 		]);
 		assert_eq!(table.size(&data), 20);
 		assert_eq!(table.address, None);
