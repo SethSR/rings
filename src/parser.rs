@@ -2,7 +2,7 @@
 use crate::ast::{Block as AstBlock, Id as AstId, Kind as AKind, PathSegment};
 use crate::cursor::{Cursor, Error};
 use crate::error;
-use crate::identifier::{Id as IdentId};
+use crate::identifier::Id as IdentId;
 use crate::operators::BinaryOp;
 use crate::task::{Kind as TaskKind, Task};
 use crate::token::{Id as TokenId, Kind as TKind, Kind};

@@ -153,6 +153,10 @@ pub enum Target {
 	Z80,
 }
 
+// TODO - srenshaw - Determine how to get 'signed/unsigned' info to assembly arithmetic/comparison ops, and type size info to assembly storage ops.
+
+// TODO - srenshaw - Lookup where to setup Data and Call Stack Regions on Saturn, MegaDrive, and x64 PC.
+
 // TODO - srenshaw - Need to add Table location calculations.
 
 #[allow(non_snake_case)]

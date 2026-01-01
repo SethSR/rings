@@ -1,5 +1,5 @@
 
-use crate::ast::{Block as ABlock, Id as AstId, Kind};
+use crate::ast::{Block as AstBlock, Id as AstId, Kind};
 use crate::error;
 use crate::identifier::Id as IdentId;
 use crate::operators::{BinaryOp, UnaryOp};
@@ -399,7 +399,7 @@ impl Section {
 		iter_vars: &[IdentId],
 		table_id: &Option<IdentId>,
 		bounds: &Option<Bounds>,
-		body_block: &ABlock,
+		body_block: &AstBlock,
 	) -> Result<(), Error> {
 		// Simple case: for i in 0..N
 		if iter_vars.len() == 1 && table_id.is_none() {
@@ -534,7 +534,7 @@ impl Error {
 		};
 
 		crate::Error::new(location, message)
-				.with_kind(error::Kind::LoweringTAC)
+			.with_kind(error::Kind::LoweringTAC)
 	}
 }
 
@@ -547,7 +547,10 @@ mod tests {
 	use super::*;
 
 	fn setup(source: &str) -> Data {
-		let mut data = Data::new("lowering".into(), source.into());
+		let mut source_str = String::new();
+		source_str.push_str("region Stack[0] @ 0;");
+		source_str.push_str(source);
+		let mut data = Data::new("lowering".into(), source_str.into());
 		lexer::eval(&mut data);
 		discovery::eval(&mut data);
 		parser::eval(&mut data);
@@ -559,10 +562,11 @@ mod tests {
 
 	#[test]
 	fn return_void() {
-		let data = setup("proc a() {
+		let data = setup("main {}
+		proc a() {
 			return;
 		}");
-		assert_eq!(data.proc_db.len(), 1);
+		assert_eq!(data.proc_db.len(), 2);
 		let section = data.proc_db[&"a".id()].tac_data
 			.as_ref()
 			.expect("existing tac-data");
@@ -573,10 +577,11 @@ mod tests {
 
 	#[test]
 	fn return_expression() {
-		let data = setup("proc a() -> s8 {
+		let data = setup("main {}
+		proc a() -> s8 {
 			return 100 - 200;
 		}");
-		assert_eq!(data.proc_db.len(), 1);
+		assert_eq!(data.proc_db.len(), 2);
 		let section = data.proc_db[&"a".id()].tac_data
 			.as_ref()
 			.expect("existing tac-data");
@@ -590,7 +595,8 @@ mod tests {
 
 	#[test]
 	fn proc_if() {
-		let data = setup("proc a() -> s8 {
+		let data = setup("main {}
+		proc a() -> s8 {
 			let b: s8 = 5;
 			let c: s8 = 3;
 			if b < 10 {
@@ -634,7 +640,8 @@ mod tests {
 
 	#[test]
 	fn proc_while() {
-		let data = setup("proc a() {
+		let data = setup("main {}
+		proc a() {
 			let b: s8 = 5;
 			while b > 0 {
 				b -= 1;

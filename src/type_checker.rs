@@ -3,9 +3,10 @@ use std::collections::hash_map::Entry;
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
 use crate::error;
-use crate::identifier::{Id as IdentId};
+use crate::identifier::{Id as IdentId, Identifier};
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::rings_type::Meet;
+use crate::token::Id as TokenId;
 use crate::{Data, ProcData, Type};
 
 enum Error {
@@ -56,6 +57,42 @@ impl Error {
 }
 
 pub fn eval(data: &mut Data) {
+	// Check for 'main' procedure
+	if !data.proc_db.contains_key(&"main".id()) {
+		let err = error::error(data, "missing 'main' procedure", TokenId::default());
+		data.errors.push(err.with_kind(error::Kind::Checker));
+	}
+
+	// Check for stack regions
+	let has_call_stack = data.regions.contains_key(&"CallStack".id());
+	let has_data_stack = data.regions.contains_key(&"DataStack".id());
+	if let Some(stack_src_loc) = data.regions.get(&"Stack".id()) {
+		// call and data stack are combined, reject explicitly named regions
+		if has_call_stack || has_data_stack {
+			let err = error::error(data,
+				"Combined Call/Data stack already defined",
+				(stack_src_loc.start as usize).into(),
+			);
+			data.errors.push(err.with_kind(error::Kind::Checker));
+		}
+	} else {
+		// no combined stack region, call and data stack are required
+		if !has_call_stack {
+			let err = error::error(data,
+				"No combined Call/Data stack defined, declare a dedicated 'CallStack' region.",
+				TokenId::default(),
+			);
+			data.errors.push(err.with_kind(error::Kind::Checker));
+		} else if !has_data_stack {
+			let err = error::error(data,
+				"No combined Call/Data stack defined, declare a dedicated 'DataStack' region.",
+				TokenId::default(),
+			);
+			data.errors.push(err.with_kind(error::Kind::Checker));
+		}
+	}
+
+	// Check procedures
 	let completed_procs = data.proc_db.clone();
 	for (proc_id, mut proc_data) in completed_procs {
 		let proc_type = &data.procedures[&proc_id];
