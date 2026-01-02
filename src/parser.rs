@@ -4,7 +4,7 @@ use crate::cursor::{Cursor, Error};
 use crate::error;
 use crate::identifier::Id as IdentId;
 use crate::operators::BinaryOp;
-use crate::task::{Kind as TaskKind, Task};
+use crate::task::Kind as TaskKind;
 use crate::token::{Id as TokenId, Kind as TKind, Kind};
 use crate::{Bounds, Data, ProcData};
 use crate::discovery::Value;

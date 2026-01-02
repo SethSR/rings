@@ -67,8 +67,6 @@ pub enum Target {
 	Z80,
 }
 
-// TODO - srenshaw - Maybe we should just directly convert errors to String output, until we add multi-error support?
-
 // TODO - srenshaw - We need to validate 'targets' for their respective consoles.
 
 // TODO - srenshaw - Determine how to get 'signed/unsigned' info to assembly arithmetic/comparison ops, and type size info to assembly storage ops.

@@ -20,6 +20,7 @@ enum Error {
 	MissingLoopBounds,
 	// Compiler Errors
 	NoType { msg: &'static str, ast_id: AstId },
+	MissingAstNode(IdentId, AstId),
 }
 
 impl Error {
@@ -51,6 +52,9 @@ impl Error {
 			}
 			Self::NoType { msg, ast_id } => {
 				format!("{msg} has no type: {ast_id:?}")
+			}
+			Self::MissingAstNode(proc_id, ast_id) => {
+				format!("{} not found in procedure '{}'", ast_id, db.text(&proc_id))
 			}
 		}
 	}
@@ -135,7 +139,7 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 		let range = proc_data.ast_pos_tok[proc_start].clone();
 
 		let ret_type = proc_type.ret_type;
-		if let Err(err) = check_stmt(&mut proc_data, proc_start, ret_type) {
+		if let Err(err) = check_stmt(&mut proc_data, proc_id, proc_start, ret_type) {
 			let err = error::error(&data, &err.to_string(&data), range.start)
 				.with_kind(error::Kind::Checker)
 				.display(&data.source_file, &data.source, &data.line_pos);
@@ -149,7 +153,7 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 }
 
 fn check_stmt(proc_data: &mut ProcData,
-	ast_id: AstId, ret_type: Type,
+	proc_id: IdentId, ast_id: AstId, ret_type: Type,
 ) -> Result<(), Error> {
 	match proc_data.ast_nodes[ast_id].clone() {
 		Kind::Int(_) => {
@@ -173,15 +177,15 @@ fn check_stmt(proc_data: &mut ProcData,
 
 		Kind::Assign(lvalue_id, expr_id) => {
 			if proc_data.ast_nodes.get(expr_id).is_none() {
-				todo!("expression with no ast node: {expr_id:?}")
+				return Err(Error::MissingAstNode(proc_id, expr_id));
 			}
-			check_stmt(proc_data, lvalue_id, ret_type)?;
-			check_stmt(proc_data, expr_id, ret_type)?;
+			check_stmt(proc_data, proc_id, lvalue_id, ret_type)?;
+			check_stmt(proc_data, proc_id, expr_id, ret_type)?;
 			check_assign(proc_data, lvalue_id, expr_id)
 		}
 
 		Kind::BinOp(op, left, right) => {
-			check_binop(proc_data, ast_id, op, &left, &right, ret_type)
+			check_binop(proc_data, proc_id, ast_id, op, &left, &right, ret_type)
 		}
 
 		Kind::UnOp(op, right) => {
@@ -189,20 +193,20 @@ fn check_stmt(proc_data: &mut ProcData,
 		}
 
 		Kind::Return(expr_id) => {
-			check_return(proc_data, expr_id, ret_type)
+			check_return(proc_data, proc_id, expr_id, ret_type)
 		}
 
 		Kind::Block(block) => {
-			check_block(proc_data, &block, ret_type)
+			check_block(proc_data, proc_id, &block, ret_type)
 		}
 
 		Kind::If(cond_id, then_block, else_block) => {
-			check_if(proc_data, cond_id, &then_block, &else_block, ret_type)
+			check_if(proc_data, proc_id, cond_id, &then_block, &else_block, ret_type)
 		}
 
 		Kind::While(cond_id, block) => {
-			check_condition(proc_data, cond_id, ret_type)?;
-			check_block(proc_data, &block, ret_type)
+			check_condition(proc_data, proc_id, cond_id, ret_type)?;
+			check_block(proc_data, proc_id, &block, ret_type)
 		}
 
 		Kind::For(_vars, Some(_), _, _) => { todo!() }
@@ -254,7 +258,7 @@ fn check_stmt(proc_data: &mut ProcData,
 					return Err(Error::MissingLoopBounds);
 				}
 			}
-			check_block(proc_data, &block, ret_type)
+			check_block(proc_data, proc_id, &block, ret_type)
 		}
 
 		Kind::For(vars, None, None, block) => {
@@ -341,11 +345,11 @@ fn check_assign(proc_data: &ProcData,
 }
 
 fn check_binop(proc_data: &mut ProcData,
-	ast_id: AstId,
+	proc_id: IdentId, ast_id: AstId,
 	op: BinaryOp, left_id: &AstId, right_id: &AstId, proc_type: Type,
 ) -> Result<(), Error> {
-	check_stmt(proc_data, *left_id, proc_type)?;
-	check_stmt(proc_data, *right_id, proc_type)?;
+	check_stmt(proc_data, proc_id, *left_id, proc_type)?;
+	check_stmt(proc_data, proc_id, *right_id, proc_type)?;
 	match op {
 		BinaryOp::Add |
 		BinaryOp::Sub |
@@ -398,11 +402,11 @@ fn check_unop(proc_data: &mut ProcData,
 }
 
 fn check_return(proc_data: &mut ProcData,
-	ast_id: Option<AstId>, proc_type: Type,
+	proc_id: IdentId, ast_id: Option<AstId>, proc_type: Type,
 ) -> Result<(), Error> {
 	let ret_type = match ast_id {
 		Some(ast_id) => {
-			check_stmt(proc_data, ast_id, proc_type)?;
+			check_stmt(proc_data, proc_id, ast_id, proc_type)?;
 			match proc_data.ast_to_type.get(&ast_id) {
 				Some(ret_type) => *ret_type,
 				None => return Err(Error::NoType { msg: "return expression", ast_id }),
@@ -419,18 +423,18 @@ fn check_return(proc_data: &mut ProcData,
 }
 
 fn check_block(proc_data: &mut ProcData,
-	block: &AstBlock, proc_type: Type,
+	proc_id: IdentId, block: &AstBlock, proc_type: Type,
 ) -> Result<(), Error> {
 	for stmt_id in &block.0 {
-		check_stmt(proc_data, *stmt_id, proc_type)?;
+		check_stmt(proc_data, proc_id, *stmt_id, proc_type)?;
 	}
 	Ok(())
 }
 
 fn check_condition(proc_data: &mut ProcData,
-	cond_id: AstId, proc_type: Type,
+	proc_id: IdentId, cond_id: AstId, proc_type: Type,
 ) -> Result<(), Error> {
-	check_stmt(proc_data, cond_id, proc_type)?;
+	check_stmt(proc_data, proc_id, cond_id, proc_type)?;
 	let cond_type = proc_data.ast_to_type[&cond_id];
 	if cond_type.meet(&Type::s8_top()) == Type::Bot
 	//&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
@@ -441,10 +445,12 @@ fn check_condition(proc_data: &mut ProcData,
 }
 
 fn check_if(proc_data: &mut ProcData,
-	cond_id: AstId, then_block: &AstBlock, else_block: &AstBlock, proc_type: Type,
+	proc_id: IdentId,
+	cond_id: AstId, then_block: &AstBlock, else_block: &AstBlock,
+	proc_type: Type,
 ) -> Result<(), Error> {
-	check_condition(proc_data, cond_id, proc_type)?;
-	check_block(proc_data, then_block, proc_type)?;
-	check_block(proc_data, else_block, proc_type)
+	check_condition(proc_data, proc_id, cond_id, proc_type)?;
+	check_block(proc_data, proc_id, then_block, proc_type)?;
+	check_block(proc_data, proc_id, else_block, proc_type)
 }
 
