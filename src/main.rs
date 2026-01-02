@@ -94,7 +94,6 @@ pub struct Data {
 	procedures: discovery::ProcMap,
 	values: discovery::ValueMap,
 	regions: discovery::RegionMap,
-	#[cfg(feature="record")]
 	records: discovery::RecordMap,
 	#[cfg(feature="table")]
 	tables: discovery::TableMap,
@@ -288,36 +287,34 @@ impl Data {
 
 	fn type_text(&self, ring_type: &Type) -> String {
 		match ring_type {
-			#[cfg(feature="record")]
-			Type::Record(ident_id) => self.text(&ident_id).to_string(),
+			Type::Record(ident_id) => self.text(ident_id).to_string(),
 			#[cfg(feature="table")]
 			Type::Table(ident_id) => self.text(&ident_id).to_string(),
 			_ => format!("{ring_type:?}"),
 		}
 	}
 
-	#[cfg(all(feature="record", feature="table"))]
 	fn type_size(&self, ring_type: &Type) -> u32 {
 		match ring_type {
-			#[cfg(feature="ready")]
+			#[cfg(feature="types")]
 			Type::Bool => 1,
-			#[cfg(feature="ready")]
+			#[cfg(feature="types")]
 			Type::U8 => 1,
 			Type::S8(_) => 1,
-			#[cfg(feature="ready")]
+			#[cfg(feature="types")]
 			Type::U16 => 2,
-			#[cfg(feature="ready")]
+			#[cfg(feature="types")]
 			Type::S16 => 2,
-			#[cfg(feature="ready")]
+			#[cfg(feature="types")]
 			Type::U32 => 4,
-			#[cfg(feature="ready")]
+			#[cfg(feature="types")]
 			Type::S32 => 4,
-			#[cfg(feature="ready")]
-			Type::Record(ident_id) => self.records[&ident_id].size(self),
-			#[cfg(feature="ready")]
+			Type::Record(ident_id) => self.records[ident_id].size(self),
+			#[cfg(feature="table")]
 			Type::Table(ident_id) => self.tables[&ident_id].size(self),
 			Type::Unit => 0,
 			Type::Top | Type::Bot => 0,
+			Type::Int => 0,
 		}
 	}
 }
@@ -327,7 +324,6 @@ impl fmt::Display for Data {
 		writeln!(f, "=== Rings Compiler ===")?;
 		writeln!(f)?;
 
-		#[cfg(any(feature="record", feature="table"))]
 		fn fields_to_str(data: &Data, fields: &[(identifier::Id, Type)]) -> String {
 			fields.iter()
 				.map(|(field_id, field_type)| {
@@ -368,28 +364,24 @@ impl fmt::Display for Data {
 		writeln!(f, "{:-<16} | {:-<9} | {:-<9}", "", "", "")?;
 		for (ident_id, data) in self.regions.iter() {
 			let name = self.text(ident_id);
-			let address = data.start;
-			let size = fmt_size((data.end - data.start) as usize);
+			let address = data.span.start;
+			let size = fmt_size((data.span.end - data.span.start) as usize);
 			writeln!(f, "{name:<16} | #{address:0>8X} | {size:<8}")?;
 		}
 		writeln!(f)?;
 
-		#[cfg(feature="record")]
 		writeln!(f, "{:<16} | {:<8} | {:<9} | FIELDS",
 			"RECORD", "SIZE", "ADDRESS")?;
-		#[cfg(feature="record")]
 		writeln!(f, "{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "")?;
-		#[cfg(feature="record")]
 		for (ident_id, record) in self.records.iter() {
 			let name = self.text(ident_id);
 			let size = record.size(self);
-			let address = record.address
-				.map(|num| format!("#{num:0>8X}"))
+			let address = record.region
+				.map(|id| format!("#{:0>8X}", self.regions[&id].span.start))
 				.unwrap_or("-".to_string());
 			let field_str = fields_to_str(self, &record.fields);
 			writeln!(f, "{name:<16} | {size:<8} | {address:9} | {field_str}")?;
 		}
-		#[cfg(feature="record")]
 		writeln!(f)?;
 
 		#[cfg(feature="table")]

@@ -8,9 +8,8 @@ use crate::value::Kind as ValueKind;
 use crate::{Data, Span, Target, Task, Type};
 
 pub type ValueMap = identifier::Map<Value>;
-pub type RegionMap = identifier::Map<Span<u32>>;
+pub type RegionMap = identifier::Map<Region>;
 pub type ProcMap = identifier::Map<ProcType>;
-#[cfg(feature="record")]
 pub type RecordMap = identifier::Map<Record>;
 #[cfg(feature="table")]
 pub type TableMap = identifier::Map<Table>;
@@ -23,6 +22,12 @@ pub enum Value {
 	Decimal(f64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Region {
+	pub span: Span<u32>,
+	pub alloc_position: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcType {
 	pub params: Vec<Param>,
@@ -30,14 +35,12 @@ pub struct ProcType {
 	pub target: Option<Target>,
 }
 
-#[cfg(feature="record")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
 	pub fields: Vec<Param>,
-	pub address: Option<u32>,
+	pub region: Option<IdentId>,
 }
 
-#[cfg(feature="record")]
 impl Record {
 	pub fn size(&self, db: &Data) -> u32 {
 		self.fields.iter()
@@ -153,7 +156,6 @@ fn eval_loop(cursor: &mut Cursor, data: &mut Data) -> DiscResult<()> {
 				data.regions.insert(name_id, region);
 			}
 
-			#[cfg(feature="record")]
 			TokenKind::Record => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(data, "record name")?;
@@ -275,47 +277,43 @@ fn discover_fields(cursor: &mut Cursor, data: &Data,
 	Ok(fields)
 }
 
-fn discover_region(cursor: &mut Cursor, data: &Data) -> DiscResult<Span<u32>> {
+fn discover_region(cursor: &mut Cursor, data: &Data) -> DiscResult<Region> {
 	cursor.expect(data, TokenKind::OBracket)?;
 	let byte_count = cursor.expect_u32(data, "region size")?;
 	cursor.expect(data, TokenKind::CBracket)?;
 	cursor.expect(data, TokenKind::At)?;
 	let address = cursor.expect_u32(data, "region address")?;
 	cursor.expect(data, TokenKind::Semicolon)?;
-	Ok(Span { start: address, end: address + byte_count })
+	Ok(Region {
+		span: Span { start: address, end: address + byte_count },
+		alloc_position: 0,
+	})
 }
 
-#[cfg(feature="record")]
-fn discover_address(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Option<u32>> {
+/// Check after an '@' for a defined region or an address location
+fn discover_address(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Option<IdentId>> {
 	if cursor.expect(data, TokenKind::At).is_ok() {
-		if let Ok(num) = cursor.expect_u32(data, "record address") {
-			for (id, region) in &data.regions {
-				let addr_start = region.address;
-				let addr_end = addr_start + region.byte_count;
-				if (addr_start..addr_end).contains(&num) {
-					return Err(error::error(data,
-						&format!("Address '{num}' overlaps with region {}", data.text(id)),
-						cursor.index()))
-				}
+		if let Ok(id) = cursor.expect_identifier(data, "region name") {
+			if data.regions.contains_key(&id) {
+				return Ok(Some(id));
 			}
-			Ok(Some(num))
-		} else if let Ok(id) = cursor.expect_identifier(data, "region name") {
-			Ok(Some(data.regions[&id].address))
-		} else {
-			Err(error::error(data, "address or region ID", cursor.index()))
 		}
+
+		Err(Error::ExpectedToken {
+			expected: "address or region ID".to_string(),
+			found: cursor.index(),
+		})
 	} else {
 		Ok(None)
 	}
 }
 
-#[cfg(feature="record")]
 fn discover_record(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Record> {
-	let address = discover_address(cursor, data)?;
+	let region = discover_address(cursor, data)?;
 	cursor.expect(data, TokenKind::OBrace)?;
 	let fields = discover_fields(cursor, data, TokenKind::CBrace)?;
 	cursor.expect(data, TokenKind::CBrace)?;
-	Ok(Record { address, fields })
+	Ok(Record { region, fields })
 }
 
 #[cfg(feature="table")]
@@ -462,80 +460,82 @@ mod can_parse {
 	fn region() {
 		let data = setup("region a[1024] @ 0x0020_0000;");
 		assert_eq!(data.regions.len(), 1);
-		assert_eq!(data.regions[&"a".id()], Span {
-			start: 0x20_0000,
-			end:   0x20_0400,
+		assert_eq!(data.regions[&"a".id()], Region {
+			span: (0x20_0000..0x20_0400).into(),
+			alloc_position: 0,
 		});
 	}
 
-	#[cfg(feature="record")]
 	#[test]
 	fn empty_record() {
 		let data = setup("record a {}");
 		assert_eq!(data.records.len(), 1);
-		assert_eq!(data.records[&"a".id()], Record {
-			address: None,
-			fields: vec![],
-		});
+		let record = &data.records[&"a".id()];
+		assert_eq!(record.size(&data), 0);
+		assert_eq!(record.region, None);
+		assert_eq!(record.fields.len(), 0);
 	}
 
-	#[cfg(feature="record")]
 	#[test]
 	fn record_with_one_field_no_trailing_comma() {
-		let data = setup("record a { b: u8 }");
+		let data = setup("record a { b: s8 }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data), 1);
-		assert_eq!(record.address, None);
-		assert_eq!(record.fields, [("b".id(), Type::U8)]);
+		assert_eq!(record.region, None);
+		assert_eq!(record.fields, [("b".id(), Type::s8_top())]);
 	}
 
-	#[cfg(feature="record")]
 	#[test]
 	fn record_with_one_field_and_trailing_comma() {
-		let data = setup("record a { b: u8, }");
+		let data = setup("record a { b: s8, }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data), 1);
-		assert_eq!(record.address, None);
-		assert_eq!(record.fields, [("b".id(), Type::U8)]);
+		assert_eq!(record.region, None);
+		assert_eq!(record.fields, [("b".id(), Type::s8_top())]);
 	}
 
-	#[cfg(feature="record")]
 	#[test]
 	fn record_with_multiple_fields() {
-		let data = setup("record a { b: u8, c: s16 }");
+		let data = setup("record a { b: s8, c: s8 }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data), 3);
-		assert_eq!(record.address, None);
+		assert_eq!(record.region, None);
 		assert_eq!(record.fields, [
-			("b".id(), Type::U8),
-			("c".id(), Type::S16),
+			("b".id(), Type::s8_top()),
+			("c".id(), Type::s8_top()),
 		]);
 	}
 
-	#[cfg(feature="record")]
 	#[test]
 	fn record_with_user_defined_field() {
 		let data = setup("record a {} record b { c: a }");
 		assert_eq!(data.records.len(), 2);
 		let record = &data.records[&"b".id()];
 		assert_eq!(record.size(&data), 0);
-		assert_eq!(record.address, None);
+		assert_eq!(record.region, None);
 		assert_eq!(record.fields, [
 			("c".id(), Type::Record("a".id())),
 		]);
 	}
 
-	#[cfg(feature="record")]
 	#[test]
-	fn record_with_address() {
-		let data = setup("record a @ 32 {}");
+	fn record_with_region() {
+		let data = setup("
+			region b[8] @ 32;
+			record a @ b {}
+		");
+		assert_eq!(data.regions.len(), 1);
+		assert_eq!(data.regions[&"b".id()], Region {
+			span: (32..40).into(),
+			alloc_position: 0,
+		});
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data), 0);
-		assert_eq!(record.address, Some(32));
+		assert_eq!(record.region, Some("b".id()));
 		assert!(record.fields.is_empty());
 	}
 

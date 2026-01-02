@@ -2,6 +2,7 @@
 use std::collections::hash_map::Entry;
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
+use crate::discovery::Region;
 use crate::error;
 use crate::identifier::{Id as IdentId, Identifier};
 use crate::operators::{BinaryOp, UnaryOp};
@@ -76,7 +77,7 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 		if has_call_stack || has_data_stack {
 			let err = error::error(&data,
 				"Combined Call/Data stack already defined",
-				(stack_src_loc.start as usize).into(),
+				(stack_src_loc.span.start as usize).into(),
 			);
 			return Err(err.with_kind(error::Kind::Checker)
 				.display(&data.source_file, &data.source, &data.line_pos));
@@ -101,14 +102,14 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 	}
 
 	// Check for region overlap
-	let mut regions: Vec<(&IdentId, &crate::Span<u32>)> = Vec::with_capacity(data.regions.len());
+	let mut regions: Vec<(&IdentId, &Region)> = Vec::with_capacity(data.regions.len());
 	regions.extend(data.regions.iter());
 
 	for i in 0..regions.len() {
 		for j in i+1..regions.len() {
 			let (i_name, i_span) = regions[i];
 			let (j_name, j_span) = regions[j];
-			if !(i_span.start >= j_span.end || i_span.end <= j_span.start) {
+			if !(i_span.span.start >= j_span.span.end || i_span.span.end <= j_span.span.start) {
 				let i_src_loc = data.identifiers[i_name];
 				let j_src_loc = data.identifiers[j_name];
 				let i_text = data.text(i_name);
@@ -125,6 +126,9 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 			}
 		}
 	}
+
+	// Check Record placement
+	// TODO - srenshaw - Ensure records fit within their respective regions.
 
 	// Check procedures
 	let completed_procs = data.proc_db.clone();

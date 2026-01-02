@@ -1,4 +1,6 @@
 
+use crate::identifier::Id as IdentId;
+
 pub trait Meet {
 	fn meet(&self, rhs: &Self) -> Self;
 }
@@ -19,7 +21,9 @@ pub enum Type {
 	Int,
 
 	// Language Types
+	Record(IdentId),
 	S8(Lattice<i8>),
+	// TODO - srenshaw - Add S32 type
 	Unit,
 }
 
@@ -43,6 +47,7 @@ impl std::fmt::Display for Type {
 			Self::Top => write!(f, "top"),
 			Self::Bot => write!(f, "bot"),
 			Self::Int => write!(f, "int"),
+			Self::Record(_) => write!(f, "rec"),
 			Self::S8(_) => write!(f, "s8"),
 			Self::Unit => write!(f, "unit"),
 		}
