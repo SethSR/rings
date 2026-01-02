@@ -8,6 +8,7 @@ use crate::token::Kind;
 pub enum Error {
 	ExpectedToken { expected: String, found: token::Id },
 	Expected { span: Span<usize>, expected: String, found: String },
+	UnresolvedType { span: Span<usize>, msg: String },
 }
 
 impl Error {
@@ -24,6 +25,9 @@ impl Error {
 			}
 			Self::Expected { span, expected, found } => {
 				crate::Error::new(span, format!("Expected {expected}, found {found}"))
+			}
+			Self::UnresolvedType { span, msg } => {
+				crate::Error::new(span, msg)
 			}
 		}
 	}

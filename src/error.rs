@@ -74,16 +74,16 @@ impl Error {
 		});
 	}
 
-	#[cfg(feature="notes")]
 	pub fn with_note_at(
-		&mut self,
-		location: Span,
+		mut self,
+		location: Span<usize>,
 		message: impl Into<String>,
-	) {
+	) -> Self {
 		self.notes.push(Note {
 			location: Some(location),
 			message: message.into(),
 		});
+		self
 	}
 
 	pub fn display(&self, source_file: &str, source: &str, pos_list: &PosList) -> String {

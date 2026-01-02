@@ -67,6 +67,8 @@ pub enum Target {
 	Z80,
 }
 
+// TODO - srenshaw - Maybe we should just directly convert errors to String output, until we add multi-error support?
+
 // TODO - srenshaw - We need to validate 'targets' for their respective consoles.
 
 // TODO - srenshaw - Determine how to get 'signed/unsigned' info to assembly arithmetic/comparison ops, and type size info to assembly storage ops.
@@ -84,7 +86,6 @@ pub struct Data {
 	source: Box<str>,
 	// stores the position of each newline (\n) character in the source
 	line_pos: token::PosList,
-	errors: Vec<Error>,
 
 	/* Lexer */
 	tok_list: token::KindList,
@@ -321,13 +322,6 @@ impl Data {
 			Type::Top | Type::Bot => 0,
 		}
 	}
-
-	fn errors_to_string(&self) -> String {
-		format!("{}", self.errors.iter()
-			.map(|e| e.display(&self.source_file, &self.source, &self.line_pos))
-			.collect::<Vec<_>>()
-			.join("\n\n"))
-	}
 }
 
 impl fmt::Display for Data {
@@ -514,10 +508,6 @@ impl fmt::Display for Data {
 					writeln!(f)?;
 				}
 			}
-		}
-
-		if !self.errors.is_empty() {
-			writeln!(f, "{}", self.errors_to_string())?;
 		}
 
 		Ok(())

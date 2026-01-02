@@ -17,10 +17,8 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 		match lexer.next(&mut data) {
 			Ok(true) => {}
 			Ok(false) => return Ok(data), // all done!
-			Err(e) => {
-				data.errors.push(e.with_kind(error::Kind::Lexer));
-				return Err(data.errors_to_string());
-			}
+			Err(e) => return Err(e.with_kind(error::Kind::Lexer)
+				.display(&data.source_file, &data.source, &data.line_pos)),
 		}
 
 		lexer.skip_whitespace_and_comments(&mut data);

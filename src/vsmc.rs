@@ -16,11 +16,9 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 			Ok(_) => {
 				proc_data.tac_data = Some(section);
 			}
-			Err(e) => {
-				data.errors.push(e.into_comp_error(&data)
-						.with_kind(error::Kind::LoweringVSMC));
-				return Err(data.errors_to_string());
-			}
+			Err(e) => return Err(e.into_comp_error(&data)
+				.with_kind(error::Kind::LoweringVSMC)
+				.display(&data.source_file, &data.source, &data.line_pos)),
 		}
 	}
 
@@ -554,15 +552,12 @@ mod tests {
 		source_str.push_str("region Stack[0] @ 0;");
 		source_str.push_str(source);
 
-		let data = lexer::eval(Data::new("lowering".into(), source_str.into()))
+		lexer::eval(Data::new("lowering".into(), source_str.into()))
 			.and_then(discovery::eval)
 			.and_then(parser::eval)
 			.and_then(type_checker::eval)
 			.and_then(eval)
-			.unwrap_or_else(|msg| panic!("{msg}"));
-
-		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
-		data
+			.unwrap_or_else(|msg| panic!("{msg}"))
 	}
 
 	#[test]

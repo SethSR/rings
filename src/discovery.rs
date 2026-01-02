@@ -87,10 +87,9 @@ impl Table {
 
 pub fn eval(mut data: Data) -> Result<Data, String> {
 	eval_loop(&mut Cursor::default(), &mut data)
-		.map_err(|e| {
-			data.errors.push(e.into_comp_error(&data).with_kind(error::Kind::Discovery));
-			data.errors_to_string()
-		})
+		.map_err(|e| e.into_comp_error(&data)
+			.with_kind(error::Kind::Discovery)
+			.display(&data.source_file, &data.source, &data.line_pos))
 		.map(|_| data)
 }
 
@@ -346,11 +345,9 @@ mod can_parse {
 	fn setup(source: &str) -> Data {
 		let mut data = Data::new(file!().to_string(), source.into());
 		data.DEBUG_show_tokens = true;
-		let data = lexer::eval(data)
+		lexer::eval(data)
 			.and_then(eval)
-			.unwrap_or_else(|msg| panic!("{msg}"));
-		assert!(data.errors.is_empty(), "{}", data.errors_to_string());
-		data
+			.unwrap_or_else(|msg| panic!("{msg}"))
 	}
 
 	#[test]

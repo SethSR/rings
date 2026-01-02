@@ -60,7 +60,8 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 	// Check for 'main' procedure
 	if !data.proc_db.contains_key(&"main".id()) {
 		let err = error::error(&data, "missing 'main' procedure", TokenId::default());
-		data.errors.push(err.with_kind(error::Kind::Checker));
+		return Err(err.with_kind(error::Kind::Checker)
+			.display(&data.source_file, &data.source, &data.line_pos));
 	}
 
 	// Check for stack regions
@@ -73,7 +74,8 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 				"Combined Call/Data stack already defined",
 				(stack_src_loc.start as usize).into(),
 			);
-			data.errors.push(err.with_kind(error::Kind::Checker));
+			return Err(err.with_kind(error::Kind::Checker)
+				.display(&data.source_file, &data.source, &data.line_pos));
 		}
 	} else {
 		// no combined stack region, call and data stack are required
@@ -82,13 +84,41 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 				"No combined Call/Data stack defined, declare a dedicated 'CallStack' region.",
 				TokenId::default(),
 			);
-			data.errors.push(err.with_kind(error::Kind::Checker));
+			return Err(err.with_kind(error::Kind::Checker)
+				.display(&data.source_file, &data.source, &data.line_pos));
 		} else if !has_data_stack {
 			let err = error::error(&data,
 				"No combined Call/Data stack defined, declare a dedicated 'DataStack' region.",
 				TokenId::default(),
 			);
-			data.errors.push(err.with_kind(error::Kind::Checker));
+			return Err(err.with_kind(error::Kind::Checker)
+				.display(&data.source_file, &data.source, &data.line_pos));
+		}
+	}
+
+	// Check for region overlap
+	let mut regions: Vec<(&IdentId, &crate::Span<u32>)> = Vec::with_capacity(data.regions.len());
+	regions.extend(data.regions.iter());
+
+	for i in 0..regions.len() {
+		for j in i+1..regions.len() {
+			let (i_name, i_span) = regions[i];
+			let (j_name, j_span) = regions[j];
+			if !(i_span.start >= j_span.end || i_span.end <= j_span.start) {
+				let i_src_loc = data.identifiers[i_name];
+				let j_src_loc = data.identifiers[j_name];
+				let i_text = data.text(i_name);
+				let j_text = data.text(j_name);
+				let msg = format!("regions {i_text} and {j_text} overlap");
+				let i_msg = format!("{i_text} has a memory range of {i_span:?}");
+				let j_msg = format!("{j_text} has a memory range of {j_span:?}");
+				let err = error::Error::new(i_src_loc, msg)
+					.with_note_at(i_src_loc, &i_msg)
+					.with_note_at(j_src_loc, &j_msg)
+					.with_kind(error::Kind::Checker)
+					.display(&data.source_file, &data.source, &data.line_pos);
+				return Err(err);
+			}
 		}
 	}
 
@@ -107,14 +137,14 @@ pub fn eval(mut data: Data) -> Result<Data, String> {
 		let ret_type = proc_type.ret_type;
 		if let Err(err) = check_stmt(&mut proc_data, proc_start, ret_type) {
 			let err = error::error(&data, &err.to_string(&data), range.start)
-				.with_kind(error::Kind::Checker);
-			data.errors.push(err);
-			return Err(data.errors_to_string());
+				.with_kind(error::Kind::Checker)
+				.display(&data.source_file, &data.source, &data.line_pos);
+			return Err(err);
 		}
 		data.proc_db.entry(proc_id)
 			.and_modify(|data| *data = proc_data);
 	}
-	
+
 	Ok(data)
 }
 
