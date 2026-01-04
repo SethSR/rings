@@ -63,13 +63,13 @@ impl Error {
 }
 
 pub fn eval(
-	proc_db: &mut IdentMap<ProcData>,
-	regions: &RegionMap,
 	source: &str,
 	identifiers: &IdentMap<Span<SrcPos>>,
-	procedures: &ProcMap,
 	tok_list: &token::KindList,
 	tok_pos: &token::PosList,
+	procedures: &ProcMap,
+	regions: &RegionMap,
+	proc_db: &mut IdentMap<ProcData>,
 ) -> Result<(), error::Error> {
 	// Check for 'main' procedure
 	if !proc_db.contains_key(&"main".id()) {

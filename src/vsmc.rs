@@ -561,57 +561,59 @@ mod tests {
 		let mut source_str = String::new();
 		source_str.push_str("region Stack[0] @ 0;");
 		source_str.push_str(source);
+		let mut db = Data::new("lowering".into(), source_str.into());
+		db.DEBUG_show_tokens = true;
 
-		lexer::eval(Data::new("lowering".into(), source_str.into()))
-			.and_then(|mut db| {
-				discovery::eval(
-					&db.source,
-					&db.identifiers,
-					&db.tok_list,
-					&db.tok_pos,
-					&mut db.task_queue,
-					&mut db.procedures,
-					&mut db.records,
-					&mut db.regions,
-					&mut db.values,
-				).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery)
-						.display(&db.source_file, &db.source, &db.line_pos))
-						.map(|_| db)
-			})
-			.and_then(|mut db| {
-				parser::eval(
-					&db.source,
-					&db.identifiers,
-					&db.tok_list,
-					&db.tok_pos,
-					&db.records,
-					&db.procedures,
-					&mut db.task_queue,
-					&mut db.values,
-					&mut db.proc_db,
-				).map_err(|e| e.into_comp_error(&db, error::Kind::Parser)
-						.display(&db.source_file, &db.source, &db.line_pos))
-					.map(|_| db)
-			})
-			.and_then(|mut db| {
-				type_checker::eval(
-					&mut db.proc_db,
-					&db.regions,
-					&db.source,
-					&db.identifiers,
-					&db.procedures,
-					&db.tok_list,
-					&db.tok_pos,
-				).map_err(|e| e.display(&db.source_file, &db.source, &db.line_pos))
-					.map(|_| db)
-			})
-			.and_then(|mut db| {
-				eval(&mut db.proc_db)
-					.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db)
-						.display(&db.source_file, &db.source, &db.line_pos))
-					.map(|_| db)
-			})
-			.unwrap_or_else(|msg| panic!("{msg}"))
+		let result = {
+			lexer::eval(
+				&db.source,
+				&mut db.identifiers,
+				&mut db.tok_list,
+				&mut db.tok_pos,
+				&mut db.line_pos,
+			).map_err(|e| e.with_kind(error::Kind::Lexer))
+		}.and_then(|_| {
+			discovery::eval(
+				&db.source, &db.identifiers,
+				&db.tok_list, &db.tok_pos,
+				&mut db.task_queue,
+				&mut db.procedures,
+				&mut db.records,
+				&mut db.regions,
+				&mut db.values,
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery))
+		}).and_then(|_| {
+			parser::eval(
+				&db.source, &db.identifiers,
+				&db.tok_list, &db.tok_pos,
+				&db.records, &db.procedures,
+				&mut db.task_queue,
+				&mut db.values,
+				&mut db.proc_db,
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Parser))
+		}).and_then(|_| {
+			type_checker::eval(
+				&db.source,
+				&db.identifiers,
+				&db.tok_list,
+				&db.tok_pos,
+				&db.procedures,
+				&db.regions,
+				&mut db.proc_db,
+			)
+		}).and_then(|_| {
+			eval(&mut db.proc_db)
+				.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db))
+		});
+
+		match result {
+			Ok(_) => db,
+			Err(e) => {
+				let msg = e.display(
+					&db.source_file, &db.source, &db.line_pos);
+				panic!("{msg}");
+			}
+		}
 	}
 
 	#[test]

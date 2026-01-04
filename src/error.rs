@@ -1,10 +1,6 @@
 
-use crate::token::{Id as TokenId, PosList};
-use crate::{Data, Span, SrcPos};
-
-pub fn error(data: &Data, message: &str, token_id: TokenId) -> Error {
-	Error::new(data.token_source(token_id), message)
-}
+use crate::token::PosList;
+use crate::{Span, SrcPos};
 
 #[cfg(feature="notes")]
 pub fn error_with_notes(data: &Data, message: &str, token_id: TokenId,

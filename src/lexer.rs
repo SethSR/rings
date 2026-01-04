@@ -1,27 +1,32 @@
 
 use std::collections::hash_map::Entry;
 
-use crate::error::{self, Error};
-use crate::identifier::Identifier;
-use crate::token;
-use crate::{Data, SrcPos};
+use crate::error::Error;
+use crate::identifier::{Identifier, Map as IdentMap};
+use crate::token::{Kind, KindList, PosList};
+use crate::{Span, SrcPos};
 
-pub fn eval(mut data: Data) -> Result<Data, String> {
+pub fn eval(
+	source: &str,
+	identifiers: &mut IdentMap<Span<SrcPos>>,
+	tok_list: &mut KindList,
+	tok_pos: &mut PosList,
+	line_pos: &mut PosList,
+) -> Result<(), Error> {
 	let mut lexer = Lexer { pos: 0 };
 
 	// Add the initial line
-	data.line_pos.push(lexer.pos);
+	line_pos.push(lexer.pos);
 
-	lexer.skip_whitespace_and_comments(&mut data);
+	lexer.skip_whitespace_and_comments(source, line_pos);
 	loop {
-		match lexer.next(&mut data) {
+		match lexer.next(source, identifiers, tok_list, tok_pos) {
 			Ok(true) => {}
-			Ok(false) => return Ok(data), // all done!
-			Err(e) => return Err(e.with_kind(error::Kind::Lexer)
-				.display(&data.source_file, &data.source, &data.line_pos)),
+			Ok(false) => return Ok(()), // all done!
+			Err(e) => return Err(e),
 		}
 
-		lexer.skip_whitespace_and_comments(&mut data);
+		lexer.skip_whitespace_and_comments(source, line_pos);
 	}
 }
 
@@ -31,70 +36,75 @@ struct Lexer {
 }
 
 impl Lexer {
-	fn next(&mut self, data: &mut Data) -> Result<bool, Error> {
+	fn next(&mut self,
+		source: &str,
+		identifiers: &mut IdentMap<Span<SrcPos>>,
+		tok_list: &mut KindList,
+		tok_pos: &mut PosList,
+	) -> Result<bool, Error> {
 		let start = self.pos;
 
-		let kind = match self.peek(data, 0) {
+		let kind = match self.peek(source, 0) {
 			None => {
-				data.tok_list.push(token::Kind::Eof);
-				data.tok_pos.push(start);
+				tok_list.push(Kind::Eof);
+				tok_pos.push(start);
 				return Ok(false);
 			}
 
 			Some(c) if c.is_alphabetic() || c == '_' => {
-				self.advance(data);
-				while let Some(c) = self.peek(data, 0) {
+				self.advance(source);
+				while let Some(c) = self.peek(source, 0) {
 					if !c.is_alphanumeric() && c != '_' {
 						break;
 					}
-					self.advance(data);
+					self.advance(source);
 				}
-				match &data.source[start..self.pos] {
+				match &source[start..self.pos] {
 					// Top Level Stmts
-					"index" => token::Kind::Index,
-					"overlay" => token::Kind::Overlay,
-					"proc" => token::Kind::Proc,
-					"record" => token::Kind::Record,
-					"region" => token::Kind::Region,
-					"table" => token::Kind::Table,
-					"value" => token::Kind::Value,
+					"index" => Kind::Index,
+					"overlay" => Kind::Overlay,
+					"proc" => Kind::Proc,
+					"record" => Kind::Record,
+					"region" => Kind::Region,
+					"table" => Kind::Table,
+					"value" => Kind::Value,
 
 					// Types
-					"bool" => token::Kind::Bool,
-					"s16" => token::Kind::S16,
-					"s32" => token::Kind::S32,
-					"s8" => token::Kind::S8,
-					"u16" => token::Kind::U16,
-					"u32" => token::Kind::U32,
-					"u8" => token::Kind::U8,
+					"bool" => Kind::Bool,
+					"s16" => Kind::S16,
+					"s32" => Kind::S32,
+					"s8" => Kind::S8,
+					"u16" => Kind::U16,
+					"u32" => Kind::U32,
+					"u8" => Kind::U8,
 
 					// Keywords
-					"else" => token::Kind::Else,
-					"false" => token::Kind::False,
-					"for" => token::Kind::For,
-					"free" => token::Kind::Free,
-					"if" => token::Kind::If,
-					"in" => token::Kind::In,
-					"let" => token::Kind::Let,
-					"m68k" => token::Kind::M68k,
-					"mark" => token::Kind::Mark,
-					"return" => token::Kind::Return,
-					"sh2" => token::Kind::SH2,
-					"true" => token::Kind::True,
-					"where" => token::Kind::Where,
-					"while" => token::Kind::While,
-					"x64" => token::Kind::X64,
-					"z80" => token::Kind::Z80,
+					"else" => Kind::Else,
+					"false" => Kind::False,
+					"for" => Kind::For,
+					"free" => Kind::Free,
+					"if" => Kind::If,
+					"in" => Kind::In,
+					"let" => Kind::Let,
+					"m68k" => Kind::M68k,
+					"mark" => Kind::Mark,
+					"return" => Kind::Return,
+					"sh2" => Kind::SH2,
+					"true" => Kind::True,
+					"where" => Kind::Where,
+					"while" => Kind::While,
+					"x64" => Kind::X64,
+					"z80" => Kind::Z80,
 
 					text => {
 						let ident_id = text.id();
-						if let Entry::Vacant(e) = data.identifiers.entry(ident_id) {
+						if let Entry::Vacant(e) = identifiers.entry(ident_id) {
 							e.insert((start..self.pos).into());
 						}
 						match text {
-							"main" => token::Kind::Main,
-							"sub" => token::Kind::Sub,
-							_ => token::Kind::Identifier(ident_id),
+							"main" => Kind::Main,
+							"sub" => Kind::Sub,
+							_ => Kind::Identifier(ident_id),
 						}
 					}
 				}
@@ -102,13 +112,13 @@ impl Lexer {
 
 			Some(c) if c.is_numeric() => {
 				let mut inner_start = start;
-				self.advance(data);
+				self.advance(source);
 
 				#[derive(PartialEq)]
 				enum NumType { Bin, Hex, Dec }
 
 				let num_type = if c == '0' {
-					match self.peek(data, 0) {
+					match self.peek(source, 0) {
 						Some('b') => NumType::Bin,
 						Some('x') => NumType::Hex,
 						_ => NumType::Dec,
@@ -118,205 +128,191 @@ impl Lexer {
 				};
 
 				if num_type != NumType::Dec {
-					self.advance(data);
+					self.advance(source);
 					inner_start = self.pos;
 				}
 
-				while let Some(c) = self.peek(data, 0) {
+				while let Some(c) = self.peek(source, 0) {
 					let valid = match num_type {
 						NumType::Bin => ['0', '1', '_'].contains(&c),
 						NumType::Hex => c.is_ascii_hexdigit() || c == '_',
 						NumType::Dec => c.is_ascii_digit() || c == '_',
 					};
 					if !valid { break; }
-					self.advance(data);
+					self.advance(source);
 				}
 				let mut is_fractional = false;
-				if self.peek(data, 0) == Some('.') && self.peek(data, 1) != Some('.') {
+				if self.peek(source, 0) == Some('.') && self.peek(source, 1) != Some('.') {
 
 					is_fractional = true;
-					self.advance(data);
-					while let Some(c) = self.peek(data, 0) {
+					self.advance(source);
+					while let Some(c) = self.peek(source, 0) {
 						if !c.is_numeric() && c != '_' {
 							break;
 						}
-						self.advance(data);
+						self.advance(source);
 					}
 				}
 
-				let text = &data.source[inner_start..self.pos];
+				let text = &source[inner_start..self.pos];
+				let tok_src = (inner_start..self.pos).into();
 				if is_fractional {
 					match num_type {
-						NumType::Bin => return Err(error::error(data,
-							"parsing binary fixed-point numbers not implemented yet",
-							self.pos.into())),
-						NumType::Hex => return Err(error::error(data,
-							"parsing hexadecimal fixed-point numbers not implemented yet",
-							self.pos.into())),
-						NumType::Dec => {
-							match text.replace('_', "").parse::<f64>() {
-								Ok(num) => token::Kind::Decimal(num),
-								Err(_) => return Err(error::error(data,
-									"unable to parse decimal fixed-point number",
-									self.pos.into())),
-							}
-						}
+						NumType::Bin => return Err(Error::new(tok_src,
+							"parsing binary fixed-point numbers not implemented yet")),
+						NumType::Hex => return Err(Error::new(tok_src,
+							"parsing hexadecimal fixed-point numbers not implemented yet")),
+						NumType::Dec => text.replace('_', "").parse::<f64>()
+							.map_err(|_| Error::new(tok_src,
+								"unable to parse decimal fixed-point number"))
+							.map(Kind::Decimal)?,
 					}
 				} else {
 					let text = text.replace('_', "");
 					let num = match num_type {
-						NumType::Bin => match i64::from_str_radix(&text, 2) {
-							Ok(num) => num,
-							Err(_) => return Err(error::error(data,
-								"unable to parse binary integer",
-								self.pos.into())),
-						},
-						NumType::Hex => match i64::from_str_radix(&text, 16) {
-							Ok(num) => num,
-							Err(_) => return Err(error::error(data,
-								"unable to parse hexadecimal integer",
-								self.pos.into())),
-						},
-						NumType::Dec => match text.parse::<i64>() {
-							Ok(num) => num,
-							Err(_) => return Err(error::error(data,
-								"unable to parse decimal integer",
-								self.pos.into())),
-						},
+						NumType::Bin => i64::from_str_radix(&text, 2).map_err(|_| Error::new(tok_src,
+							"unable to parse binary integer"))?,
+						NumType::Hex => i64::from_str_radix(&text, 16).map_err(|_| Error::new(tok_src,
+							"unable to parse hexadecimal integer"))?,
+						NumType::Dec => text.parse::<i64>().map_err(|_| Error::new(tok_src,
+							"unable to parse decimal integer"))?,
 					};
-					token::Kind::Integer(num)
+					Kind::Integer(num)
 				}
 			}
 
 			Some('-') => {
-				self.advance(data);
-				self.item(data, &[
-					('=', token::Kind::DashEq),
-					('>', token::Kind::Arrow),
-				], token::Kind::Dash)
+				self.advance(source);
+				self.item(source, &[
+					('=', Kind::DashEq),
+					('>', Kind::Arrow),
+				], Kind::Dash)
 			}
 
 			Some(':') => {
-				self.advance(data);
-				self.item(data, &[
-					(':', token::Kind::Colon2),
-					('=', token::Kind::ColonEq),
-				], token::Kind::Colon)
+				self.advance(source);
+				self.item(source, &[
+					(':', Kind::Colon2),
+					('=', Kind::ColonEq),
+				], Kind::Colon)
 			}
 
 			Some('<') => {
-				self.advance(data);
-				self.item(data, &[
-					('<', token::Kind::LArr2),
-					('=', token::Kind::LArrEq),
-				], token::Kind::LArr)
+				self.advance(source);
+				self.item(source, &[
+					('<', Kind::LArr2),
+					('=', Kind::LArrEq),
+				], Kind::LArr)
 			}
 
 			Some('>') => {
-				self.advance(data);
-				self.item(data, &[
-					('>', token::Kind::RArr2),
-					('=', token::Kind::RArrEq),
-				], token::Kind::RArr)
+				self.advance(source);
+				self.item(source, &[
+					('>', Kind::RArr2),
+					('=', Kind::RArrEq),
+				], Kind::RArr)
 			}
 
 			Some('^') => {
-				self.advance(data);
-				self.item(data, &[
-					('^', token::Kind::Carrot2),
-					('=', token::Kind::CarrotEq),
-				], token::Kind::Carrot)
+				self.advance(source);
+				self.item(source, &[
+					('^', Kind::Carrot2),
+					('=', Kind::CarrotEq),
+				], Kind::Carrot)
 			}
 
 			Some('+') => {
-				self.advance(data);
-				self.item(data, &[('=', token::Kind::PlusEq)], token::Kind::Plus)
+				self.advance(source);
+				self.item(source, &[('=', Kind::PlusEq)], Kind::Plus)
 			}
 
 			Some('*') => {
-				self.advance(data);
-				self.item(data, &[('=', token::Kind::StarEq)], token::Kind::Star)
+				self.advance(source);
+				self.item(source, &[('=', Kind::StarEq)], Kind::Star)
 			}
 
 			Some('/') => {
-				self.advance(data);
-				self.item(data, &[('=', token::Kind::SlashEq)], token::Kind::Slash)
+				self.advance(source);
+				self.item(source, &[('=', Kind::SlashEq)], Kind::Slash)
 			}
 
 			Some('%') => {
-				self.advance(data);
-				self.item(data, &[('=', token::Kind::PercentEq)], token::Kind::Percent)
+				self.advance(source);
+				self.item(source, &[('=', Kind::PercentEq)], Kind::Percent)
 			}
 
 			Some('=') => {
-				self.advance(data);
-				self.item(data, &[('=', token::Kind::Eq2)], token::Kind::Eq)
+				self.advance(source);
+				self.item(source, &[('=', Kind::Eq2)], Kind::Eq)
 			}
 
 			Some('!') => {
-				self.advance(data);
-				self.item(data, &[('=', token::Kind::BangEq)], token::Kind::Bang)
+				self.advance(source);
+				self.item(source, &[('=', Kind::BangEq)], Kind::Bang)
 			}
 
 			Some('.') => {
-				self.advance(data);
-				self.item(data, &[('.', token::Kind::Dot2)], token::Kind::Dot)
+				self.advance(source);
+				self.item(source, &[('.', Kind::Dot2)], Kind::Dot)
 			}
 
 			Some('&') => {
-				self.advance(data);
-				self.item(data, &[('&', token::Kind::Amp2)], token::Kind::Amp)
+				self.advance(source);
+				self.item(source, &[('&', Kind::Amp2)], Kind::Amp)
 			}
 
 			Some('|') => {
-				self.advance(data);
-				self.item(data, &[('|', token::Kind::Bar2)], token::Kind::Bar)
+				self.advance(source);
+				self.item(source, &[('|', Kind::Bar2)], Kind::Bar)
 			}
 
-			Some('(') => { self.advance(data); token::Kind::OParen }
+			Some('(') => { self.advance(source); Kind::OParen }
 
-			Some(')') => { self.advance(data); token::Kind::CParen }
+			Some(')') => { self.advance(source); Kind::CParen }
 
-			Some('{') => { self.advance(data); token::Kind::OBrace }
+			Some('{') => { self.advance(source); Kind::OBrace }
 
-			Some('}') => { self.advance(data); token::Kind::CBrace }
+			Some('}') => { self.advance(source); Kind::CBrace }
 
-			Some('[') => { self.advance(data); token::Kind::OBracket }
+			Some('[') => { self.advance(source); Kind::OBracket }
 
-			Some(']') => { self.advance(data); token::Kind::CBracket }
+			Some(']') => { self.advance(source); Kind::CBracket }
 
-			Some('@') => { self.advance(data); token::Kind::At }
+			Some('@') => { self.advance(source); Kind::At }
 
-			Some(';') => { self.advance(data); token::Kind::Semicolon }
+			Some(';') => { self.advance(source); Kind::Semicolon }
 
-			Some(',') => { self.advance(data); token::Kind::Comma }
+			Some(',') => { self.advance(source); Kind::Comma }
 
-			Some(_) => { self.advance(data); token::Kind::Eof }
+			Some(_) => { self.advance(source); Kind::Eof }
 		};
 
-		data.tok_list.push(kind);
-		data.tok_pos.push(start);
+		tok_list.push(kind);
+		tok_pos.push(start);
 		Ok(true)
 	}
 
-	fn skip_whitespace_and_comments(&mut self, data: &mut Data) {
+	fn skip_whitespace_and_comments(&mut self,
+		source: &str,
+		line_pos: &mut PosList,
+	) {
 		loop {
-			match self.peek(data, 0) {
+			match self.peek(source, 0) {
 				Some('\n') => {
-					data.line_pos.push(self.pos);
-					self.advance(data);
+					line_pos.push(self.pos);
+					self.advance(source);
 				}
 				Some(c) if c.is_whitespace() => {
-					self.advance(data);
+					self.advance(source);
 				}
-				Some('-') if self.peek(data, 1) == Some('-') => {
-					self.advance(data);
-					self.advance(data);
-					while let Some(c) = self.peek(data, 0) {
+				Some('-') if self.peek(source, 1) == Some('-') => {
+					self.advance(source);
+					self.advance(source);
+					while let Some(c) = self.peek(source, 0) {
 						if c == '\n' {
 							break;
 						}
-						self.advance(data);
+						self.advance(source);
 					}
 				}
 				_ => break,
@@ -324,33 +320,37 @@ impl Lexer {
 		}
 	}
 
-	fn item(&mut self, db: &Data,
-		pairs: &[(char, token::Kind)],
-		end: token::Kind,
-	) -> token::Kind {
+	fn item(&mut self,
+		source: &str,
+		pairs: &[(char, Kind)],
+		end: Kind,
+	) -> Kind {
 		for &(ch, kind) in pairs {
-			if self.expect(db, ch) {
+			if self.expect(source, ch) {
 				return kind;
 			}
 		}
 		end
 	}
 
-	fn peek(&self, data: &Data, offset: usize) -> Option<char> {
-		data.source[self.pos..].chars().nth(offset)
+	fn peek(&self,
+		source: &str,
+		offset: usize,
+	) -> Option<char> {
+		source[self.pos..].chars().nth(offset)
 	}
 
-	fn expect(&mut self, data: &Data, ch: char) -> bool {
-		if self.peek(data, 0) == Some(ch) {
-			self.advance(data);
+	fn expect(&mut self, source: &str, ch: char) -> bool {
+		if self.peek(source, 0) == Some(ch) {
+			self.advance(source);
 			true
 		} else {
 			false
 		}
 	}
 
-	fn advance(&mut self, data: &Data) {
-		if let Some(c) = self.peek(data, 0) {
+	fn advance(&mut self, source: &str) {
+		if let Some(c) = self.peek(source, 0) {
 			self.pos += c.len_utf8();
 		}
 	}
@@ -358,13 +358,23 @@ impl Lexer {
 
 #[cfg(test)]
 mod can_lex {
+	use crate::error;
+	use crate::Data;
+
 	use super::*;
-	use super::token::Kind;
 
 	fn setup(source: &str) -> Data {
 		let mut data = Data::new(file!().to_string(), source.into());
 		data.DEBUG_show_tokens = true;
-		eval(data)
+		eval(
+			&data.source,
+			&mut data.identifiers,
+			&mut data.tok_list,
+			&mut data.tok_pos,
+			&mut data.line_pos,
+		).map_err(|e| e.with_kind(error::Kind::Lexer)
+				.display(&data.source_file, &data.source, &data.line_pos))
+			.map(|_| data)
 			.unwrap_or_else(|msg| panic!("{msg}"))
 	}
 

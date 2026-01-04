@@ -40,9 +40,17 @@ fn main() {
 type SrcPos = usize;
 
 pub fn compile(file_path: String, source: &str) {
-	let db = Data::new(file_path, source.into());
-	let result = lexer::eval(db)
-		.and_then(|mut db| {
+	let mut db = Data::new(file_path, source.into());
+
+	let result = {
+		lexer::eval(
+			&db.source,
+			&mut db.identifiers,
+			&mut db.tok_list,
+			&mut db.tok_pos,
+			&mut db.line_pos,
+		).map_err(|e| e.with_kind(error::Kind::Lexer))
+	}.and_then(|_| {
 			discovery::eval(
 				&db.source,
 				&db.identifiers,
@@ -53,11 +61,9 @@ pub fn compile(file_path: String, source: &str) {
 				&mut db.records,
 				&mut db.regions,
 				&mut db.values,
-			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery)
-					.display(&db.source_file, &db.source, &db.line_pos))
-				.map(|_| db)
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery))
 		})
-		.and_then(|mut db| {
+		.and_then(|_| {
 			parser::eval(
 				&db.source, &db.identifiers,
 				&db.tok_list, &db.tok_pos,
@@ -65,38 +71,40 @@ pub fn compile(file_path: String, source: &str) {
 				&mut db.task_queue,
 				&mut db.values,
 				&mut db.proc_db,
-			).map_err(|e| e.into_comp_error(&db, error::Kind::Parser)
-					.display(&db.source_file, &db.source, &db.line_pos))
-				.map(|_| db)
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Parser))
 		})
-		.and_then(|mut db| {
-			type_checker::eval(
-				&mut db.proc_db,
-				&db.regions,
-				&db.source,
-				&db.identifiers,
-				&db.procedures,
-				&db.tok_list,
-				&db.tok_pos,
-			).map_err(|e| e.display(&db.source_file, &db.source, &db.line_pos))
-				.map(|_| db)
-		})
-		.and_then(|mut db| {
-			vsmc::eval(&mut db.proc_db)
-				.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db)
-					.display(&db.source_file, &db.source, &db.line_pos))
-				.map(|_| db)
-		})
-		.map(|mut db| {
-			asm::eval(&db.source, &db.identifiers, &mut db.proc_db, &mut db.asm_db);
-			db
-		});
+		.and_then(|_| type_checker::eval(
+			&db.source,
+			&db.identifiers,
+			&db.tok_list,
+			&db.tok_pos,
+			&db.procedures,
+			&db.regions,
+			&mut db.proc_db,
+		))
+		.and_then(|_| vsmc::eval(&mut db.proc_db)
+			.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db))
+		)
+		.map(|_| asm::eval(
+			&db.source,
+			&db.identifiers,
+			&mut db.proc_db,
+			&mut db.asm_db,
+		));
+
 	match result {
-		Ok(data) => {
-			println!("{data}");
-			output(&data.source_file, data.asm_db);
+		Ok(_) => {
+			println!("{db}");
+			output(&db.source_file, db.asm_db);
 		}
-		Err(msg) => eprintln!("{msg}"),
+		Err(e) => {
+			let msg = e.display(
+				&db.source_file,
+				&db.source,
+				&db.line_pos,
+			);
+			eprintln!("{msg}");
+		}
 	}
 }
 

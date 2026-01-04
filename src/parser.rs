@@ -550,35 +550,44 @@ mod can_parse_proc {
 	fn setup(source: &str) -> Data {
 		let mut db = Data::new("parser".to_string(), source.into());
 		db.DEBUG_show_tokens = true;
-		lexer::eval(db)
-			.and_then(|mut db| {
-				discovery::eval(
-					&db.source,
-					&db.identifiers,
-					&db.tok_list,
-					&db.tok_pos,
-					&mut db.task_queue,
-					&mut db.procedures,
-					&mut db.records,
-					&mut db.regions,
-					&mut db.values,
-				).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery)
-						.display(&db.source_file, &db.source, &db.line_pos))
-						.map(|_| db)
-			})
-			.and_then(|mut db| {
-				eval(
-					&db.source, &db.identifiers,
-					&db.tok_list, &db.tok_pos,
-					&db.records, &db.procedures,
-					&mut db.task_queue,
-					&mut db.values,
-					&mut db.proc_db,
-				).map_err(|e| e.into_comp_error(&db, error::Kind::Parser)
-						.display(&db.source_file, &db.source, &db.line_pos))
-					.map(|_| db)
-			})
-			.unwrap_or_else(|msg| panic!("{msg}"))
+
+		let result = {
+			lexer::eval(
+				&db.source,
+				&mut db.identifiers,
+				&mut db.tok_list,
+				&mut db.tok_pos,
+				&mut db.line_pos,
+			).map_err(|e| e.with_kind(error::Kind::Lexer))
+		}.and_then(|_| {
+			discovery::eval(
+				&db.source, &db.identifiers,
+				&db.tok_list, &db.tok_pos,
+				&mut db.task_queue,
+				&mut db.procedures,
+				&mut db.records,
+				&mut db.regions,
+				&mut db.values,
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery))
+		}).and_then(|_| {
+			eval(
+				&db.source, &db.identifiers,
+				&db.tok_list, &db.tok_pos,
+				&db.records, &db.procedures,
+				&mut db.task_queue,
+				&mut db.values,
+				&mut db.proc_db,
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Parser))
+		});
+
+		match result {
+			Ok(_) => db,
+			Err(e) => {
+				let msg = e.display(
+					&db.source_file, &db.source, &db.line_pos);
+				panic!("{msg}");
+			}
+		}
 	}
 
 	#[test]

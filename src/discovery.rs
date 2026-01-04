@@ -361,25 +361,39 @@ mod can_parse {
 	use super::*;
 
 	fn setup(source: &str) -> Data {
-		let mut data = Data::new(file!().to_string(), source.into());
-		data.DEBUG_show_tokens = true;
-		lexer::eval(data)
-			.and_then(|mut db| {
-				eval(
-					&db.source,
-					&db.identifiers,
-					&db.tok_list,
-					&db.tok_pos,
-					&mut db.task_queue,
-					&mut db.procedures,
-					&mut db.records,
-					&mut db.regions,
-					&mut db.values,
-				).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery)
-						.display(&db.source_file, &db.source, &db.line_pos))
-					.map(|_| db)
-			})
-			.unwrap_or_else(|msg| panic!("{msg}"))
+		let mut db = Data::new(file!().to_string(), source.into());
+		db .DEBUG_show_tokens = true;
+
+		let result = {
+			lexer::eval(
+				&db.source,
+				&mut db.identifiers,
+				&mut db.tok_list,
+				&mut db.tok_pos,
+				&mut db.line_pos,
+			).map_err(|e| e.with_kind(error::Kind::Lexer))
+		}.and_then(|_| {
+			eval(
+				&db.source,
+				&db.identifiers,
+				&db.tok_list,
+				&db.tok_pos,
+				&mut db.task_queue,
+				&mut db.procedures,
+				&mut db.records,
+				&mut db.regions,
+				&mut db.values,
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery))
+		});
+
+		match result {
+			Ok(_) => db,
+			Err(e) => {
+				let msg = e.display(
+					&db.source_file, &db.source, &db.line_pos);
+				panic!("{msg}");
+			}
+		}
 	}
 
 	#[test]
