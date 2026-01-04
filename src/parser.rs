@@ -551,7 +551,21 @@ mod can_parse_proc {
 		let mut db = Data::new("parser".to_string(), source.into());
 		db.DEBUG_show_tokens = true;
 		lexer::eval(db)
-			.and_then(discovery::eval)
+			.and_then(|mut db| {
+				discovery::eval(
+					&db.source,
+					&db.identifiers,
+					&db.tok_list,
+					&db.tok_pos,
+					&mut db.task_queue,
+					&mut db.procedures,
+					&mut db.records,
+					&mut db.regions,
+					&mut db.values,
+				).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery)
+						.display(&db.source_file, &db.source, &db.line_pos))
+						.map(|_| db)
+			})
 			.and_then(|mut db| {
 				eval(
 					&db.source, &db.identifiers,
@@ -560,8 +574,7 @@ mod can_parse_proc {
 					&mut db.task_queue,
 					&mut db.values,
 					&mut db.proc_db,
-				).map_err(|e| e.into_comp_error(&db)
-						.with_kind(error::Kind::Parser)
+				).map_err(|e| e.into_comp_error(&db, error::Kind::Parser)
 						.display(&db.source_file, &db.source, &db.line_pos))
 					.map(|_| db)
 			})

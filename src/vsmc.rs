@@ -563,7 +563,21 @@ mod tests {
 		source_str.push_str(source);
 
 		lexer::eval(Data::new("lowering".into(), source_str.into()))
-			.and_then(discovery::eval)
+			.and_then(|mut db| {
+				discovery::eval(
+					&db.source,
+					&db.identifiers,
+					&db.tok_list,
+					&db.tok_pos,
+					&mut db.task_queue,
+					&mut db.procedures,
+					&mut db.records,
+					&mut db.regions,
+					&mut db.values,
+				).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery)
+						.display(&db.source_file, &db.source, &db.line_pos))
+						.map(|_| db)
+			})
 			.and_then(|mut db| {
 				parser::eval(
 					&db.source,
@@ -575,7 +589,7 @@ mod tests {
 					&mut db.task_queue,
 					&mut db.values,
 					&mut db.proc_db,
-				).map_err(|e| e.into_comp_error(&db)
+				).map_err(|e| e.into_comp_error(&db, error::Kind::Parser)
 						.display(&db.source_file, &db.source, &db.line_pos))
 					.map(|_| db)
 			})
@@ -589,7 +603,7 @@ mod tests {
 					&db.tok_list,
 					&db.tok_pos,
 				).map_err(|e| e.display(&db.source_file, &db.source, &db.line_pos))
-						.map(|_| db)
+					.map(|_| db)
 			})
 			.and_then(|mut db| {
 				eval(&mut db.proc_db)

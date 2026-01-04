@@ -42,7 +42,21 @@ type SrcPos = usize;
 pub fn compile(file_path: String, source: &str) {
 	let db = Data::new(file_path, source.into());
 	let result = lexer::eval(db)
-		.and_then(discovery::eval)
+		.and_then(|mut db| {
+			discovery::eval(
+				&db.source,
+				&db.identifiers,
+				&db.tok_list,
+				&db.tok_pos,
+				&mut db.task_queue,
+				&mut db.procedures,
+				&mut db.records,
+				&mut db.regions,
+				&mut db.values,
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery)
+					.display(&db.source_file, &db.source, &db.line_pos))
+				.map(|_| db)
+		})
 		.and_then(|mut db| {
 			parser::eval(
 				&db.source, &db.identifiers,
@@ -51,8 +65,7 @@ pub fn compile(file_path: String, source: &str) {
 				&mut db.task_queue,
 				&mut db.values,
 				&mut db.proc_db,
-			).map_err(|e| e.into_comp_error(&db)
-					.with_kind(error::Kind::Parser)
+			).map_err(|e| e.into_comp_error(&db, error::Kind::Parser)
 					.display(&db.source_file, &db.source, &db.line_pos))
 				.map(|_| db)
 		})

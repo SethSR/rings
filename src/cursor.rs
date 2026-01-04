@@ -17,7 +17,7 @@ pub enum Error {
 }
 
 impl Error {
-	pub fn into_comp_error(self, db: &Data) -> error::Error {
+	pub fn into_comp_error(self, db: &Data, kind: error::Kind) -> error::Error {
 		match self {
 			Self::ExpectedToken { expected, found: token_id } => {
 				let found = db.tok_list[token_id];
@@ -34,7 +34,7 @@ impl Error {
 			Self::UnresolvedType { span, msg } => {
 				error::Error::new(span, msg)
 			}
-		}
+		}.with_kind(kind)
 	}
 }
 

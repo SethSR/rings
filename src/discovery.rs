@@ -2,13 +2,13 @@
 use std::collections::VecDeque;
 
 use crate::cursor::{Cursor, Error};
-use crate::{error, type_size};
 use crate::identifier::{self, Id as IdentId, Identifier, Map as IdentMap};
 use crate::rings_type::Type;
 use crate::task::{Kind as TaskKind, Task};
 use crate::token::{Id as TokenId, Kind as TokenKind, KindList, PosList};
 use crate::value::Kind as ValueKind;
-use crate::{Data, Span, SrcPos, Target};
+use crate::type_size;
+use crate::{Span, SrcPos, Target};
 
 pub type ValueMap = identifier::Map<Value>;
 pub type RegionMap = identifier::Map<Region>;
@@ -78,27 +78,9 @@ impl Table {
 	}
 }
 
-pub fn eval(mut data: Data) -> Result<Data, String> {
-	eval_loop(&mut Cursor::default(),
-		&data.source,
-		&data.identifiers,
-		&data.tok_list,
-		&data.tok_pos,
-		&mut data.task_queue,
-		&mut data.procedures,
-		&mut data.records,
-		&mut data.regions,
-		&mut data.values,
-	).map_err(|e| e.into_comp_error(&data)
-			.with_kind(error::Kind::Discovery)
-			.display(&data.source_file, &data.source, &data.line_pos))
-		.map(|_| data)
-}
-
 type DiscResult<T> = Result<T, Error>;
 
-fn eval_loop(
-	cursor: &mut Cursor,
+pub fn eval(
 	source: &str,
 	identifiers: &IdentMap<Span<SrcPos>>,
 	tok_list: &KindList,
@@ -109,52 +91,53 @@ fn eval_loop(
 	regions: &mut RegionMap,
 	values: &mut ValueMap,
 ) -> DiscResult<()> {
+	let mut cursor = Cursor::default();
 	loop {
 		match cursor.current(tok_list) {
 			TokenKind::Main => {
-				let tok_start = discover_init_proc(cursor, tok_list)?;
+				let tok_start = discover_init_proc(&mut cursor, tok_list)?;
 				let name_id = "main".id();
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
 				procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
 			}
 
 			TokenKind::Sub => {
-				let tok_start = discover_init_proc(cursor, tok_list)?;
+				let tok_start = discover_init_proc(&mut cursor, tok_list)?;
 				let name_id = "sub".id();
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
 				procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
 			}
 
 			TokenKind::Proc => {
-				let (name_id, tok_start, params, ret_type) = discover_proc(cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_proc(&mut cursor, tok_list, records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
 				procedures.insert(name_id, ProcType { params, ret_type, target: None });
 			}
 
 			TokenKind::M68k => {
 				cursor.advance();
-				let (name_id, tok_start, params, ret_type) = discover_target_proc(cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, tok_list, records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
 				procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::M68k) });
 			}
 
 			TokenKind::SH2 => {
 				cursor.advance();
-				let (name_id, tok_start, params, ret_type) = discover_target_proc(cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, tok_list, records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
 				procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::SH2) });
 			}
 
 			TokenKind::X64 => {
 				cursor.advance();
-				let (name_id, tok_start, params, ret_type) = discover_target_proc(cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, tok_list, records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
 				procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::X86_64) });
 			}
 
 			TokenKind::Z80 => {
 				cursor.advance();
-				let (name_id, tok_start, params, ret_type) = discover_target_proc(cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, tok_list, records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
 				procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::Z80) });
 			}
@@ -162,14 +145,14 @@ fn eval_loop(
 			TokenKind::Region => {
 				cursor.advance();
 				let name_id = cursor.expect_identifier(tok_list, "region name")?;
-				let region = discover_region(cursor, source, identifiers, tok_list, tok_pos)?;
+				let region = discover_region(&mut cursor, source, identifiers, tok_list, tok_pos)?;
 				regions.insert(name_id, region);
 			}
 
 			TokenKind::Record => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(tok_list, "record name")?;
-				let record = discover_record(cursor, tok_list, records, regions)?;
+				let record = discover_record(&mut cursor, tok_list, records, regions)?;
 				records.insert(ident_id, record);
 			}
 
@@ -177,7 +160,7 @@ fn eval_loop(
 			TokenKind::Table => {
 				cursor.advance();
 				let ident_id = cursor.expect_identifier(data, "table name")?;
-				let table = discover_table(cursor, data)?;
+				let table = discover_table(&mut cursor, data)?;
 				data.tables.insert(ident_id, table);
 			}
 
@@ -191,7 +174,7 @@ fn eval_loop(
 				let name_id = cursor.expect_identifier(tok_list, "value name")?;
 				cursor.expect(tok_list, TokenKind::Eq)?;
 				let tok_start = cursor.index();
-				let expr = crate::value::value_expression(cursor, tok_list, &[TokenKind::Semicolon], None)?;
+				let expr = crate::value::value_expression(&mut cursor, tok_list, &[TokenKind::Semicolon], None)?;
 				match expr.kind {
 					ValueKind::Int(num) => {
 						values.insert(name_id, Value::Integer(num));
@@ -372,7 +355,8 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Table> {
 
 #[cfg(test)]
 mod can_parse {
-	use crate::lexer;
+	use crate::{error, lexer};
+	use crate::Data;
 
 	use super::*;
 
@@ -380,7 +364,21 @@ mod can_parse {
 		let mut data = Data::new(file!().to_string(), source.into());
 		data.DEBUG_show_tokens = true;
 		lexer::eval(data)
-			.and_then(eval)
+			.and_then(|mut db| {
+				eval(
+					&db.source,
+					&db.identifiers,
+					&db.tok_list,
+					&db.tok_pos,
+					&mut db.task_queue,
+					&mut db.procedures,
+					&mut db.records,
+					&mut db.regions,
+					&mut db.values,
+				).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery)
+						.display(&db.source_file, &db.source, &db.line_pos))
+					.map(|_| db)
+			})
 			.unwrap_or_else(|msg| panic!("{msg}"))
 	}
 
