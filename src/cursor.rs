@@ -1,47 +1,47 @@
 
-use crate::identifier;
+use crate::{error, identifier};
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::token;
-use crate::{Data, Span};
-use crate::token::Kind;
+use crate::rings_type::Type;
+use crate::token::{Id as TokenId, Kind as TokenKind};
+use crate::{Data, Span, SrcPos};
 
 pub enum Error {
-	ExpectedToken { expected: String, found: token::Id },
-	Expected { span: Span<usize>, expected: String, found: String },
-	UnresolvedType { span: Span<usize>, msg: String },
+	ExpectedToken { expected: String, found: TokenId },
+	Expected { span: Span<SrcPos>, expected: String, found: String },
+	UnresolvedType { span: Span<SrcPos>, msg: String },
 }
 
 impl Error {
-	pub fn into_comp_error(self, db: &Data) -> crate::Error {
+	pub fn into_comp_error(self, db: &Data) -> error::Error {
 		match self {
 			Self::ExpectedToken { expected, found: token_id } => {
 				let found = db.tok_list[token_id];
-				let message = if let Kind::Identifier(ident_id) = found {
+				let message = if let TokenKind::Identifier(ident_id) = found {
 					format!("Expected {expected}, found '{}'", db.text(&ident_id))
 				} else {
 					format!("Expected {expected}, found {found:?}")
 				};
-				crate::Error::new(db.token_source(token_id), message)
+				error::Error::new(db.token_source(token_id), message)
 			}
 			Self::Expected { span, expected, found } => {
-				crate::Error::new(span, format!("Expected {expected}, found {found}"))
+				error::Error::new(span, format!("Expected {expected}, found {found}"))
 			}
 			Self::UnresolvedType { span, msg } => {
-				crate::Error::new(span, msg)
+				error::Error::new(span, msg)
 			}
 		}
 	}
 }
 
 #[derive(Default)]
-pub struct Cursor(token::Id);
+pub struct Cursor(TokenId);
 
 impl Cursor {
-	pub fn new(start: token::Id) -> Self {
+	pub fn new(start: TokenId) -> Self {
 		Self(start)
 	}
 
-	pub fn index(&self) -> token::Id {
+	pub fn index(&self) -> TokenId {
 		self.0
 	}
 
@@ -49,18 +49,18 @@ impl Cursor {
 		self.0 += 1;
 	}
 
-	pub fn peek(&self, data: &Data, offset: usize) -> Kind {
+	pub fn peek(&self, data: &Data, offset: usize) -> TokenKind {
 		data.tok_list
 			.get(self.0 + offset)
 			.copied()
-			.unwrap_or(Kind::Eof)
+			.unwrap_or(TokenKind::Eof)
 	}
 
-	pub fn current(&self, data: &Data) -> Kind {
+	pub fn current(&self, data: &Data) -> TokenKind {
 		self.peek(data, 0)
 	}
 
-	pub fn expect(&mut self, data: &Data, expected: Kind) -> Result<(), Error> {
+	pub fn expect(&mut self, data: &Data, expected: TokenKind) -> Result<(), Error> {
 		if self.current(data) == expected {
 			self.advance();
 			Ok(())
@@ -72,7 +72,7 @@ impl Cursor {
 	pub fn expect_identifier(&mut self, data: &Data,
 		expected: &str,
 	) -> Result<identifier::Id, Error> {
-		if let Kind::Identifier(ident_id) = self.current(data) {
+		if let TokenKind::Identifier(ident_id) = self.current(data) {
 			self.advance();
 			Ok(ident_id)
 		} else {
@@ -83,7 +83,7 @@ impl Cursor {
 	pub fn expect_integer(&mut self, data: &Data,
 		expected: &str,
 	) -> Result<i64, Error> {
-		if let Kind::Integer(num) = self.current(data) {
+		if let TokenKind::Integer(num) = self.current(data) {
 			self.advance();
 			Ok(num)
 		} else {
@@ -100,31 +100,28 @@ impl Cursor {
 			))
 	}
 
-	pub fn expect_type(&mut self, data: &Data) -> Result<crate::Type, Error> {
+	pub fn expect_type(&mut self, data: &Data) -> Result<Type, Error> {
 		let result = match self.current(data) {
-			#[cfg(all(feature="record", feature="table"))]
-			Kind::Identifier(ident_id) => {
-				if data.records.contains_key(&ident_id) {
-					Ok(crate::Type::Record(ident_id))
-				} else if data.tables.contains_key(&ident_id) {
-					Ok(crate::Type::Table(ident_id))
-				} else {
-					return Err(error::expected_token(data, "type-specifier", self.index()))
-				}
+			TokenKind::Identifier(ident_id) if data.records.contains_key(&ident_id) => {
+				Ok(Type::Record(ident_id))
+			}
+			#[cfg(feature="table")]
+			TokenKind::Identifier(ident_id) if data.tables.contains_key(&ident_id) => {
+				Ok(Type::Table(ident_id));
 			}
 			#[cfg(feature="types")]
-			Kind::Bool => Ok(crate::Type::Bool),
+			TokenKind::Bool => Ok(Type::Bool),
 			#[cfg(feature="types")]
-			Kind::U8 => Ok(crate::Type::U8),
-			Kind::S8 => Ok(crate::Type::s8_top()),
+			TokenKind::U8 => Ok(Type::U8),
+			TokenKind::S8 => Ok(Type::s8_top()),
 			#[cfg(feature="types")]
-			Kind::U16 => Ok(crate::Type::U16),
+			TokenKind::U16 => Ok(Type::U16),
 			#[cfg(feature="types")]
-			Kind::S16 => Ok(crate::Type::S16),
+			TokenKind::S16 => Ok(Type::S16),
 			#[cfg(feature="types")]
-			Kind::U32 => Ok(crate::Type::U32),
+			TokenKind::U32 => Ok(Type::U32),
 			#[cfg(feature="types")]
-			Kind::S32 => Ok(crate::Type::S32),
+			TokenKind::S32 => Ok(Type::S32),
 			_ => return Err(self.expected_token("type-specifier")),
 		};
 		self.advance();
@@ -133,33 +130,33 @@ impl Cursor {
 
 	pub fn expect_bin_op(&mut self, data: &mut Data) -> Result<BinaryOp, Error> {
 		match self.current(data) {
-			Kind::Amp     => { self.advance(); Ok(BinaryOp::BinAnd) }
-			Kind::Amp2    => { self.advance(); Ok(BinaryOp::LogAnd) }
-			Kind::BangEq  => { self.advance(); Ok(BinaryOp::CmpNE) }
-			Kind::Bar     => { self.advance(); Ok(BinaryOp::BinOr) }
-			Kind::Bar2    => { self.advance(); Ok(BinaryOp::LogOr) }
-			Kind::Carrot  => { self.advance(); Ok(BinaryOp::BinXor) }
-			Kind::Carrot2 => { self.advance(); Ok(BinaryOp::LogXor) }
-			Kind::Dash    => { self.advance(); Ok(BinaryOp::Sub) }
-			Kind::Eq2     => { self.advance(); Ok(BinaryOp::CmpEQ) }
-			Kind::LArr    => { self.advance(); Ok(BinaryOp::CmpLT) }
-			Kind::LArr2   => { self.advance(); Ok(BinaryOp::ShL) }
-			Kind::LArrEq  => { self.advance(); Ok(BinaryOp::CmpLE) }
-			Kind::Percent => { self.advance(); Ok(BinaryOp::Mod) }
-			Kind::Plus    => { self.advance(); Ok(BinaryOp::Add) }
-			Kind::RArr    => { self.advance(); Ok(BinaryOp::CmpGT) }
-			Kind::RArr2   => { self.advance(); Ok(BinaryOp::ShR) }
-			Kind::RArrEq  => { self.advance(); Ok(BinaryOp::CmpGE) }
-			Kind::Slash   => { self.advance(); Ok(BinaryOp::Div) }
-			Kind::Star    => { self.advance(); Ok(BinaryOp::Mul) }
+			TokenKind::Amp     => { self.advance(); Ok(BinaryOp::BinAnd) }
+			TokenKind::Amp2    => { self.advance(); Ok(BinaryOp::LogAnd) }
+			TokenKind::BangEq  => { self.advance(); Ok(BinaryOp::CmpNE) }
+			TokenKind::Bar     => { self.advance(); Ok(BinaryOp::BinOr) }
+			TokenKind::Bar2    => { self.advance(); Ok(BinaryOp::LogOr) }
+			TokenKind::Carrot  => { self.advance(); Ok(BinaryOp::BinXor) }
+			TokenKind::Carrot2 => { self.advance(); Ok(BinaryOp::LogXor) }
+			TokenKind::Dash    => { self.advance(); Ok(BinaryOp::Sub) }
+			TokenKind::Eq2     => { self.advance(); Ok(BinaryOp::CmpEQ) }
+			TokenKind::LArr    => { self.advance(); Ok(BinaryOp::CmpLT) }
+			TokenKind::LArr2   => { self.advance(); Ok(BinaryOp::ShL) }
+			TokenKind::LArrEq  => { self.advance(); Ok(BinaryOp::CmpLE) }
+			TokenKind::Percent => { self.advance(); Ok(BinaryOp::Mod) }
+			TokenKind::Plus    => { self.advance(); Ok(BinaryOp::Add) }
+			TokenKind::RArr    => { self.advance(); Ok(BinaryOp::CmpGT) }
+			TokenKind::RArr2   => { self.advance(); Ok(BinaryOp::ShR) }
+			TokenKind::RArrEq  => { self.advance(); Ok(BinaryOp::CmpGE) }
+			TokenKind::Slash   => { self.advance(); Ok(BinaryOp::Div) }
+			TokenKind::Star    => { self.advance(); Ok(BinaryOp::Mul) }
 			_ => Err(self.expected_token("binary operator")),
 		}
 	}
 
 	pub fn expect_unary_op(&mut self, data: &Data) -> Option<UnaryOp> {
 		match self.current(data) {
-			Kind::Dash => { self.advance(); Some(UnaryOp::Neg) }
-			Kind::Bang => { self.advance(); Some(UnaryOp::Not) }
+			TokenKind::Dash => { self.advance(); Some(UnaryOp::Neg) }
+			TokenKind::Bang => { self.advance(); Some(UnaryOp::Not) }
 			_ => None,
 		}
 	}
@@ -169,7 +166,7 @@ impl Cursor {
 	}
 }
 
-fn check_integer_as_u32(expected: &str, found: i64, span: Span<usize>) -> Result<u32, Error> {
+fn check_integer_as_u32(expected: &str, found: i64, span: Span<SrcPos>) -> Result<u32, Error> {
 	if !(0..u32::MAX as i64).contains(&found) {
 		Err(Error::Expected { span, expected: expected.into(), found: found.to_string() })
 	} else {

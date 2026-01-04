@@ -3,7 +3,8 @@ use index_vec::IndexVec;
 use index_vec::define_index_type;
 
 use crate::identifier;
-use crate::{Data, SrcPos};
+use crate::{Span, SrcPos};
+use crate::text;
 
 pub type KindList = IndexVec<Id, Kind>;
 pub type PosList = IndexVec<Id, SrcPos>;
@@ -87,9 +88,12 @@ pub enum Kind {
 }
 
 impl Kind {
-	pub fn size(&self, data: &Data) -> usize {
+	pub fn size(&self,
+		source: &str,
+		identifiers: &identifier::Map<Span<usize>>,
+	) -> usize {
 		match self {
-			Self::Identifier(ident_id) => data.text(ident_id).len(),
+			Self::Identifier(ident_id) => text(source, identifiers, ident_id).len(),
 			Self::Integer(num) => num.to_string().len(),
 			Self::Decimal(num) => num.to_string().len(),
 

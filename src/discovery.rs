@@ -1,11 +1,12 @@
 
 use crate::cursor::{Cursor, Error};
-use crate::error;
+use crate::{error, type_size};
 use crate::identifier::{self, Id as IdentId, Identifier};
-use crate::task::Kind as TaskKind;
+use crate::rings_type::Type;
+use crate::task::{Kind as TaskKind, Task};
 use crate::token::{Id as TokenId, Kind as TokenKind};
 use crate::value::Kind as ValueKind;
-use crate::{Data, Span, Target, Task, Type};
+use crate::{Data, Span, Target};
 
 pub type ValueMap = identifier::Map<Value>;
 pub type RegionMap = identifier::Map<Region>;
@@ -42,23 +43,10 @@ pub struct Record {
 }
 
 impl Record {
-	pub fn size(&self, db: &Data) -> u32 {
+	pub fn size(&self, records: &RecordMap) -> u32 {
 		self.fields.iter()
-			.map(|(_, field_type)| db.type_size(field_type))
+			.map(|(_, field_type)| type_size(records, field_type))
 			.sum()
-	}
-
-	//   1 2 1 4 1
-	// = 2 2 2 4 1
-	// = 0 2 4 6 10 = 11b
-	pub fn field_offset(&self, _data: &Data, _field_id: IdentId) -> Option<u32> {
-		todo!("make an actual record packing algorithm")
-	}
-
-	pub fn field_size(&self, data: &Data, field_id: identifier::Id) -> Option<u32> {
-		self.fields.iter()
-			.find(|(id,_)| field_id == *id)
-			.map(|(_, field_type)| data.type_size(field_type))
 	}
 }
 
@@ -335,8 +323,6 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Table> {
 #[cfg(test)]
 mod can_parse {
 	use crate::lexer;
-	use identifier::Identifier;
-	use crate::Type;
 
 	use super::*;
 
@@ -471,7 +457,7 @@ mod can_parse {
 		let data = setup("record a {}");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data), 0);
+		assert_eq!(record.size(&data.records), 0);
 		assert_eq!(record.region, None);
 		assert_eq!(record.fields.len(), 0);
 	}
@@ -481,7 +467,7 @@ mod can_parse {
 		let data = setup("record a { b: s8 }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data), 1);
+		assert_eq!(record.size(&data.records), 1);
 		assert_eq!(record.region, None);
 		assert_eq!(record.fields, [("b".id(), Type::s8_top())]);
 	}
@@ -491,7 +477,7 @@ mod can_parse {
 		let data = setup("record a { b: s8, }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data), 1);
+		assert_eq!(record.size(&data.records), 1);
 		assert_eq!(record.region, None);
 		assert_eq!(record.fields, [("b".id(), Type::s8_top())]);
 	}
@@ -501,7 +487,7 @@ mod can_parse {
 		let data = setup("record a { b: s8, c: s8 }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data), 3);
+		assert_eq!(record.size(&data.records), 2);
 		assert_eq!(record.region, None);
 		assert_eq!(record.fields, [
 			("b".id(), Type::s8_top()),
@@ -514,7 +500,7 @@ mod can_parse {
 		let data = setup("record a {} record b { c: a }");
 		assert_eq!(data.records.len(), 2);
 		let record = &data.records[&"b".id()];
-		assert_eq!(record.size(&data), 0);
+		assert_eq!(record.size(&data.records), 0);
 		assert_eq!(record.region, None);
 		assert_eq!(record.fields, [
 			("c".id(), Type::Record("a".id())),
@@ -534,7 +520,7 @@ mod can_parse {
 		});
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data), 0);
+		assert_eq!(record.size(&data.records), 0);
 		assert_eq!(record.region, Some("b".id()));
 		assert!(record.fields.is_empty());
 	}

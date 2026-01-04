@@ -4,6 +4,7 @@ use index_vec::IndexVec;
 
 use crate::identifier::Id as IdentId;
 use crate::operators::{BinaryOp, UnaryOp};
+use crate::rings_type::Type;
 use crate::token;
 use crate::{Bounds, Span};
 
@@ -28,7 +29,7 @@ pub enum Kind {
 	Ident(IdentId),
 	Int(i64),
 	Dec(f64),
-	Define(Id, crate::Type),
+	Define(Id, Type),
 	Assign(Id, Id),
 	BinOp(BinaryOp, Id, Id),
 	UnOp(UnaryOp, Id),

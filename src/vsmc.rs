@@ -1,9 +1,10 @@
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
 use crate::error;
-use crate::identifier::Id as IdentId;
+use crate::identifier::{Id as IdentId, Map as IdentMap};
+use crate::rings_type::Type;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::{Bounds, Data, ProcData};
+use crate::{Bounds, Data, ProcData, Span, SrcPos};
 
 pub type LabelId = u32;
 pub type TempId = u32; // Temporary variable ID
@@ -62,7 +63,7 @@ pub enum Vsmc {
 }
 
 impl Vsmc {
-	pub fn to_text(&self, _data: &Data) -> String {
+	pub fn to_text(&self, _source: &str, _identifiers: &IdentMap<Span<SrcPos>>) -> String {
 		match self {
 			Vsmc::Push(value) => {
 				format!("PUSH  {value}")
@@ -90,12 +91,12 @@ impl Vsmc {
 			}
 			#[cfg(feature="call")]
 			Vsmc::Call { name, args, dst: Some(dst) } => {
-				format!("CALL  {}({}) -> {dst}", data.text(name),
+				format!("CALL  {}({}) -> {dst}", text(source, identifiers, name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
 			#[cfg(feature="call")]
 			Vsmc::Call { name, args, ..} => {
-				format!("CALL  {}({})", data.text(name),
+				format!("CALL  {}({})", text(source, identifiers, name),
 					args.iter().map(|loc| loc.to_text(data)).collect::<Vec<_>>().join(","))
 			}
 			Vsmc::Return(with_value) => {
@@ -108,7 +109,7 @@ impl Vsmc {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Section {
 	pub name: IdentId,
-	pub locals: Vec<(IdentId, crate::Type)>,
+	pub locals: Vec<(IdentId, Type)>,
 	//pub variables: HashMap<IdentId, usize>,
 	pub stack: Vec<i32>,
 	pub instructions: Vec<Vsmc>,
@@ -413,7 +414,7 @@ impl Section {
 				return Err(Error::missing_loop_bounds(self.name, *ast_id));
 			};
 
-			self.locals.push((index_id, crate::Type::Int));
+			self.locals.push((index_id, Type::Int));
 			let index_idx = self.locals.len() - 1;
 
 			// i = start
@@ -507,7 +508,7 @@ impl Error {
 		}
 	}
 
-	fn into_comp_error(self, db: &Data) -> crate::Error {
+	fn into_comp_error(self, db: &Data) -> error::Error {
 		let proc_data = &db.proc_db[&self.proc_id];
 
 		let (location, message) = match self.kind {
@@ -534,7 +535,7 @@ impl Error {
 			}
 		};
 
-		crate::Error::new(location, message)
+		error::Error::new(location, message)
 			.with_kind(error::Kind::LoweringVSMC)
 	}
 }
@@ -555,7 +556,18 @@ mod tests {
 		lexer::eval(Data::new("lowering".into(), source_str.into()))
 			.and_then(discovery::eval)
 			.and_then(parser::eval)
-			.and_then(type_checker::eval)
+			.and_then(|mut db| {
+				type_checker::eval(
+					&mut db.proc_db,
+					&db.regions,
+					&db.source,
+					&db.identifiers,
+					&db.procedures,
+					&db.tok_list,
+					&db.tok_pos,
+				).map_err(|e| e.display(&db.source_file, &db.source, &db.line_pos))
+						.map(|_| db)
+			})
 			.and_then(eval)
 			.unwrap_or_else(|msg| panic!("{msg}"))
 	}

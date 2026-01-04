@@ -2,19 +2,22 @@
 use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter, Result};
 
-use crate::{Data as MainDB, Target};
+use crate::identifier;
+use crate::{ProcData, Span, SrcPos, Target};
 
 mod m68k;
 mod sh2;
 mod x86_64;
 mod z80;
 
-pub fn eval(mut db: MainDB) -> MainDB {
-	let source = &db.source;
-	let identifiers = &db.identifiers;
-
-	for (proc_id, proc_data) in &mut db.proc_db {
-		let proc_name = MainDB::text_internal(source, identifiers, proc_id).to_owned();
+pub fn eval(
+	source: &str,
+	identifiers: &identifier::Map<Span<SrcPos>>,
+	proc_db: &mut identifier::Map<ProcData>,
+	asm_db: &mut identifier::Map<Data>,
+) {
+	for (proc_id, proc_data) in proc_db {
+		let proc_name = crate::text(source, identifiers, proc_id).to_owned();
 
 		let data = match proc_data.target {
 			Some(Target::M68k) => Data::M68k(m68k::lower(&proc_name, proc_data)),
@@ -24,7 +27,7 @@ pub fn eval(mut db: MainDB) -> MainDB {
 			Some(Target::Z80) => Data::Z80(z80::lower(&proc_name, proc_data)),
 		};
 
-		match db.asm_db.entry(*proc_id) {
+		match asm_db.entry(*proc_id) {
 			Entry::Vacant(e) => {
 				e.insert(data);
 			}
@@ -33,8 +36,6 @@ pub fn eval(mut db: MainDB) -> MainDB {
 			}
 		}
 	}
-
-	db
 }
 
 #[derive(Debug)]

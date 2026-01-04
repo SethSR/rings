@@ -23,9 +23,6 @@ mod type_checker;
 mod value;
 mod vsmc;
 
-use error::Error;
-use rings_type::Type;
-use task::Task;
 use span::Span;
 
 fn main() {
@@ -47,13 +44,27 @@ pub fn compile(file_path: String, source: &str) {
 		.and_then(discovery::eval)
 		.and_then(discovery::eval)
 		.and_then(parser::eval)
-		.and_then(type_checker::eval)
+		.and_then(|mut db| {
+			type_checker::eval(
+				&mut db.proc_db,
+				&db.regions,
+				&db.source,
+				&db.identifiers,
+				&db.procedures,
+				&db.tok_list,
+				&db.tok_pos,
+			).map_err(|e| e.display(&db.source_file, &db.source, &db.line_pos))
+				.map(|_| db)
+		})
 		.and_then(vsmc::eval)
-		.map(asm::eval);
+		.map(|mut db| {
+			asm::eval(&db.source, &db.identifiers, &mut db.proc_db, &mut db.asm_db);
+			db
+		});
 	match result {
 		Ok(data) => {
 			println!("{data}");
-			output(data);
+			output(&data.source_file, data.asm_db);
 		}
 		Err(msg) => eprintln!("{msg}"),
 	}
@@ -99,7 +110,7 @@ pub struct Data {
 	tables: discovery::TableMap,
 
 	/* Parsing */
-	task_queue: VecDeque<Task>,
+	task_queue: VecDeque<task::Task>,
 
 	/* Backend Procedure Data */
 	proc_db: identifier::Map<ProcData>,
@@ -113,8 +124,8 @@ pub struct ProcData {
 	ast_nodes: ast::KindList,
 	ast_pos_tok: ast::LocList,
 	/* Type Checking */
-	ast_to_type: HashMap<ast::Id, Type>,
-	ident_to_type: identifier::Map<Type>,
+	ast_to_type: HashMap<ast::Id, rings_type::Type>,
+	ident_to_type: identifier::Map<rings_type::Type>,
 	/* Lowering TAC */
 	tac_data: Option<vsmc::Section>,
 }
@@ -135,12 +146,12 @@ impl ProcData {
 	}
 }
 
-fn output(data: Data) {
-	let mut out_path = PathBuf::from(&data.source_file);
+fn output(source_file: &str, asm_db: identifier::Map<asm::Data>) {
+	let mut out_path = PathBuf::from(source_file);
 	out_path.set_extension("");
 
 	let mut out_data: HashMap<Target, Vec<asm::Data>> = HashMap::new();
-	for (_, asm_data) in data.asm_db {
+	for (_, asm_data) in asm_db {
 		let target_entry = match asm_data {
 			asm::Data::M68k(_) => out_data.entry(Target::M68k),
 			asm::Data::SH2(_) => out_data.entry(Target::SH2),
@@ -250,6 +261,73 @@ fn fmt_size(size: usize) -> String {
 	out.trim_start().to_string()
 }
 
+fn text<'a>(
+	source: &'a str,
+	identifiers: &identifier::Map<Span<SrcPos>>,
+	ident_id: &identifier::Id,
+) -> &'a str {
+	let Span { start, end } = identifiers[ident_id];
+	&source[start..end]
+}
+
+fn token_source(
+	source: &str,
+	identifiers: &identifier::Map<Span<SrcPos>>,
+	tok_list: &token::KindList,
+	tok_pos: &token::PosList,
+	token_id: token::Id,
+) -> Span<SrcPos> {
+	let kind = tok_list[token_id];
+	let start = tok_pos[token_id];
+	Span { start, end: start + kind.size(source, identifiers) }
+}
+
+fn ast_source(
+	source: &str,
+	identifiers: &identifier::Map<Span<SrcPos>>,
+	tok_list: &token::KindList,
+	tok_pos: &token::PosList,
+	proc_db: &identifier::Map<ProcData>,
+	proc_id: identifier::Id,
+	ast_id: ast::Id,
+) -> Span<SrcPos> {
+	let span = proc_db[&proc_id].ast_pos_tok[ast_id];
+	let start = tok_pos[span.start];
+	let end = tok_pos[span.end] + tok_list[span.end].size(source, identifiers);
+	Span { start, end }
+}
+
+fn type_size(
+	records: &discovery::RecordMap,
+	#[cfg(feature="table")]
+	tables: &discovery::TableMap,
+	ring_type: &rings_type::Type,
+) -> u32 {
+	match ring_type {
+		#[cfg(feature="types")]
+		rings_type::Type::Bool => 1,
+		#[cfg(feature="types")]
+		rings_type::Type::U8 => 1,
+		rings_type::Type::S8(_) => 1,
+		#[cfg(feature="types")]
+		rings_type::Type::U16 => 2,
+		#[cfg(feature="types")]
+		rings_type::Type::S16 => 2,
+		#[cfg(feature="types")]
+		rings_type::Type::U32 => 4,
+		#[cfg(feature="types")]
+		rings_type::Type::S32 => 4,
+		rings_type::Type::Record(ident_id) => records[ident_id].size(records),
+		#[cfg(feature="table")]
+		rings_type::Type::Table(ident_id) => {
+			tables[&ident_id].size(self)
+		}
+		rings_type::Type::Unit => 0,
+		rings_type::Type::Top | rings_type::Type::Bot => 0,
+		rings_type::Type::Int => 0,
+	}
+}
+
 impl Data {
 	pub fn new(source_file: String, source: Box<str>) -> Self {
 		Self {
@@ -260,61 +338,44 @@ impl Data {
 	}
 
 	pub fn text(&self, ident_id: &identifier::Id) -> &str {
-		Self::text_internal(&self.source, &self.identifiers, ident_id)
+		text(
+			&self.source, &self.identifiers,
+			ident_id,
+		)
 	}
 
-	pub fn text_internal<'a>(
-		source: &'a str,
-		identifiers: &identifier::Map<Span<SrcPos>>,
-		ident_id: &identifier::Id,
-	) -> &'a str {
-		let Span { start, end } = identifiers[ident_id];
-		&source[start..end]
-	}
-
-	pub fn token_source(&self, token_id: token::Id) -> Span<usize> {
-		let kind = self.tok_list[token_id];
-		let start = self.tok_pos[token_id];
-		Span { start, end: start + kind.size(self) }
+	pub fn token_source(&self, token_id: token::Id) -> Span<SrcPos> {
+		token_source(
+			&self.source, &self.identifiers,
+			&self.tok_list, &self.tok_pos,
+			token_id,
+		)
 	}
 
 	pub fn ast_source(&self, proc_id: identifier::Id, ast_id: ast::Id) -> Span<usize> {
-		let span = self.proc_db[&proc_id].ast_pos_tok[ast_id];
-		let start = self.token_source(span.start).start;
-		let end = self.token_source(span.end).end;
-		Span { start, end }
+		ast_source(
+			&self.source, &self.identifiers,
+			&self.tok_list, &self.tok_pos,
+			&self.proc_db, proc_id, ast_id,
+		)
 	}
 
-	fn type_text(&self, ring_type: &Type) -> String {
+	fn type_text(&self, ring_type: &rings_type::Type) -> String {
 		match ring_type {
-			Type::Record(ident_id) => self.text(ident_id).to_string(),
+			rings_type::Type::Record(ident_id) => {
+				text(
+					&self.source, &self.identifiers,
+					ident_id,
+				).to_string()
+			}
 			#[cfg(feature="table")]
-			Type::Table(ident_id) => self.text(&ident_id).to_string(),
+			Type::Table(ident_id) => {
+				text(
+					&self.source, &self.identifiers,
+					ident_id,
+				).to_string()
+			}
 			_ => format!("{ring_type:?}"),
-		}
-	}
-
-	fn type_size(&self, ring_type: &Type) -> u32 {
-		match ring_type {
-			#[cfg(feature="types")]
-			Type::Bool => 1,
-			#[cfg(feature="types")]
-			Type::U8 => 1,
-			Type::S8(_) => 1,
-			#[cfg(feature="types")]
-			Type::U16 => 2,
-			#[cfg(feature="types")]
-			Type::S16 => 2,
-			#[cfg(feature="types")]
-			Type::U32 => 4,
-			#[cfg(feature="types")]
-			Type::S32 => 4,
-			Type::Record(ident_id) => self.records[ident_id].size(self),
-			#[cfg(feature="table")]
-			Type::Table(ident_id) => self.tables[&ident_id].size(self),
-			Type::Unit => 0,
-			Type::Top | Type::Bot => 0,
-			Type::Int => 0,
 		}
 	}
 }
@@ -324,7 +385,7 @@ impl fmt::Display for Data {
 		writeln!(f, "=== Rings Compiler ===")?;
 		writeln!(f)?;
 
-		fn fields_to_str(data: &Data, fields: &[(identifier::Id, Type)]) -> String {
+		fn fields_to_str(data: &Data, fields: &[(identifier::Id, rings_type::Type)]) -> String {
 			fields.iter()
 				.map(|(field_id, field_type)| {
 					format!("{}:{}", data.text(field_id), data.type_text(field_type))
@@ -375,7 +436,7 @@ impl fmt::Display for Data {
 		writeln!(f, "{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "")?;
 		for (ident_id, record) in self.records.iter() {
 			let name = self.text(ident_id);
-			let size = record.size(self);
+			let size = record.size(&self.records);
 			let address = record.region
 				.map(|id| format!("#{:0>8X}", self.regions[&id].span.start))
 				.unwrap_or("-".to_string());
@@ -493,7 +554,7 @@ impl fmt::Display for Data {
 						"TAC-SECTIONS")?;
 					writeln!(f, "{:-<32} | {:-<16}", "", "")?;
 					for tac in &tac_data.instructions {
-						writeln!(f, "{:<32} | {}", self.text(proc_id), tac.to_text(self))?;
+						writeln!(f, "{:<32} | {}", self.text(proc_id), tac.to_text(&self.source, &self.identifiers))?;
 					}
 					writeln!(f)?;
 				}
