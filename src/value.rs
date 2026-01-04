@@ -1,8 +1,8 @@
+
 use crate::cursor::{Cursor, Error};
-use crate::Data;
-use crate::discovery::Value;
+use crate::discovery::{Value, ValueMap};
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::token::Kind as TKind;
+use crate::token::{Kind as TKind, KindList};
 
 type ValueResult = Result<Expr, Error>;
 
@@ -19,17 +19,21 @@ pub struct Expr {
 	pub loc: crate::Span<crate::token::Id>,
 }
 
-pub fn value_expression(cursor: &mut Cursor, data: &mut Data,
-	end_tokens: &[TKind], with_values: bool,
+pub fn value_expression(cursor: &mut Cursor,
+	tok_list: &KindList,
+	end_tokens: &[TKind],
+	with_values: Option<&ValueMap>,
 ) -> ValueResult {
-	value_expr_main(cursor, data, 0, end_tokens, with_values)
+	value_expr_main(cursor, tok_list, 0, end_tokens, with_values)
 }
 
-fn value_expr_main(cursor: &mut Cursor, data: &mut Data,
-	min_binding_power: usize, end_tokens: &[TKind], with_values: bool,
+fn value_expr_main(cursor: &mut Cursor,
+	tok_list: &KindList,
+	min_binding_power: usize, end_tokens: &[TKind],
+	with_values: Option<&ValueMap>,
 ) -> ValueResult {
-	let left = value_primary(cursor, data, with_values)?;
-	value_expr_sub(cursor, data, min_binding_power, left, end_tokens,
+	let left = value_primary(cursor, tok_list, with_values)?;
+	value_expr_sub(cursor, tok_list, min_binding_power, left, end_tokens,
 		with_values)
 }
 
@@ -81,24 +85,26 @@ fn reduce_binary_op(op: BinaryOp, left_kind: Kind, right_kind: Kind) -> Kind {
 	}
 }
 
-fn value_expr_sub(cursor: &mut Cursor, data: &mut Data,
+fn value_expr_sub(cursor: &mut Cursor,
+	tok_list: &KindList,
 	min_binding_power: usize, left: Expr,
-	end_tokens: &[TKind], with_values: bool,
+	end_tokens: &[TKind],
+	with_values: Option<&ValueMap>,
 ) -> ValueResult {
-	if end_tokens.contains(&cursor.current(data)) {
+	if end_tokens.contains(&cursor.current(tok_list)) {
 		cursor.advance();
 		return Ok(left);
 	}
 
-	let Ok(op) = cursor.expect_bin_op(data) else {
+	let Ok(op) = cursor.expect_bin_op(tok_list) else {
 		return Ok(left);
 	};
 	let op_binding_power = op.binding_power();
 
-	let right = value_primary(cursor, data, with_values)?;
+	let right = value_primary(cursor, tok_list, with_values)?;
 
 	if min_binding_power <= op_binding_power {
-		let right = value_expr_sub(cursor, data, op_binding_power,
+		let right = value_expr_sub(cursor, tok_list, op_binding_power,
 			right, end_tokens, with_values)?;
 
 		let kind = reduce_binary_op(op, left.kind, right.kind);
@@ -120,16 +126,17 @@ fn reduce_unary_op(op: UnaryOp, kind: Kind) -> Kind {
 	}
 }
 
-fn value_primary(cursor: &mut Cursor, data: &mut Data,
-	with_values: bool,
+fn value_primary(cursor: &mut Cursor,
+	tok_list: &KindList,
+	with_values: Option<&ValueMap>,
 ) -> ValueResult {
-	let unary_op = cursor.expect_unary_op(data);
+	let unary_op = cursor.expect_unary_op(tok_list);
 
 	let tok_start = cursor.index();
-	let mut kind = match cursor.current(data) {
-		TKind::Identifier(ident_id) => if with_values {
+	let mut kind = match cursor.current(tok_list) {
+		TKind::Identifier(ident_id) => if let Some(values) = with_values {
 			cursor.advance();
-			match data.values.get(&ident_id) {
+			match values.get(&ident_id) {
 				Some(Value::Integer(num)) => Kind::Int(*num),
 				Some(Value::Decimal(num)) => Kind::Dec(*num),
 				None => Kind::Unfinished,
@@ -144,7 +151,7 @@ fn value_primary(cursor: &mut Cursor, data: &mut Data,
 		TKind::False => { cursor.advance(); Kind::Int(0) }
 		TKind::OParen => {
 			cursor.advance();
-			let expr = value_expression(cursor, data, &[TKind::CParen], with_values)?;
+			let expr = value_expression(cursor, tok_list, &[TKind::CParen], with_values)?;
 			expr.kind
 		}
 		_ => return Err(cursor.expected_token("identifier or number")),

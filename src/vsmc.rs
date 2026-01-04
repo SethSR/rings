@@ -564,7 +564,21 @@ mod tests {
 
 		lexer::eval(Data::new("lowering".into(), source_str.into()))
 			.and_then(discovery::eval)
-			.and_then(parser::eval)
+			.and_then(|mut db| {
+				parser::eval(
+					&db.source,
+					&db.identifiers,
+					&db.tok_list,
+					&db.tok_pos,
+					&db.records,
+					&db.procedures,
+					&mut db.task_queue,
+					&mut db.values,
+					&mut db.proc_db,
+				).map_err(|e| e.into_comp_error(&db)
+						.display(&db.source_file, &db.source, &db.line_pos))
+					.map(|_| db)
+			})
 			.and_then(|mut db| {
 				type_checker::eval(
 					&mut db.proc_db,

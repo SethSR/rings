@@ -43,7 +43,19 @@ pub fn compile(file_path: String, source: &str) {
 	let db = Data::new(file_path, source.into());
 	let result = lexer::eval(db)
 		.and_then(discovery::eval)
-		.and_then(parser::eval)
+		.and_then(|mut db| {
+			parser::eval(
+				&db.source, &db.identifiers,
+				&db.tok_list, &db.tok_pos,
+				&db.records, &db.procedures,
+				&mut db.task_queue,
+				&mut db.values,
+				&mut db.proc_db,
+			).map_err(|e| e.into_comp_error(&db)
+					.with_kind(error::Kind::Parser)
+					.display(&db.source_file, &db.source, &db.line_pos))
+				.map(|_| db)
+		})
 		.and_then(|mut db| {
 			type_checker::eval(
 				&mut db.proc_db,
@@ -58,9 +70,9 @@ pub fn compile(file_path: String, source: &str) {
 		})
 		.and_then(|mut db| {
 			vsmc::eval(&mut db.proc_db)
-					.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db)
-							.display(&db.source_file, &db.source, &db.line_pos))
-					.map(|_| db)
+				.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db)
+					.display(&db.source_file, &db.source, &db.line_pos))
+				.map(|_| db)
 		})
 		.map(|mut db| {
 			asm::eval(&db.source, &db.identifiers, &mut db.proc_db, &mut db.asm_db);

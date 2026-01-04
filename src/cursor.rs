@@ -1,9 +1,14 @@
 
-use crate::{error, identifier};
+use crate::discovery::RecordMap;
+use crate::error;
+use crate::identifier::{Id as IdentId, Map as IdentMap};
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::rings_type::Type;
-use crate::token::{Id as TokenId, Kind as TokenKind};
-use crate::{Data, Span, SrcPos};
+use crate::token::{Id as TokenId, Kind as TokenKind, KindList, PosList};
+use crate::{
+	token_source,
+	Data, Span, SrcPos,
+};
 
 pub enum Error {
 	ExpectedToken { expected: String, found: TokenId },
@@ -49,19 +54,19 @@ impl Cursor {
 		self.0 += 1;
 	}
 
-	pub fn peek(&self, data: &Data, offset: usize) -> TokenKind {
-		data.tok_list
+	pub fn peek(&self, tok_list: &KindList, offset: usize) -> TokenKind {
+		tok_list
 			.get(self.0 + offset)
 			.copied()
 			.unwrap_or(TokenKind::Eof)
 	}
 
-	pub fn current(&self, data: &Data) -> TokenKind {
-		self.peek(data, 0)
+	pub fn current(&self, tok_list: &KindList) -> TokenKind {
+		self.peek(tok_list, 0)
 	}
 
-	pub fn expect(&mut self, data: &Data, expected: TokenKind) -> Result<(), Error> {
-		if self.current(data) == expected {
+	pub fn expect(&mut self, tok_list: &KindList, expected: TokenKind) -> Result<(), Error> {
+		if self.current(tok_list) == expected {
 			self.advance();
 			Ok(())
 		} else {
@@ -69,10 +74,10 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_identifier(&mut self, data: &Data,
+	pub fn expect_identifier(&mut self, tok_list: &KindList,
 		expected: &str,
-	) -> Result<identifier::Id, Error> {
-		if let TokenKind::Identifier(ident_id) = self.current(data) {
+	) -> Result<IdentId, Error> {
+		if let TokenKind::Identifier(ident_id) = self.current(tok_list) {
 			self.advance();
 			Ok(ident_id)
 		} else {
@@ -80,10 +85,10 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_integer(&mut self, data: &Data,
+	pub fn expect_integer(&mut self, tok_list: &KindList,
 		expected: &str,
 	) -> Result<i64, Error> {
-		if let TokenKind::Integer(num) = self.current(data) {
+		if let TokenKind::Integer(num) = self.current(tok_list) {
 			self.advance();
 			Ok(num)
 		} else {
@@ -91,18 +96,31 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_u32(&mut self, data: &Data, expected: &str) -> Result<u32, Error> {
-		self.expect_integer(data, expected)
-			.and_then(|num| check_integer_as_u32(
-				&format!("valid {expected}"),
-				num,
-				data.token_source(self.index() - 1) + data.token_source(self.index())
-			))
+	pub fn expect_u32(&mut self,
+		source: &str,
+		identifiers: &IdentMap<Span<SrcPos>>,
+		tok_list: &KindList,
+		tok_pos: &PosList,
+		expected: &str,
+	) -> Result<u32, Error> {
+		self.expect_integer(tok_list, expected)
+			.and_then(|num| {
+				let start = token_source(source, identifiers, tok_list, tok_pos, self.index() - 1);
+				let end = token_source(source, identifiers, tok_list, tok_pos, self.index());
+				check_integer_as_u32(
+					&format!("valid {expected}"),
+					num,
+					start + end,
+				)
+			})
 	}
 
-	pub fn expect_type(&mut self, data: &Data) -> Result<Type, Error> {
-		let result = match self.current(data) {
-			TokenKind::Identifier(ident_id) if data.records.contains_key(&ident_id) => {
+	pub fn expect_type(&mut self,
+		tok_list: &KindList,
+		records: &RecordMap,
+	) -> Result<Type, Error> {
+		let result = match self.current(tok_list) {
+			TokenKind::Identifier(ident_id) if records.contains_key(&ident_id) => {
 				Ok(Type::Record(ident_id))
 			}
 			#[cfg(feature="table")]
@@ -128,8 +146,8 @@ impl Cursor {
 		result
 	}
 
-	pub fn expect_bin_op(&mut self, data: &mut Data) -> Result<BinaryOp, Error> {
-		match self.current(data) {
+	pub fn expect_bin_op(&mut self, tok_list: &KindList) -> Result<BinaryOp, Error> {
+		match self.current(tok_list) {
 			TokenKind::Amp     => { self.advance(); Ok(BinaryOp::BinAnd) }
 			TokenKind::Amp2    => { self.advance(); Ok(BinaryOp::LogAnd) }
 			TokenKind::BangEq  => { self.advance(); Ok(BinaryOp::CmpNE) }
@@ -153,8 +171,8 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_unary_op(&mut self, data: &Data) -> Option<UnaryOp> {
-		match self.current(data) {
+	pub fn expect_unary_op(&mut self, tok_list: &KindList) -> Option<UnaryOp> {
+		match self.current(tok_list) {
 			TokenKind::Dash => { self.advance(); Some(UnaryOp::Neg) }
 			TokenKind::Bang => { self.advance(); Some(UnaryOp::Not) }
 			_ => None,
