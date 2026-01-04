@@ -40,8 +40,8 @@ fn main() {
 type SrcPos = usize;
 
 pub fn compile(file_path: String, source: &str) {
-	let result = lexer::eval(Data::new(file_path, source.into()))
-		.and_then(discovery::eval)
+	let db = Data::new(file_path, source.into());
+	let result = lexer::eval(db)
 		.and_then(discovery::eval)
 		.and_then(parser::eval)
 		.and_then(|mut db| {
@@ -56,7 +56,12 @@ pub fn compile(file_path: String, source: &str) {
 			).map_err(|e| e.display(&db.source_file, &db.source, &db.line_pos))
 				.map(|_| db)
 		})
-		.and_then(vsmc::eval)
+		.and_then(|mut db| {
+			vsmc::eval(&mut db.proc_db)
+					.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db)
+							.display(&db.source_file, &db.source, &db.line_pos))
+					.map(|_| db)
+		})
 		.map(|mut db| {
 			asm::eval(&db.source, &db.identifiers, &mut db.proc_db, &mut db.asm_db);
 			db

@@ -1,29 +1,32 @@
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
-use crate::error;
 use crate::identifier::{Id as IdentId, Map as IdentMap};
 use crate::rings_type::Type;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::{Bounds, Data, ProcData, Span, SrcPos};
+use crate::{
+	error, token,
+	text,
+	Bounds, ProcData, Span, SrcPos,
+};
 
 pub type LabelId = u32;
 pub type TempId = u32; // Temporary variable ID
 
-pub fn eval(mut data: Data) -> Result<Data, String> {
-	for (proc_id, proc_data) in &mut data.proc_db {
+pub fn eval(proc_db: &mut IdentMap<ProcData>) -> Result<(), Error> {
+	for (proc_id, proc_data) in proc_db {
 		let mut section = Section::default();
 		section.name = *proc_id;
 		match section.lower(proc_data) {
 			Ok(_) => {
 				proc_data.tac_data = Some(section);
 			}
-			Err(e) => return Err(e.into_comp_error(&data)
-				.with_kind(error::Kind::LoweringVSMC)
-				.display(&data.source_file, &data.source, &data.line_pos)),
+			Err(e) => return Err(e),//.into_comp_error(&data)
+				//.with_kind(error::Kind::LoweringVSMC)
+				//.display(&data.source_file, &data.source, &data.line_pos)),
 		}
 	}
 
-	Ok(data)
+	Ok(())
 }
 
 /// Virtual Stack-Machine Code
@@ -472,7 +475,7 @@ enum ErrorKind {
 	UnknownIdentifier(IdentId),
 }
 
-struct Error {
+pub struct Error {
 	kind: ErrorKind,
 	proc_id: IdentId,
 }
@@ -508,29 +511,35 @@ impl Error {
 		}
 	}
 
-	fn into_comp_error(self, db: &Data) -> error::Error {
-		let proc_data = &db.proc_db[&self.proc_id];
+	pub fn into_comp_error(self,
+		source: &str,
+		identifiers: &IdentMap<Span<SrcPos>>,
+		tok_pos: &token::PosList,
+		proc_db: &IdentMap<ProcData>,
+	) -> error::Error {
+		let proc_data = &proc_db[&self.proc_id];
 
 		let (location, message) = match self.kind {
 			ErrorKind::MissingAstNode(ast_id) => {
 				let ast_pos = proc_data.ast_pos_tok[ast_id];
-				let start = db.tok_pos[ast_pos.start];
-				let end = db.tok_pos[ast_pos.end];
+				let start = tok_pos[ast_pos.start];
+				let end = tok_pos[ast_pos.end];
 				let location = crate::Span { start, end };
-				let message = format!("{} not found in procedure '{}'", ast_id, db.text(&self.proc_id));
+				let message = format!("{} not found in procedure '{}'", ast_id, text(source, identifiers, &self.proc_id));
 				(location, message)
 			}
 			ErrorKind::MissingLoopBounds(ast_id) => {
 				let ast_pos = proc_data.ast_pos_tok[ast_id];
-				let start = db.tok_pos[ast_pos.start];
-				let end = db.tok_pos[ast_pos.end];
+				let start = tok_pos[ast_pos.start];
+				let end = tok_pos[ast_pos.end];
 				let location = crate::Span { start, end };
-				let message = format!("type-checker missed a bounds check in {}", db.text(&self.proc_id));
+				let message = format!("type-checker missed a bounds check in {}", text(source, identifiers, &self.proc_id));
 				(location, message)
 			}
 			ErrorKind::UnknownIdentifier(ident_id) => {
-				let location = db.identifiers[&ident_id];
-				let message = format!("Unknown identifier '{}' in procedure '{}'", db.text(&ident_id), db.text(&self.proc_id));
+				let location = identifiers[&ident_id];
+				let message = format!("Unknown identifier '{}' in procedure '{}'",
+					text(source, identifiers, &ident_id), text(source, identifiers, &self.proc_id));
 				(location, message)
 			}
 		};
@@ -568,7 +577,12 @@ mod tests {
 				).map_err(|e| e.display(&db.source_file, &db.source, &db.line_pos))
 						.map(|_| db)
 			})
-			.and_then(eval)
+			.and_then(|mut db| {
+				eval(&mut db.proc_db)
+					.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db)
+						.display(&db.source_file, &db.source, &db.line_pos))
+					.map(|_| db)
+			})
 			.unwrap_or_else(|msg| panic!("{msg}"))
 	}
 
