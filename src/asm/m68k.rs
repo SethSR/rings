@@ -1,12 +1,9 @@
 
 use std::fmt::{Display, Formatter, Result};
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::ProcData;
-use crate::vsmc::Vsmc;
+use crate::vsmc::{Section, Vsmc};
 
-pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
-	let section = proc_data.tac_data.as_mut().unwrap();
-
+pub fn lower(proc_name: &str, section: Section) -> Vec<Asm> {
 	// The base address for the variable stack
 	const VAR_SP: Addr = Addr::A6;
 	// The base address for the function (call) stack
@@ -15,10 +12,10 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 	let mut data = vec![
 		Asm::Label(proc_name.to_string()),
 	];
-	for asm in section.instructions.clone() {
+	for asm in &section.instructions {
 		match asm {
 			Vsmc::Push(value) => {
-				data.push(Asm::Move(Sz::W, EA::Imm(value), EA::Pre(FUN_SP)));
+				data.push(Asm::Move(Sz::W, EA::Imm(*value), EA::Pre(FUN_SP)));
 			}
 			Vsmc::BinOp(op) => {
 				data.push(Asm::Move(Sz::W, EA::Pst(FUN_SP), EA::Dat(Data::D0)));
@@ -107,10 +104,10 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 				}
 			}
 			Vsmc::Load(stack_idx) => {
-				data.push(Asm::Move(Sz::W, EA::Dsp(stack_idx as i16, VAR_SP), EA::Pre(FUN_SP)));
+				data.push(Asm::Move(Sz::W, EA::Dsp(*stack_idx as i16, VAR_SP), EA::Pre(FUN_SP)));
 			}
 			Vsmc::Store(stack_idx) => {
-				data.push(Asm::Move(Sz::W, EA::Pst(FUN_SP), EA::Dsp(stack_idx as i16, VAR_SP)));
+				data.push(Asm::Move(Sz::W, EA::Pst(FUN_SP), EA::Dsp(*stack_idx as i16, VAR_SP)));
 			}
 			Vsmc::Label(id) => {
 				data.push(Asm::Label(format!("{proc_name}_{id}")));
@@ -123,7 +120,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 				data.push(Asm::Bcc(Cond::NE, format!("{proc_name}_{id}")));
 			}
 			Vsmc::Return(with_value) => {
-				if with_value {
+				if *with_value {
 					data.push(Asm::Move(Sz::W, EA::Pst(FUN_SP), EA::Dat(Data::D0)));
 				}
 				data.push(Asm::Rts);

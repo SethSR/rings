@@ -1,39 +1,94 @@
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::ops::Range;
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind as AKind, PathSegment};
 use crate::cursor::{Cursor, Error};
-use crate::discovery::{ProcMap, RecordMap, Value, ValueMap};
+use crate::discovery::{Data as DscData, RecordMap, Value, ValueMap};
 use crate::identifier::{Id as IdentId, Map as IdentMap};
+use crate::input::Data as InputData;
+use crate::lexer::Data as LexData;
 use crate::operators::BinaryOp;
 use crate::task::{Kind as TaskKind, Task};
-use crate::token::{Id as TokenId, Kind as TKind, Kind, KindList, PosList};
-use crate::{Bounds, ProcData, Span, SrcPos};
+use crate::token::{Id as TokenId, Kind as TKind, Kind};
+use crate::{ast, identifier, rings_type, Bounds, Target};
 
 type ParseResult<T> = Result<T, Error>;
 
+#[derive(Debug, Default, Clone)]
+pub struct ProcData {
+	pub target: Option<Target>,
+	pub ast_start: ast::Id,
+	pub ast_nodes: ast::KindList,
+	pub ast_pos_tok: ast::LocList,
+	/* Type Checking */
+	pub ast_to_type: HashMap<ast::Id, rings_type::Type>,
+	pub ident_to_type: identifier::Map<rings_type::Type>,
+}
+
+impl ProcData {
+	pub fn add_ast(&mut self, kind: ast::Kind,
+		tok_range: Range<TokenId>,
+	) -> ast::Id {
+		self.ast_nodes.push(kind);
+		self.ast_pos_tok.push(tok_range.into());
+		ast::Id::new(self.ast_nodes.len() - 1)
+	}
+}
+
+pub fn print(
+	proc_db: &IdentMap<ProcData>,
+	input: &InputData,
+	lex_data: &LexData,
+) {
+	if proc_db.is_empty() {
+		return;
+	}
+
+	for (proc_id, proc_data) in proc_db.iter() {
+		let proc_name = crate::text(input, lex_data, proc_id);
+
+		if !proc_data.ast_to_type.is_empty() {
+			println!();
+			println!("{:<32} | {:<8} | TYPE",
+				"PROCEDURE", "AST-ID");
+			println!("{:-<32} | {:-<8} | {:-<8}", "", "", "");
+			for (ast_id, rings_type) in &proc_data.ast_to_type {
+				let ast = ast_id.to_string();
+				let ast_type = crate::type_text(input, lex_data, rings_type);
+				println!("{proc_name:<32} | {ast:<8} | {ast_type:<8}");
+			}
+		}
+
+		if !proc_data.ident_to_type.is_empty() {
+			println!();
+			println!("{:<32} | {:<16} | TYPE",
+				"PROCEDURE", "VARIABLE");
+			println!("{:-<32} | {:-<16} | {:-<8}", "", "", "");
+			for (ident_id, rings_type) in &proc_data.ident_to_type {
+				let var_name = crate::text(input, lex_data, ident_id);
+				let var_type = crate::type_text(input, lex_data, rings_type);
+				println!("{proc_name:<32} | {var_name:<16} | {var_type:<8}");
+			}
+		}
+	}
+}
+
 pub fn eval(
-	source: &str, identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList, tok_pos: &PosList,
-	records: &RecordMap,
-	procedures: &ProcMap,
-	task_queue: &mut VecDeque<Task>,
-	values: &mut ValueMap,
-	proc_db: &mut IdentMap<ProcData>,
-) -> Result<(), Error> {
+	input: &InputData,
+	lex_data: &LexData,
+	dsc_data: &mut DscData,
+	mut task_queue: VecDeque<Task>,
+) -> Result<IdentMap<ProcData>, Error> {
+	let mut out = IdentMap::<ProcData>::default();
+
 	let queue_start_len = task_queue.len();
-	for task in &mut *task_queue {
+	for task in &mut task_queue {
 		task.prev_queue_length = Some(queue_start_len);
 	}
 
 	while let Some(mut task) = task_queue.pop_front() {
-		if let Err((token_id, err)) = parse(
-			source, identifiers,
-			tok_list, tok_pos,
-			records,
-			values, proc_db,
-			&task,
-		) {
+		if let Err((token_id, err)) = parse(input, lex_data, dsc_data, &mut out, &task) {
 			// We didn't finish...
 			if token_id > task.prev_furthest_token {
 				// ...but we made progress, so we're not stuck yet. Re-queue and try again.
@@ -47,36 +102,33 @@ pub fn eval(
 				task_queue.push_back(task);
 			} else {
 				task_queue.push_back(task);
-				return Err(err);//.into_comp_error(&data)
-						//.with_kind(error::Kind::Parser)
-						//.display(&data.source_file, &data.source, &data.line_pos));
+				return Err(err);
 			}
 		} else {
-			proc_db.entry(task.name_id)
+			out.entry(task.name_id)
 				.and_modify(|proc_data| {
-					proc_data.target = procedures[&task.name_id].target;
+					proc_data.target = dsc_data.procedures[&task.name_id].target;
 				});
 		}
 	}
 
-	Ok(())
+	Ok(out)
 }
 
 fn parse(
-	source: &str, identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList, tok_pos: &PosList,
-	records: &RecordMap,
-	values: &mut ValueMap,
+	input: &InputData,
+	lex_data: &LexData,
+	dsc_data: &mut DscData,
 	proc_db: &mut IdentMap<ProcData>,
 	task: &Task,
 ) -> Result<(), (TokenId, Error)> {
 	let cursor = Cursor::new(task.tok_start);
 	match task.kind {
-		TaskKind::Value => parse_value(cursor, tok_list, tok_pos, values)
+		TaskKind::Value => parse_value(cursor, lex_data, &dsc_data.values)
 			.map(|value| {
-				values.insert(task.name_id, value);
+				dsc_data.values.insert(task.name_id, value);
 			}),
-		TaskKind::Proc => parse_procedure(cursor, source, identifiers, tok_list, tok_pos, records)
+		TaskKind::Proc => parse_procedure(cursor, input, lex_data, &dsc_data.records)
 			.map(|proc_data| {
 				proc_db.insert(task.name_id, proc_data);
 			}),
@@ -85,19 +137,19 @@ fn parse(
 
 fn parse_value(
 	mut cursor: Cursor,
-	tok_list: &KindList, tok_pos: &PosList,
+	lex_data: &LexData,
 	values: &ValueMap,
 ) -> Result<Value, (TokenId, Error)> {
 	use crate::value::{Kind as VKind, value_expression};
 
-	value_expression(&mut cursor, tok_list, &[Kind::Semicolon], Some(values))
+	value_expression(&mut cursor, &lex_data, &[Kind::Semicolon], Some(values))
 		.map_err(|e| (cursor.index(), e))
 		.and_then(|result| match result.kind {
 			VKind::Int(num) => Ok(Value::Integer(num)),
 			VKind::Dec(num) => Ok(Value::Decimal(num)),
 			VKind::Unfinished => {
-				let start = tok_pos[result.loc.start];
-				let end = tok_pos[result.loc.end];
+				let start = lex_data.tok_pos[result.loc.start];
+				let end = lex_data.tok_pos[result.loc.end];
 				let err = Error::UnresolvedType {
 					span: (start..end).into(),
 					msg: format!("{:?}", result.kind),
@@ -109,8 +161,8 @@ fn parse_value(
 
 fn parse_procedure(
 	mut cursor: Cursor,
-	source: &str, identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList, tok_pos: &PosList,
+	input: &InputData,
+	lex_data: &LexData,
 	records: &RecordMap,
 ) -> Result<ProcData, (TokenId, Error)> {
 	let cursor = &mut cursor;
@@ -118,12 +170,12 @@ fn parse_procedure(
 	let start = AstId::new(proc_data.ast_nodes.len());
 
 	// skip to the procedure body
-	while TKind::OBrace != cursor.peek(tok_list, 0) {
+	while TKind::OBrace != cursor.peek(lex_data, 0) {
 		cursor.advance();
 	}
 
 	let tok_start = cursor.index();
-	let mut block = parse_block(cursor, source, identifiers, tok_list, tok_pos, records, &mut proc_data)
+	let mut block = parse_block(cursor, input, lex_data, records, &mut proc_data)
 		.map_err(|e| (cursor.index(), e))?;
 	let tok_end = cursor.index();
 
@@ -149,73 +201,71 @@ fn parse_procedure(
 
 fn parse_block(
 	cursor: &mut Cursor,
-	source: &str,
-	identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList,
-	tok_pos: &PosList,
+	input: &InputData,
+	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
 ) -> ParseResult<AstBlock> {
-	cursor.expect(tok_list, TKind::OBrace)?;
+	cursor.expect(lex_data, TKind::OBrace)?;
 
 	let mut block = vec![];
-	while ![TKind::Eof, TKind::CBrace].contains(&cursor.current(tok_list)) {
-		block.push(match cursor.current(tok_list) {
-			TKind::Let => parse_let_statement(cursor, tok_list, records, proc_data)?,
-			TKind::Identifier(ident_id) => parse_ident_statement(cursor, tok_list, proc_data, ident_id)?,
+	while ![TKind::Eof, TKind::CBrace].contains(&cursor.current(lex_data)) {
+		block.push(match cursor.current(lex_data) {
+			TKind::Let => parse_let_statement(cursor, lex_data, records, proc_data)?,
+			TKind::Identifier(ident_id) => parse_ident_statement(cursor, lex_data, proc_data, ident_id)?,
 			TKind::OBrace => {
 				let tok_start = cursor.index();
-				let b = parse_block(cursor, source, identifiers, tok_list, tok_pos, records, proc_data)?;
+				let b = parse_block(cursor, input, lex_data, records, proc_data)?;
 				let tok_range = tok_start..cursor.index();
 				proc_data.add_ast(AKind::Block(b), tok_range)
 			}
-			TKind::Return => parse_return_statement(cursor, tok_list, proc_data)?,
-			TKind::If => parse_if_statement(cursor, source, identifiers, tok_list, tok_pos, records, proc_data)?,
-			TKind::For => parse_for_statement(cursor, source, identifiers, tok_list, tok_pos, records, proc_data)?,
-			TKind::While => parse_while_statement(cursor, source, identifiers, tok_list, tok_pos, records, proc_data)?,
+			TKind::Return => parse_return_statement(cursor, lex_data, proc_data)?,
+			TKind::If => parse_if_statement(cursor, input, lex_data, records, proc_data)?,
+			TKind::For => parse_for_statement(cursor, input, lex_data, records, proc_data)?,
+			TKind::While => parse_while_statement(cursor, input, lex_data, records, proc_data)?,
 			_ => return Err(cursor.expected_token("definition, assignment, return, if, or for statement")),
 		});
 	}
 
-	cursor.expect(tok_list, TKind::CBrace)?;
+	cursor.expect(lex_data, TKind::CBrace)?;
 
 	Ok(AstBlock(block))
 }
 
 fn parse_ident_statement(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	ident_id: IdentId,
 ) -> ParseResult<AstId> {
-	let left_id = parse_access(cursor, tok_list, proc_data, ident_id)?;
+	let left_id = parse_access(cursor, lex_data, proc_data, ident_id)?;
 
-	match cursor.current(tok_list) {
-		TKind::Eq => parse_assignment(cursor, tok_list, proc_data, left_id),
-		TKind::PlusEq => parse_op_assignment(cursor, tok_list, proc_data, left_id, BinaryOp::Add),
-		TKind::DashEq => parse_op_assignment(cursor, tok_list, proc_data, left_id, BinaryOp::Sub),
-		TKind::StarEq => parse_op_assignment(cursor, tok_list, proc_data, left_id, BinaryOp::Mul),
-		TKind::SlashEq => parse_op_assignment(cursor, tok_list, proc_data, left_id, BinaryOp::Div),
+	match cursor.current(lex_data) {
+		TKind::Eq => parse_assignment(cursor, lex_data, proc_data, left_id),
+		TKind::PlusEq => parse_op_assignment(cursor, lex_data, proc_data, left_id, BinaryOp::Add),
+		TKind::DashEq => parse_op_assignment(cursor, lex_data, proc_data, left_id, BinaryOp::Sub),
+		TKind::StarEq => parse_op_assignment(cursor, lex_data, proc_data, left_id, BinaryOp::Mul),
+		TKind::SlashEq => parse_op_assignment(cursor, lex_data, proc_data, left_id, BinaryOp::Div),
 		_ => Err(cursor.expected_token("definition or assignment statement")),
 	}
 }
 
 fn parse_let_statement(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
-	cursor.expect(tok_list, TKind::Let)?;
+	cursor.expect(lex_data, TKind::Let)?;
 	let tok_ident_start = cursor.index();
-	let ident_id = cursor.expect_identifier(tok_list, "variable identifier")?;
+	let ident_id = cursor.expect_identifier(lex_data, "variable identifier")?;
 	let tok_ident_range = tok_ident_start..cursor.index();
-	cursor.expect(tok_list, TKind::Colon)?;
-	let var_type = cursor.expect_type(tok_list, records)?;
-	cursor.expect(tok_list, TKind::Eq)?;
-	let ast_id = parse_expression(cursor, tok_list, proc_data, &[TKind::Semicolon])?;
-	cursor.expect(tok_list, TKind::Semicolon)?;
+	cursor.expect(lex_data, TKind::Colon)?;
+	let var_type = cursor.expect_type(lex_data, records)?;
+	cursor.expect(lex_data, TKind::Eq)?;
+	let ast_id = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
+	cursor.expect(lex_data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
 	let ident = proc_data.add_ast(AKind::Ident(ident_id), tok_ident_range);
 	let define = proc_data.add_ast(AKind::Define(ident, var_type), tok_range.clone());
@@ -224,28 +274,28 @@ fn parse_let_statement(
 
 fn parse_access(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	ident_id: IdentId,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
 	cursor.advance(); // skip the identifier
 	let mut accesses = vec![];
-	while [TKind::Dot, TKind::OBracket].contains(&cursor.current(tok_list)) {
-		match cursor.current(tok_list) {
+	while [TKind::Dot, TKind::OBracket].contains(&cursor.current(lex_data)) {
+		match cursor.current(lex_data) {
 			// a.b -> location of 'a' + offset of 'b'
 			TKind::Dot => {
-				cursor.expect(tok_list, TKind::Dot)?;
-				let id = cursor.expect_identifier(tok_list, "field name")?;
+				cursor.expect(lex_data, TKind::Dot)?;
+				let id = cursor.expect_identifier(lex_data, "field name")?;
 				accesses.push(PathSegment::Field(id));
 			}
 			// a[b].c -> location of 'a' + 'b' * size of 'c'
 			TKind::OBracket => {
-				cursor.expect(tok_list, TKind::OBracket)?;
-				let index = parse_expression(cursor, tok_list, proc_data, &[TKind::CBracket])?;
-				cursor.expect(tok_list, TKind::CBracket)?;
-				cursor.expect(tok_list, TKind::Dot)?;
-				let id = cursor.expect_identifier(tok_list, "field name")?;
+				cursor.expect(lex_data, TKind::OBracket)?;
+				let index = parse_expression(cursor, lex_data, proc_data, &[TKind::CBracket])?;
+				cursor.expect(lex_data, TKind::CBracket)?;
+				cursor.expect(lex_data, TKind::Dot)?;
+				let id = cursor.expect_identifier(lex_data, "field name")?;
 				accesses.push(PathSegment::Index(index, id));
 			}
 			_ => break,
@@ -264,28 +314,28 @@ fn parse_access(
 
 fn parse_assignment(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	lvalue_id: AstId,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
-	cursor.expect(tok_list, TKind::Eq)?;
-	let ast_id = parse_expression(cursor, tok_list, proc_data, &[TKind::Semicolon])?;
-	cursor.expect(tok_list, TKind::Semicolon)?;
+	cursor.expect(lex_data, TKind::Eq)?;
+	let ast_id = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
+	cursor.expect(lex_data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
 	Ok(proc_data.add_ast(AKind::Assign(lvalue_id, ast_id), tok_range))
 }
 
 fn parse_op_assignment(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	lvalue_id: AstId, op: BinaryOp,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
 	cursor.advance(); // skip the operator token
-	let ast_id = parse_expression(cursor, tok_list, proc_data, &[TKind::Semicolon])?;
-	cursor.expect(tok_list, TKind::Semicolon)?;
+	let ast_id = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
+	cursor.expect(lex_data, TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
 	let op_id = proc_data.add_ast(AKind::BinOp(op, lvalue_id, ast_id),
 		tok_range.clone());
@@ -294,16 +344,16 @@ fn parse_op_assignment(
 
 fn parse_return_statement(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
-	cursor.expect(tok_list, TKind::Return)?;
-	let ast_id = match cursor.expect(tok_list, TKind::Semicolon) {
+	cursor.expect(lex_data, TKind::Return)?;
+	let ast_id = match cursor.expect(lex_data, TKind::Semicolon) {
 		Ok(_) => None,
 		Err(_) => {
-			let result = parse_expression(cursor, tok_list, proc_data, &[TKind::Semicolon])?;
-			cursor.expect(tok_list, TKind::Semicolon)?;
+			let result = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
+			cursor.expect(lex_data, TKind::Semicolon)?;
 			Some(result)
 		},
 	};
@@ -313,18 +363,18 @@ fn parse_return_statement(
 
 fn parse_if_statement(
 	cursor: &mut Cursor,
-	source: &str, identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList, tok_pos: &PosList,
+	input: &InputData,
+	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
-	cursor.expect(tok_list, TKind::If)?;
-	let cond_id = parse_expression(cursor, tok_list, proc_data, &[TKind::OBrace])?;
-	let then_block = parse_block(cursor, source, identifiers, tok_list, tok_pos, records, proc_data)?;
-	let else_block = if TKind::Else == cursor.current(tok_list) {
+	cursor.expect(lex_data, TKind::If)?;
+	let cond_id = parse_expression(cursor, lex_data, proc_data, &[TKind::OBrace])?;
+	let then_block = parse_block(cursor, input, lex_data, records, proc_data)?;
+	let else_block = if TKind::Else == cursor.current(lex_data) {
 		cursor.advance();
-		parse_block(cursor, source, identifiers, tok_list, tok_pos, records, proc_data)?
+		parse_block(cursor, input, lex_data, records, proc_data)?
 	} else {
 		AstBlock(vec![])
 	};
@@ -334,61 +384,61 @@ fn parse_if_statement(
 
 fn parse_while_statement(
 	cursor: &mut Cursor,
-	source: &str, identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList, tok_pos: &PosList,
+	input: &InputData,
+	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
-	cursor.expect(tok_list, TKind::While)?;
-	let cond = parse_expression(cursor, tok_list, proc_data, &[TKind::OBrace])?;
-	let block = parse_block(cursor, source, identifiers, tok_list, tok_pos, records, proc_data)?;
+	cursor.expect(lex_data, TKind::While)?;
+	let cond = parse_expression(cursor, lex_data, proc_data, &[TKind::OBrace])?;
+	let block = parse_block(cursor, input, lex_data, records, proc_data)?;
 	let tok_range = tok_start..cursor.index();
 	Ok(proc_data.add_ast(AKind::While(cond, block), tok_range))
 }
 
 fn parse_for_statement(
 	cursor: &mut Cursor,
-	source: &str, identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList, tok_pos: &PosList,
+	input: &InputData,
+	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
-	cursor.expect(tok_list, TKind::For)?;
+	cursor.expect(lex_data, TKind::For)?;
 
 	let mut vars = vec![];
-	let ident_id = cursor.expect_identifier(tok_list, "identifier")?;
+	let ident_id = cursor.expect_identifier(lex_data, "identifier")?;
 	vars.push(ident_id);
 
-	while TKind::Comma == cursor.current(tok_list) {
+	while TKind::Comma == cursor.current(lex_data) {
 		cursor.advance();
-		let ident_id = cursor.expect_identifier(tok_list, "identifier")?;
+		let ident_id = cursor.expect_identifier(lex_data, "identifier")?;
 		vars.push(ident_id);
 	}
 
-	while TKind::In != cursor.current(tok_list) {
-		let ident_id = cursor.expect_identifier(tok_list, "identifier")?;
+	while TKind::In != cursor.current(lex_data) {
+		let ident_id = cursor.expect_identifier(lex_data, "identifier")?;
 		vars.push(ident_id);
-		if TKind::In == cursor.current(tok_list) {
+		if TKind::In == cursor.current(lex_data) {
 			break;
 		}
-		cursor.expect(tok_list, TKind::Comma)?;
+		cursor.expect(lex_data, TKind::Comma)?;
 	}
 
-	cursor.expect(tok_list, TKind::In)?;
+	cursor.expect(lex_data, TKind::In)?;
 
 	// for x in Table {}
 	// for x in Table[..] {}
 	// for x in [0..10] {}
-	let (table_id, range) = if let Ok(table_id) = cursor.expect_identifier(tok_list, "COMPILER ERROR") {
+	let (table_id, range) = if let Ok(table_id) = cursor.expect_identifier(lex_data, "COMPILER ERROR") {
 		// Table loop
-		let range = if TKind::OBracket == cursor.current(tok_list) {
+		let range = if TKind::OBracket == cursor.current(lex_data) {
 			cursor.advance();
-			let range_start = cursor.expect_u32(source, identifiers, tok_list, tok_pos, "COMPILER ERROR").ok();
-			cursor.expect(tok_list, TKind::Dot2)?;
-			let range_end = cursor.expect_u32(source, identifiers, tok_list, tok_pos, "COMPILER ERROR").ok();
-			cursor.expect(tok_list, TKind::CBracket)?;
+			let range_start = cursor.expect_u32(input, lex_data, "COMPILER ERROR").ok();
+			cursor.expect(lex_data, TKind::Dot2)?;
+			let range_end = cursor.expect_u32(input, lex_data, "COMPILER ERROR").ok();
+			cursor.expect(lex_data, TKind::CBracket)?;
 			match (range_start, range_end) {
 				(Some(start), Some(end)) => Some(Bounds::Full { start, end }),
 				(Some(start), None) => Some(Bounds::From { start }),
@@ -399,18 +449,18 @@ fn parse_for_statement(
 			None
 		};
 		(Some(table_id), range)
-	} else if TKind::OBracket == cursor.current(tok_list) {
+	} else if TKind::OBracket == cursor.current(lex_data) {
 		cursor.advance();
-		let start = cursor.expect_u32(source, identifiers, tok_list, tok_pos, "start (inclusive) value")?;
-		cursor.expect(tok_list, TKind::Dot2)?;
-		let end = cursor.expect_u32(source, identifiers, tok_list, tok_pos, "end (exclusive) value")?;
-		cursor.expect(tok_list, TKind::CBracket)?;
+		let start = cursor.expect_u32(input, lex_data, "start (inclusive) value")?;
+		cursor.expect(lex_data, TKind::Dot2)?;
+		let end = cursor.expect_u32(input, lex_data, "end (exclusive) value")?;
+		cursor.expect(lex_data, TKind::CBracket)?;
 		(None, Some(Bounds::Full { start, end }))
 	} else {
 		return Err(cursor.expected_token("table name or bracketed range"));
 	};
 
-	let block = parse_block(cursor, source, identifiers, tok_list, tok_pos, records, proc_data)?;
+	let block = parse_block(cursor, input, lex_data, records, proc_data)?;
 
 	let tok_range = tok_start..cursor.index();
 	Ok(proc_data.add_ast(AKind::For(vars, table_id, range, block), tok_range))
@@ -418,73 +468,73 @@ fn parse_for_statement(
 
 fn parse_call(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	ident_id: IdentId,
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
 	cursor.advance();
-	cursor.expect(tok_list, TKind::OParen)?;
+	cursor.expect(lex_data, TKind::OParen)?;
 	let end_tokens = &[TKind::CParen, TKind::Comma];
 
 	let mut exprs = vec![];
-	while TKind::CParen != cursor.current(tok_list) {
-		let expr = parse_expression(cursor, tok_list, proc_data, end_tokens)?;
+	while TKind::CParen != cursor.current(lex_data) {
+		let expr = parse_expression(cursor, lex_data, proc_data, end_tokens)?;
 		exprs.push(expr);
 
-		if TKind::Comma == cursor.current(tok_list) {
+		if TKind::Comma == cursor.current(lex_data) {
 			cursor.advance();
-			if TKind::CParen == cursor.current(tok_list) {
+			if TKind::CParen == cursor.current(lex_data) {
 				break;
 			}
-		} else if TKind::CParen != cursor.current(tok_list) {
+		} else if TKind::CParen != cursor.current(lex_data) {
 			break;
 		}
 	}
 
-	cursor.expect(tok_list, TKind::CParen)?;
+	cursor.expect(lex_data, TKind::CParen)?;
 	let tok_range = tok_start..cursor.index();
 	Ok(proc_data.add_ast(AKind::Call(ident_id, exprs), tok_range))
 }
 
 fn parse_expression(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	end_tokens: &[TKind],
 ) -> ParseResult<AstId> {
-	parse_expr_main(cursor, tok_list, proc_data, 0, end_tokens)
+	parse_expr_main(cursor, lex_data, proc_data, 0, end_tokens)
 }
 
 fn parse_expr_main(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	min_binding_power: usize, end_tokens: &[TKind],
 ) -> ParseResult<AstId> {
 	let tok_start = cursor.index();
-	let left = parse_primary(cursor, tok_list, proc_data)?;
-	parse_expr_sub(cursor, tok_list, proc_data, min_binding_power, tok_start, left, end_tokens)
+	let left = parse_primary(cursor, lex_data, proc_data)?;
+	parse_expr_sub(cursor, lex_data, proc_data, min_binding_power, tok_start, left, end_tokens)
 }
 
 fn parse_expr_sub(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	min_binding_power: usize, tok_start: TokenId, left: AstId,
 	end_tokens: &[TKind],
 ) -> ParseResult<AstId> {
-	if end_tokens.contains(&cursor.current(tok_list)) {
+	if end_tokens.contains(&cursor.current(lex_data)) {
 		return Ok(left);
 	}
-	let Ok(op) = cursor.expect_bin_op(tok_list) else {
+	let Ok(op) = cursor.expect_bin_op(lex_data) else {
 		return Ok(left);
 	};
 	let op_binding_power = op.binding_power();
 	let tok_start_inner = cursor.index();
-	let right = parse_primary(cursor, tok_list, proc_data)?;
+	let right = parse_primary(cursor, lex_data, proc_data)?;
 	let right = if min_binding_power <= op_binding_power {
-		parse_expr_sub(cursor, tok_list, proc_data, op_binding_power,
+		parse_expr_sub(cursor, lex_data, proc_data, op_binding_power,
 			tok_start_inner, right, end_tokens)?
 	} else {
 		right
@@ -496,11 +546,11 @@ fn parse_expr_sub(
 
 fn parse_primary(
 	cursor: &mut Cursor,
-	tok_list: &KindList,
+	lex_data: &LexData,
 	proc_data: &mut ProcData,
 ) -> ParseResult<AstId> {
 	let tok_start_op = cursor.index();
-	let unary_op = cursor.expect_unary_op(tok_list);
+	let unary_op = cursor.expect_unary_op(lex_data);
 	let tok_end_op = cursor.index();
 
 	fn primary_node(cursor: &mut Cursor, proc_data: &mut ProcData, kind: AKind) -> AstId {
@@ -510,11 +560,11 @@ fn parse_primary(
 		proc_data.add_ast(kind, tok_range)
 	}
 
-	let node = match cursor.current(tok_list) {
+	let node = match cursor.current(lex_data) {
 		TKind::Identifier(ident_id) => {
-			match cursor.peek(tok_list, 1) {
-				TKind::OParen => parse_call(cursor, tok_list, proc_data, ident_id)?,
-				TKind::Dot | TKind::OBracket => parse_access(cursor, tok_list, proc_data, ident_id)?,
+			match cursor.peek(lex_data, 1) {
+				TKind::OParen => parse_call(cursor, lex_data, proc_data, ident_id)?,
+				TKind::Dot | TKind::OBracket => parse_access(cursor, lex_data, proc_data, ident_id)?,
 				_ => primary_node(cursor, proc_data, AKind::Ident(ident_id)),
 			}
 		}
@@ -524,8 +574,8 @@ fn parse_primary(
 		TKind::False => primary_node(cursor, proc_data, AKind::Int(0)),
 		TKind::OParen => {
 			cursor.advance();
-			let expr = parse_expression(cursor, tok_list, proc_data, &[TKind::CParen])?;
-			cursor.expect(tok_list, TKind::CParen)?;
+			let expr = parse_expression(cursor, lex_data, proc_data, &[TKind::CParen])?;
+			cursor.expect(lex_data, TKind::CParen)?;
 			expr
 		}
 		_ => return Err(cursor.expected_token("identifier or number")),
@@ -541,59 +591,32 @@ fn parse_primary(
 
 #[cfg(test)]
 mod can_parse_proc {
-	use crate::{ error, lexer, discovery, ast };
+	use crate::{ error, input, lexer, discovery, ast };
 	use crate::identifier::Identifier;
-	use crate::Data;
 
 	use super::*;
 
-	fn setup(source: &str) -> Data {
-		let mut db = Data::new("parser".to_string(), source.into());
-		db.DEBUG_show_tokens = true;
+	fn setup(source: &str) -> (DscData, IdentMap<ProcData>) {
+		let input = input::eval("parser".to_string(), source.into());
 
-		let result = {
-			lexer::eval(
-				&db.source,
-				&mut db.identifiers,
-				&mut db.tok_list,
-				&mut db.tok_pos,
-				&mut db.line_pos,
-			).map_err(|e| e.with_kind(error::Kind::Lexer))
-		}.and_then(|_| {
-			discovery::eval(
-				&db.source, &db.identifiers,
-				&db.tok_list, &db.tok_pos,
-				&mut db.task_queue,
-				&mut db.procedures,
-				&mut db.records,
-				&mut db.regions,
-				&mut db.values,
-			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery))
-		}).and_then(|_| {
-			eval(
-				&db.source, &db.identifiers,
-				&db.tok_list, &db.tok_pos,
-				&db.records, &db.procedures,
-				&mut db.task_queue,
-				&mut db.values,
-				&mut db.proc_db,
-			).map_err(|e| e.into_comp_error(&db, error::Kind::Parser))
-		});
+		let lex_data = lexer::eval(&input.source)
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		match result {
-			Ok(_) => db,
-			Err(e) => {
-				let msg = e.display(
-					&db.source_file, &db.source, &db.line_pos);
-				panic!("{msg}");
-			}
-		}
+		let (mut dsc_out, task_queue) = discovery::eval(&input, &lex_data)
+			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Discovery))
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+
+		let proc_db = eval(&input, &lex_data, &mut dsc_out, task_queue)
+			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Parser))
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+
+		(dsc_out, proc_db)
 	}
 
 	#[test]
 	fn main() {
-		let db = setup("main{}");
-		assert_eq!(db.proc_db[&"main".id()].ast_nodes, [
+		let (_, proc_db) = setup("main{}");
+		assert_eq!(proc_db[&"main".id()].ast_nodes, [
 			ast::Kind::Return(None),
 			ast::Kind::Block(ast::Block(vec![0.into()])),
 		]);
@@ -601,206 +624,202 @@ mod can_parse_proc {
 
 	#[test]
 	fn values_basic() {
-		let db = setup("value a = 2;");
-		assert!(db.task_queue.is_empty());
+		let (dsc_data, _) = setup("value a = 2;");
 		let a_id = "a".id();
-		assert!(db.values.contains_key(&a_id));
-		assert_eq!(db.values[&a_id], Value::Integer(2));
+		assert!(dsc_data.values.contains_key(&a_id));
+		assert_eq!(dsc_data.values[&a_id], Value::Integer(2));
 	}
 
 	#[test]
 	fn values_expressions() {
-		let db = setup("value a = 2 * 5;");
-		assert!(db.task_queue.is_empty());
+		let (dsc_data, _) = setup("value a = 2 * 5;");
 		let a_id = "a".id();
-		assert!(db.values.contains_key(&a_id));
-		assert_eq!(db.values[&a_id], Value::Integer(10));
+		assert!(dsc_data.values.contains_key(&a_id));
+		assert_eq!(dsc_data.values[&a_id], Value::Integer(10));
 	}
 
 	#[test]
 	fn values_compound() {
-		let db = setup("value a = 3; value b = a * 5;");
-		assert!(db.task_queue.is_empty());
+		let (dsc_data, _) = setup("value a = 3; value b = a * 5;");
 		let a_id = "a".id();
 		let b_id = "b".id();
-		assert!(db.values.contains_key(&a_id));
-		assert!(db.values.contains_key(&b_id));
-		assert_eq!(db.values[&a_id], Value::Integer(3));
-		assert_eq!(db.values[&b_id], Value::Integer(15));
+		assert!(dsc_data.values.contains_key(&a_id));
+		assert!(dsc_data.values.contains_key(&b_id));
+		assert_eq!(dsc_data.values[&a_id], Value::Integer(3));
+		assert_eq!(dsc_data.values[&b_id], Value::Integer(15));
 	}
 
 	#[test]
 	fn values_compound_inverted() {
-		let db = setup("value b = a * 5; value a = 3;");
-		assert!(db.task_queue.is_empty());
+		let (dsc_data, _) = setup("value b = a * 5; value a = 3;");
 		let a_id = "a".id();
 		let b_id = "b".id();
-		assert!(db.values.contains_key(&a_id));
-		assert!(db.values.contains_key(&b_id));
-		assert_eq!(db.values[&a_id], Value::Integer(3));
-		assert_eq!(db.values[&b_id], Value::Integer(15));
+		assert!(dsc_data.values.contains_key(&a_id));
+		assert!(dsc_data.values.contains_key(&b_id));
+		assert_eq!(dsc_data.values[&a_id], Value::Integer(3));
+		assert_eq!(dsc_data.values[&b_id], Value::Integer(15));
 	}
 
 	#[test]
 	fn with_no_params() {
-		let db = setup("main{} proc a() {}");
-		assert!(db.proc_db.contains_key(&"a".id()));
+		let (_, proc_db) = setup("main{} proc a() {}");
+		assert!(proc_db.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_internal_expressions() {
-		let db = setup("main { let a: s8 = 2 + 3; }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { let a: s8 = 2 + 3; }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_sub_expressions() {
-		let db = setup("main { let a: s8 = (2 + 3) * (4 - 5); }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { let a: s8 = (2 + 3) * (4 - 5); }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_return() {
-		let db = setup("main{} proc a() -> s8 {}");
-		assert!(db.proc_db.contains_key(&"a".id()));
+		let (_, proc_db) = setup("main{} proc a() -> s8 {}");
+		assert!(proc_db.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_single_param() {
-		let db = setup("main{} proc a(b:s8) {}");
-		assert!(db.proc_db.contains_key(&"a".id()));
+		let (_, proc_db) = setup("main{} proc a(b:s8) {}");
+		assert!(proc_db.contains_key(&"a".id()));
 	}
 
 	#[test]
 	fn with_multi_params() {
-		let db = setup("main{} proc a(b:s8,c:s8) {}");
-		assert!(db.proc_db.contains_key(&"a".id()));
+		let (_, proc_db) = setup("main{} proc a(b:s8,c:s8) {}");
+		assert!(proc_db.contains_key(&"a".id()));
 	}
 
 	#[cfg(feature="record")]
 	#[test]
 	fn with_record_param() {
-		let db = setup("main{} record a {} proc b(c:a) {}");
-		assert!(db.proc_db.contains_key(&"b".id()));
+		let (_, proc_db) = setup("main{} record a {} proc b(c:a) {}");
+		assert!(proc_db.contains_key(&"b".id()));
 	}
 
 	#[cfg(feature="record")]
 	#[test]
 	fn with_out_of_order_record_param() {
-		let db = setup("main{} proc b(c:a) {} record a {}");
-		assert!(db.proc_db.contains_key(&"b".id()));
+		let (_, proc_db) = setup("main{} proc b(c:a) {} record a {}");
+		assert!(proc_db.contains_key(&"b".id()));
 	}
 
 	#[cfg(feature="table")]
 	#[test]
 	fn with_table_param() {
-		let db = setup("main{} table a[0] {} proc b(c:a) {}");
-		assert!(db.proc_db.contains_key(&"b".id()));
+		let (_, proc_db) = setup("main{} table a[0] {} proc b(c:a) {}");
+		assert!(proc_db.contains_key(&"b".id()));
 	}
 
 	#[test]
 	fn with_basic_for_loop() {
-		let db = setup("main { for i in [0..10] {} }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { for i in [0..10] {} }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_multi_element_for_loop() {
-		let db = setup("main { for i,j in [0..10] {} }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { for i,j in [0..10] {} }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_for_loop() {
-		let db = setup("main { for i in a {} }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { for i in a {} }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_index_for_loop() {
-		let db = setup("main { for i in a[0..10] {} }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { for i in a[0..10] {} }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_from_for_loop() {
-		let db = setup("main { for i in a[0..] {} }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { for i in a[0..] {} }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_to_for_loop() {
-		let db = setup("main { for i in a[..10] {} }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { for i in a[..10] {} }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="forloop")]
 	#[test]
 	fn with_table_full_for_loop() {
-		let db = setup("main { for i in a[..] {} }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { for i in a[..] {} }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="index")]
 	#[test]
 	fn with_internal_table_index() {
-		let db = setup("main { return a[10].b; }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { return a[10].b; }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="index")]
 	#[test]
 	fn with_internal_table_expression_indexing() {
-		let db = setup("main { return a[2 + 4].b; }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { return a[2 + 4].b; }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_proc_call() {
-		let db = setup("main { return a(3); }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { return a(3); }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_proc_call_in_subexpression() {
-		let db = setup("main { return 3 * a(3); }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { return 3 * a(3); }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_proc_call_with_expression_argument() {
-		let db = setup("main { return a(b + 4); }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { return a(b + 4); }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_proc_call_with_multiple_arguments() {
-		let db = setup("main { return a(2, 4 / b, b + 4); }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { return a(2, 4 / b, b + 4); }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[test]
 	fn with_internal_while_loop() {
-		let db = setup("main { while true { } }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { while true { } }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="access")]
 	#[test]
 	fn with_internal_field_assign() {
-		let db = setup("main { a.b = 2; }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { a.b = 2; }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 
 	#[cfg(feature="access")]
 	#[test]
 	fn with_internal_table_assign() {
-		let db = setup("main { a[3].b = 2; }");
-		assert!(db.proc_db.contains_key(&"main".id()));
+		let (_, proc_db) = setup("main { a[3].b = 2; }");
+		assert!(proc_db.contains_key(&"main".id()));
 	}
 }
 

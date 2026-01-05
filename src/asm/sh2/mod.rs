@@ -1,7 +1,8 @@
 
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::vsmc::Vsmc;
-use crate::ProcData;
+use crate::vsmc::{Section, Vsmc};
+
+use super::inner_label;
 
 mod ins;
 use ins::Reg;
@@ -32,7 +33,13 @@ fn build_constant(data: &mut Vec<Asm>, c: &i64) {
 	}
 }
 
-pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
+pub fn lower(proc_name: &str, section: Section) -> Vec<Asm> {
+	let Section {
+		instructions,
+		next_label: mut label_id,
+		..
+	} = section;
+
 	const R0: Reg = 0;
 	const FP: Reg = 13; // Data stack address
 	const SP: Reg = 15; // Call stack address
@@ -42,12 +49,11 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 	];
 
 	data.push(Asm::Mov(SP, FP));
-	let section = proc_data.tac_data.as_mut().unwrap();
 
 	build_constant(&mut data, &(section.locals.len() as i64));
 	data.push(Asm::Sub(R0, FP));
 
-	for tac in section.instructions.clone() {
+	for tac in instructions {
 		match tac {
 			Vsmc::Push(value) => {
 				build_constant(&mut data, &(value as i64));
@@ -158,10 +164,8 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::StMacl(R0));
 					}
 					BinaryOp::ShL => {
-						let loop_label = format!("{proc_name}_{}",
-							section.alloc_label());
-						let check_label = format!("{proc_name}_{}",
-							section.alloc_label());
+						let loop_label = inner_label(proc_name, &mut label_id);
+						let check_label = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Bra(check_label.clone()));
 						data.push(Asm::Label(loop_label.clone()));
 						data.push(Asm::ShAL(R0));
@@ -170,10 +174,8 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::BF(loop_label));
 					}
 					BinaryOp::ShR => {
-						let loop_label = format!("{proc_name}_{}",
-							section.alloc_label());
-						let check_label = format!("{proc_name}_{}",
-							section.alloc_label());
+						let loop_label = inner_label(proc_name, &mut label_id);
+						let check_label = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Bra(check_label.clone()));
 						data.push(Asm::Label(loop_label.clone()));
 						data.push(Asm::ShAR(R0));

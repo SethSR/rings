@@ -1,53 +1,78 @@
 
 use std::collections::hash_map::Entry;
 
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind};
 use crate::identifier::{Identifier, Map as IdentMap};
 use crate::token::{Kind, KindList, PosList};
 use crate::{Span, SrcPos};
 
-pub fn eval(
-	source: &str,
-	identifiers: &mut IdentMap<Span<SrcPos>>,
-	tok_list: &mut KindList,
-	tok_pos: &mut PosList,
-	line_pos: &mut PosList,
-) -> Result<(), Error> {
-	let mut lexer = Lexer { pos: 0 };
+pub fn eval(source: &str) -> Result<Data, Error> {
+	let mut lexer = Lexer::default();
 
-	// Add the initial line
-	line_pos.push(lexer.pos);
-
-	lexer.skip_whitespace_and_comments(source, line_pos);
+	lexer.skip_whitespace_and_comments(source);
 	loop {
-		match lexer.next(source, identifiers, tok_list, tok_pos) {
+		match lexer.next(source) {
 			Ok(true) => {}
-			Ok(false) => return Ok(()), // all done!
-			Err(e) => return Err(e),
+			Ok(false) => return Ok(lexer.out), // all done!
+			Err(e) => return Err(e.with_kind(ErrorKind::Lexer)),
 		}
 
-		lexer.skip_whitespace_and_comments(source, line_pos);
+		lexer.skip_whitespace_and_comments(source);
+	}
+}
+
+#[derive(Debug, Default)]
+pub struct Data {
+	pub identifiers: IdentMap<Span<SrcPos>>,
+	pub tok_list: KindList,
+	pub tok_pos: PosList,
+}
+
+impl Data {
+	pub fn print(&self, input: &crate::input::Data, with_tokens: bool) {
+		if with_tokens {
+			print!("Tokens:\n ");
+			for (token, start) in self.tok_list.iter().zip(self.tok_pos.iter()) {
+				match token {
+					Kind::Identifier(ident_id) => {
+						print!(" Identifier({})[{start}]", crate::text(input, self, ident_id));
+					}
+					_ => print!(" {token:?}[{start}]"),
+				}
+			}
+			println!();
+			println!();
+		}
+
+		let mut identifiers = self.identifiers.keys()
+			.map(|id| (id, crate::text(input, self, id)))
+			.collect::<Vec<_>>();
+		identifiers.sort_by(|(_,a),(_,b)| a.cmp(b));
+
+		println!("{:<32} | HASH-VALUE",
+			"IDENTIFIER");
+		println!("{:-<32} | {:-<16}", "", "");
+		for (ident_id, ident) in identifiers {
+			println!("{ident:<32} | {ident_id}");
+		}
+		println!()
 	}
 }
 
 #[derive(Default)]
 struct Lexer {
 	pos: SrcPos,
+	out: Data,
 }
 
 impl Lexer {
-	fn next(&mut self,
-		source: &str,
-		identifiers: &mut IdentMap<Span<SrcPos>>,
-		tok_list: &mut KindList,
-		tok_pos: &mut PosList,
-	) -> Result<bool, Error> {
+	fn next(&mut self, source: &str) -> Result<bool, Error> {
 		let start = self.pos;
 
 		let kind = match self.peek(source, 0) {
 			None => {
-				tok_list.push(Kind::Eof);
-				tok_pos.push(start);
+				self.out.tok_list.push(Kind::Eof);
+				self.out.tok_pos.push(start);
 				return Ok(false);
 			}
 
@@ -98,7 +123,7 @@ impl Lexer {
 
 					text => {
 						let ident_id = text.id();
-						if let Entry::Vacant(e) = identifiers.entry(ident_id) {
+						if let Entry::Vacant(e) = self.out.identifiers.entry(ident_id) {
 							e.insert((start..self.pos).into());
 						}
 						match text {
@@ -287,21 +312,14 @@ impl Lexer {
 			Some(_) => { self.advance(source); Kind::Eof }
 		};
 
-		tok_list.push(kind);
-		tok_pos.push(start);
+		self.out.tok_list.push(kind);
+		self.out.tok_pos.push(start);
 		Ok(true)
 	}
 
-	fn skip_whitespace_and_comments(&mut self,
-		source: &str,
-		line_pos: &mut PosList,
-	) {
+	fn skip_whitespace_and_comments(&mut self, source: &str) {
 		loop {
 			match self.peek(source, 0) {
-				Some('\n') => {
-					line_pos.push(self.pos);
-					self.advance(source);
-				}
 				Some(c) if c.is_whitespace() => {
 					self.advance(source);
 				}
@@ -358,24 +376,13 @@ impl Lexer {
 
 #[cfg(test)]
 mod can_lex {
-	use crate::error;
-	use crate::Data;
-
 	use super::*;
 
 	fn setup(source: &str) -> Data {
-		let mut data = Data::new(file!().to_string(), source.into());
-		data.DEBUG_show_tokens = true;
-		eval(
-			&data.source,
-			&mut data.identifiers,
-			&mut data.tok_list,
-			&mut data.tok_pos,
-			&mut data.line_pos,
-		).map_err(|e| e.with_kind(error::Kind::Lexer)
-				.display(&data.source_file, &data.source, &data.line_pos))
-			.map(|_| data)
-			.unwrap_or_else(|msg| panic!("{msg}"))
+		let input = crate::input::eval(file!().to_string(), source.into());
+
+		eval(&source)
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)))
 	}
 
 	#[test]

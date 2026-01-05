@@ -28,17 +28,9 @@ pub enum Type {
 }
 
 impl Type {
-	pub fn top() -> Self { Self::Top }
-
 	pub fn int() -> Self { Self::Int }
 
 	pub fn s8_top() -> Self { Self::S8(Lattice::Top) }
-	pub fn s8_val(v: i8) -> Self { Self::S8(Lattice::Val(v)) }
-	pub fn s8_bot() -> Self { Self::S8(Lattice::Bot) }
-
-	pub fn unit() -> Self { Self::Unit }
-
-	pub fn bot() -> Self { Self::Bot }
 }
 
 impl std::fmt::Display for Type {

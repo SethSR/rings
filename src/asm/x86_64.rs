@@ -2,14 +2,10 @@
 use std::fmt::{Display, Formatter, Result};
 
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::vsmc::Vsmc;
-use crate::ProcData;
+use crate::vsmc::{Section, Vsmc};
 
-pub fn lower(proc_name: &str, proc_data: &ProcData) -> Vec<Asm> {
+pub fn lower(proc_name: &str, section: Section) -> Vec<Asm> {
 	let mut data = vec![];
-
-	let section = proc_data.tac_data.as_ref()
-		.expect("section data in ProcData");
 
 	data.push(Asm::Label(if proc_name == "main" {
 		"_start"

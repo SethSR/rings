@@ -2,31 +2,70 @@
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
 use crate::identifier::{Id as IdentId, Map as IdentMap};
 use crate::rings_type::Type;
+use crate::input::Data as InputData;
+use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
+use crate::parser::ProcData;
 use crate::{
-	error, token,
+	error,
 	text,
-	Bounds, ProcData, Span, SrcPos,
+	Bounds, Span, SrcPos, Target,
 };
 
 pub type LabelId = u32;
 pub type TempId = u32; // Temporary variable ID
 
-pub fn eval(proc_db: &mut IdentMap<ProcData>) -> Result<(), Error> {
-	for (proc_id, proc_data) in proc_db {
-		let mut section = Section::default();
-		section.name = *proc_id;
-		match section.lower(proc_data) {
-			Ok(_) => {
-				proc_data.tac_data = Some(section);
-			}
-			Err(e) => return Err(e),//.into_comp_error(&data)
-				//.with_kind(error::Kind::LoweringVSMC)
-				//.display(&data.source_file, &data.source, &data.line_pos)),
-		}
+pub fn print(
+	section_db: &IdentMap<Section>,
+	input: &InputData,
+	lex_data: &LexData,
+) {
+	if section_db.is_empty() {
+		return;
 	}
 
-	Ok(())
+	for (proc_id, section) in section_db.iter() {
+		let proc_name = text(input, lex_data, proc_id);
+
+		println!();
+		println!("{:<32} | {:<16} | LOCAL-TYPE",
+			"TAC-LOCALS", "LOCAL-NAME");
+		println!("{:-<32} | {:-<16} | {:-<16}", "", "", "");
+		for (local_id, ring_type) in &section.locals {
+			let local_name = text(input, lex_data, local_id);
+			let local_type = crate::type_text(input, lex_data, ring_type);
+			println!("{proc_name:<32} | {local_name:<16} | {local_type:<16}");
+		}
+
+		println!();
+		println!("{:<32} | INSTRUCTIONS",
+			"TAC-SECTIONS");
+		println!("{:-<32} | {:-<16}", "", "");
+		for tac in &section.instructions {
+			println!("{proc_name:<32} | {}", tac.to_text(&input.source, &lex_data.identifiers));
+		}
+	}
+}
+
+pub fn eval(proc_db: &IdentMap<ProcData>) -> Result<IdentMap<Section>, Error> {
+	let mut out = IdentMap::<Section>::with_capacity(proc_db.len());
+
+	for (proc_id, proc_data) in proc_db {
+		let mut section = Section {
+			name: *proc_id,
+			target: proc_data.target.unwrap_or(Target::SH2),
+			locals: vec![],
+			stack: vec![],
+			instructions: vec![],
+			next_temp: 0,
+			next_label: 0,
+		};
+
+		section.lower(proc_data)?;
+		out.insert(*proc_id, section);
+	}
+
+	Ok(out)
 }
 
 /// Virtual Stack-Machine Code
@@ -109,9 +148,10 @@ impl Vsmc {
 	}
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Section {
 	pub name: IdentId,
+	pub target: Target,
 	pub locals: Vec<(IdentId, Type)>,
 	//pub variables: HashMap<IdentId, usize>,
 	pub stack: Vec<i32>,
@@ -463,10 +503,6 @@ impl Section {
 		self.next_label += 1;
 		self.next_label - 1
 	}
-
-	pub fn inner_label(&mut self, name: &str) -> String {
-		format!("{name}_{}", self.alloc_label())
-	}
 }
 
 enum ErrorKind {
@@ -512,9 +548,8 @@ impl Error {
 	}
 
 	pub fn into_comp_error(self,
-		source: &str,
-		identifiers: &IdentMap<Span<SrcPos>>,
-		tok_pos: &token::PosList,
+		input: &InputData,
+		lex_data: &LexData,
 		proc_db: &IdentMap<ProcData>,
 	) -> error::Error {
 		let proc_data = &proc_db[&self.proc_id];
@@ -522,24 +557,24 @@ impl Error {
 		let (location, message) = match self.kind {
 			ErrorKind::MissingAstNode(ast_id) => {
 				let ast_pos = proc_data.ast_pos_tok[ast_id];
-				let start = tok_pos[ast_pos.start];
-				let end = tok_pos[ast_pos.end];
-				let location = crate::Span { start, end };
-				let message = format!("{} not found in procedure '{}'", ast_id, text(source, identifiers, &self.proc_id));
+				let start = lex_data.tok_pos[ast_pos.start];
+				let end = lex_data.tok_pos[ast_pos.end];
+				let location = Span { start, end };
+				let message = format!("{} not found in procedure '{}'", ast_id, text(input, lex_data, &self.proc_id));
 				(location, message)
 			}
 			ErrorKind::MissingLoopBounds(ast_id) => {
 				let ast_pos = proc_data.ast_pos_tok[ast_id];
-				let start = tok_pos[ast_pos.start];
-				let end = tok_pos[ast_pos.end];
-				let location = crate::Span { start, end };
-				let message = format!("type-checker missed a bounds check in {}", text(source, identifiers, &self.proc_id));
+				let start = lex_data.tok_pos[ast_pos.start];
+				let end = lex_data.tok_pos[ast_pos.end];
+				let location = Span { start, end };
+				let message = format!("type-checker missed a bounds check in {}", text(input, lex_data, &self.proc_id));
 				(location, message)
 			}
 			ErrorKind::UnknownIdentifier(ident_id) => {
-				let location = identifiers[&ident_id];
+				let location = lex_data.identifiers[&ident_id];
 				let message = format!("Unknown identifier '{}' in procedure '{}'",
-					text(source, identifiers, &ident_id), text(source, identifiers, &self.proc_id));
+					text(input, lex_data, &ident_id), text(input, lex_data, &self.proc_id));
 				(location, message)
 			}
 		};
@@ -551,81 +586,48 @@ impl Error {
 
 #[cfg(test)]
 mod tests {
-	use crate::{lexer, discovery, parser, type_checker};
+	use crate::{input, lexer, discovery, parser, type_checker};
 	use crate::identifier::Identifier;
-	use crate::Data;
 	use crate::rings_type::Type;
+
 	use super::*;
 
-	fn setup(source: &str) -> Data {
+	fn setup(source: &str) -> IdentMap<Section> {
 		let mut source_str = String::new();
 		source_str.push_str("region Stack[0] @ 0;");
 		source_str.push_str(source);
-		let mut db = Data::new("lowering".into(), source_str.into());
-		db.DEBUG_show_tokens = true;
 
-		let result = {
-			lexer::eval(
-				&db.source,
-				&mut db.identifiers,
-				&mut db.tok_list,
-				&mut db.tok_pos,
-				&mut db.line_pos,
-			).map_err(|e| e.with_kind(error::Kind::Lexer))
-		}.and_then(|_| {
-			discovery::eval(
-				&db.source, &db.identifiers,
-				&db.tok_list, &db.tok_pos,
-				&mut db.task_queue,
-				&mut db.procedures,
-				&mut db.records,
-				&mut db.regions,
-				&mut db.values,
-			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery))
-		}).and_then(|_| {
-			parser::eval(
-				&db.source, &db.identifiers,
-				&db.tok_list, &db.tok_pos,
-				&db.records, &db.procedures,
-				&mut db.task_queue,
-				&mut db.values,
-				&mut db.proc_db,
-			).map_err(|e| e.into_comp_error(&db, error::Kind::Parser))
-		}).and_then(|_| {
-			type_checker::eval(
-				&db.source,
-				&db.identifiers,
-				&db.tok_list,
-				&db.tok_pos,
-				&db.procedures,
-				&db.regions,
-				&mut db.proc_db,
-			)
-		}).and_then(|_| {
-			eval(&mut db.proc_db)
-				.map_err(|e| e.into_comp_error(&db.source, &db.identifiers, &db.tok_pos, &db.proc_db))
-		});
+		let input = input::eval("parser".to_string(), source_str.into());
 
-		match result {
-			Ok(_) => db,
-			Err(e) => {
-				let msg = e.display(
-					&db.source_file, &db.source, &db.line_pos);
-				panic!("{msg}");
-			}
-		}
+		let lex_data = lexer::eval(&input.source)
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+
+		let (mut dsc_out, task_queue) = discovery::eval(&input, &lex_data)
+			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Discovery))
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+
+		let proc_db = parser::eval(&input, &lex_data, &mut dsc_out, task_queue)
+			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Parser))
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+
+		let proc_db = type_checker::eval(&input, &lex_data, &dsc_out, proc_db)
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+
+		let sections = eval(&proc_db)
+			.map_err(|e| e.into_comp_error(&input, &lex_data, &proc_db))
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+
+		sections
 	}
 
 	#[test]
 	fn return_void() {
-		let data = setup("main {}
+		let section_db = setup("main {}
 		proc a() {
 			return;
 		}");
-		assert_eq!(data.proc_db.len(), 2);
-		let section = data.proc_db[&"a".id()].tac_data
-			.as_ref()
-			.expect("existing tac-data");
+		assert_eq!(section_db.len(), 2);
+		let section = &section_db[&"a".id()];
 		assert_eq!(section.instructions, [
 			Vsmc::Return(false),
 		]);
@@ -633,14 +635,12 @@ mod tests {
 
 	#[test]
 	fn return_expression() {
-		let data = setup("main {}
+		let section_db = setup("main {}
 		proc a() -> s8 {
 			return 100 - 200;
 		}");
-		assert_eq!(data.proc_db.len(), 2);
-		let section = data.proc_db[&"a".id()].tac_data
-			.as_ref()
-			.expect("existing tac-data");
+		assert_eq!(section_db.len(), 2);
+		let section = &section_db[&"a".id()];
 		assert_eq!(section.instructions, [
 			Vsmc::Push(100),
 			Vsmc::Push(200),
@@ -651,7 +651,7 @@ mod tests {
 
 	#[test]
 	fn proc_if() {
-		let data = setup("main {}
+		let section_db = setup("main {}
 		proc a() -> s8 {
 			let b: s8 = 5;
 			let c: s8 = 3;
@@ -662,15 +662,12 @@ mod tests {
 			}
 			return b + c;
 		}");
-		let proc_data = &data.proc_db[&"a".id()];
-		let tac = proc_data.tac_data
-			.as_ref()
-			.expect("existing tac-data");
-		assert_eq!(tac.locals, [
+		let section = &section_db[&"a".id()];
+		assert_eq!(section.locals, [
 			("b".id(), Type::s8_top()),
 			("c".id(), Type::s8_top()),
 		]);
-		assert_eq!(tac.instructions, [
+		assert_eq!(section.instructions, [
 			Vsmc::Push(5),
 			Vsmc::Store(0),
 			Vsmc::Push(3),
@@ -696,20 +693,18 @@ mod tests {
 
 	#[test]
 	fn proc_while() {
-		let data = setup("main {}
+		let section_db = setup("main {}
 		proc a() {
 			let b: s8 = 5;
 			while b > 0 {
 				b -= 1;
 			}
 		}");
-		let proc_data = &data.proc_db[&"a".id()];
-		let tac = proc_data.tac_data.as_ref()
-			.expect("existing tac-data");
-		assert_eq!(tac.locals, [
+		let section = &section_db[&"a".id()];
+		assert_eq!(section.locals, [
 			("b".id(), Type::s8_top()),
 		]);
-		assert_eq!(tac.instructions, [
+		assert_eq!(section.instructions, [
 			Vsmc::Push(5),
 			Vsmc::Store(0),
 			Vsmc::Jump(0),
@@ -729,22 +724,20 @@ mod tests {
 
 	#[test]
 	fn proc_for() {
-		let data = setup("main {
+		let section_db = setup("main {
 			let b: s8 = 4;
 			let c: s8 = 0;
 			for i in [0..10] {
 				c += b * 2;
 			}
 		}");
-		let proc_data = &data.proc_db[&"main".id()];
-		let tac = proc_data.tac_data.as_ref()
-			.expect("existing tac-data");
-		assert_eq!(tac.locals, [
+		let section = &section_db[&"main".id()];
+		assert_eq!(section.locals, [
 			("b".id(), Type::s8_top()),
 			("c".id(), Type::s8_top()),
 			("i".id(), Type::int()),
 		]);
-		assert_eq!(tac.instructions, [
+		assert_eq!(section.instructions, [
 			Vsmc::Push(4),
 			Vsmc::Store(0),
 			Vsmc::Push(0),
@@ -777,16 +770,14 @@ mod tests {
 
 	#[test]
 	fn proc_internal_sub_expressions() {
-		let db = setup("main {
+		let section_db = setup("main {
 			let a: s8 = (2 + 3) * (4 - 5);
 		}");
-		let proc_data = &db.proc_db[&"main".id()];
-		let tac = proc_data.tac_data.as_ref()
-			.expect("existing tac-data");
-		assert_eq!(tac.locals, [
+		let section = &section_db[&"main".id()];
+		assert_eq!(section.locals, [
 			("a".id(), Type::s8_top()),
 		]);
-		assert_eq!(tac.instructions, [
+		assert_eq!(section.instructions, [
 			Vsmc::Push(2),
 			Vsmc::Push(3),
 			Vsmc::BinOp(BinaryOp::Add),

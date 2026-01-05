@@ -1,4 +1,5 @@
 
+use crate::input::Data as InputData;
 use crate::token::PosList;
 use crate::{Span, SrcPos};
 
@@ -82,11 +83,11 @@ impl Error {
 		self
 	}
 
-	pub fn display(&self, source_file: &str, source: &str, pos_list: &PosList) -> String {
+	pub fn display(&self, input: &InputData) -> String {
 		let mut output = vec![];
 
 		// Main error header
-		let (line, col) = lookup_position(&source, pos_list, self.location.start);
+		let (line, col) = lookup_position(&input.source, &input.line_pos, self.location.start);
 		let line_num_digit_count = line.to_string().len();
 
 		let message = if let Some(kind) = &self.kind {
@@ -97,13 +98,13 @@ impl Error {
 
 		output.push(header(&error_lead(), &message));
 		output.push(location(line_num_digit_count,
-			&source_file, line, col));
+			&input.source_file, line, col));
 		output.push(vbar_empty(line_num_digit_count));
 		output.push(vbar_text(line_num_digit_count,
-			line, &get_line(&source, pos_list, line)));
+			line, &get_line(&input.source, &input.line_pos, line)));
 
 		// Highlight underline
-		let (end_line, end_col) = lookup_position(&source, pos_list, self.location.end);
+		let (end_line, end_col) = lookup_position(&input.source, &input.line_pos, self.location.end);
 		let underline_len = if line == end_line {
 			end_col.saturating_sub(col).max(1) // Single line highlight
 		} else {
@@ -117,14 +118,14 @@ impl Error {
 			if let Some(note_loc) = &note.location {
 				// TODO - srenshaw - Eventually, we'll want to change this to allow more than one source
 				// file.
-				let (note_line, note_col) = lookup_position(&source, pos_list, note_loc.start);
+				let (note_line, note_col) = lookup_position(&input.source, &input.line_pos, note_loc.start);
 
 				output.push(header(&note_lead(), &note.message));
 				output.push(location(line_num_digit_count,
-					&source_file, note_line, note_col));
+					&input.source_file, note_line, note_col));
 				output.push(vbar_empty(line_num_digit_count));
 				output.push(vbar_text(line_num_digit_count,
-					note_line, &get_line(&source, pos_list, note_line)));
+					note_line, &get_line(&input.source, &input.line_pos, note_line)));
 				output.push(vbar_highlight(line_num_digit_count,
 					note_col - 1, 1));
 			} else {

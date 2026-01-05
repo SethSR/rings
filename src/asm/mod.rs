@@ -2,8 +2,12 @@
 use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter, Result};
 
-use crate::identifier;
-use crate::{ProcData, Span, SrcPos, Target};
+use crate::identifier::Map as IdentMap;
+use crate::input::Data as InputData;
+use crate::lexer::Data as LexData;
+use crate::vsmc::{LabelId, Section};
+use crate::text;
+use crate::Target;
 
 mod m68k;
 mod sh2;
@@ -11,23 +15,23 @@ mod x86_64;
 mod z80;
 
 pub fn eval(
-	source: &str,
-	identifiers: &identifier::Map<Span<SrcPos>>,
-	proc_db: &mut identifier::Map<ProcData>,
-	asm_db: &mut identifier::Map<Data>,
-) {
-	for (proc_id, proc_data) in proc_db {
-		let proc_name = crate::text(source, identifiers, proc_id).to_owned();
+	input: &InputData,
+	lex_data: &LexData,
+	section_db: IdentMap<Section>,
+) -> IdentMap<Data> {
+	let mut out = IdentMap::<Data>::default();
 
-		let data = match proc_data.target {
-			Some(Target::M68k) => Data::M68k(m68k::lower(&proc_name, proc_data)),
-			None |
-			Some(Target::SH2) => Data::SH2(sh2::lower(&proc_name, proc_data)),
-			Some(Target::X86_64) => Data::X86(x86_64::lower(&proc_name, proc_data)),
-			Some(Target::Z80) => Data::Z80(z80::lower(&proc_name, proc_data)),
+	for (proc_id, section) in section_db {
+		let proc_name = text(input, lex_data, &proc_id).to_owned();
+
+		let data = match section.target {
+			Target::M68k => Data::M68k(m68k::lower(&proc_name, section)),
+			Target::SH2 => Data::SH2(sh2::lower(&proc_name, section)),
+			Target::X86_64 => Data::X86(x86_64::lower(&proc_name, section)),
+			Target::Z80 => Data::Z80(z80::lower(&proc_name, section)),
 		};
 
-		match asm_db.entry(*proc_id) {
+		match out.entry(proc_id) {
 			Entry::Vacant(e) => {
 				e.insert(data);
 			}
@@ -36,6 +40,8 @@ pub fn eval(
 			}
 		}
 	}
+	
+	out
 }
 
 #[derive(Debug)]
@@ -73,5 +79,10 @@ impl Display for Data {
 		}
 		write!(f, "{}", out.join("\n"))
 	}
+}
+
+pub fn inner_label(name: &str, id: &mut LabelId) -> String {
+	*id += 1;
+	format!("{name}_{}", *id - 1)
 }
 

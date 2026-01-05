@@ -1,16 +1,21 @@
 
 use std::fmt::{Display, Formatter, Result};
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::ProcData;
-use crate::vsmc::Vsmc;
+use crate::vsmc::{Section, Vsmc};
 
-pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
-	let section = proc_data.tac_data.as_mut().unwrap();
+use super::inner_label;
+
+pub fn lower(proc_name: &str, section: Section) -> Vec<Asm> {
+	let Section {
+		instructions,
+		next_label: mut label_id,
+		..
+	} = section;
 
 	let mut data = vec![
 		Asm::Label(proc_name.to_owned()),
 	];
-	for asm in section.instructions.clone() {
+	for asm in instructions {
 		match asm {
 			Vsmc::Push(value) => {
 				data.push(Asm::Mov8(value as u8));
@@ -25,9 +30,9 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 					BinaryOp::Add => data.push(Asm::Add(R8::B)),
 					BinaryOp::Sub => data.push(Asm::Sub(R8::B)),
 					BinaryOp::Mul => {
-						let clear = section.inner_label(proc_name);
-						let mul_loop = section.inner_label(proc_name);
-						let end = section.inner_label(proc_name);
+						let clear = inner_label(proc_name, &mut label_id);
+						let mul_loop = inner_label(proc_name, &mut label_id);
+						let end = inner_label(proc_name, &mut label_id);
 						// if c == 0 goto end
 						data.push(Asm::CpN(0));
 						data.push(Asm::JrZ(clear.clone()));
@@ -42,11 +47,11 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::Div => {
-						let b_neg = section.inner_label(proc_name);
-						let a_neg = section.inner_label(proc_name);
-						let check = section.inner_label(proc_name);
-						let div_loop = section.inner_label(proc_name);
-						let end = section.inner_label(proc_name);
+						let b_neg = inner_label(proc_name, &mut label_id);
+						let a_neg = inner_label(proc_name, &mut label_id);
+						let check = inner_label(proc_name, &mut label_id);
+						let div_loop = inner_label(proc_name, &mut label_id);
+						let end = inner_label(proc_name, &mut label_id);
 						// let flip = false;
 						data.push(Asm::Mov(R8::C, R8::A)); // remember A
 						data.push(Asm::Mov8(0));
@@ -105,12 +110,12 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::Mod => {
-						let b_check = section.inner_label(proc_name);
-						let a_check = section.inner_label(proc_name);
-						let check = section.inner_label(proc_name);
-						let div_loop = section.inner_label(proc_name);
-						let rem_check = section.inner_label(proc_name);
-						let end = section.inner_label(proc_name);
+						let b_check = inner_label(proc_name, &mut label_id);
+						let a_check = inner_label(proc_name, &mut label_id);
+						let check = inner_label(proc_name, &mut label_id);
+						let div_loop = inner_label(proc_name, &mut label_id);
+						let rem_check = inner_label(proc_name, &mut label_id);
+						let end = inner_label(proc_name, &mut label_id);
 						// let a_neg = false; // D = false;
 						// let b_neg = false; // E = false;
 						data.push(Asm::Mov(R8::C, R8::A)); // remember A
@@ -166,8 +171,8 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::ShL => {
-						let shift_loop = section.inner_label(proc_name);
-						let end = section.inner_label(proc_name);
+						let shift_loop = inner_label(proc_name, &mut label_id);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Mov(R8::C, R8::A));
 						data.push(Asm::Mov(R8::A, R8::B));
 						data.push(Asm::CpN(0));
@@ -179,8 +184,8 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::ShR => {
-						let shift_loop = section.inner_label(proc_name);
-						let end = section.inner_label(proc_name);
+						let shift_loop = inner_label(proc_name, &mut label_id);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Mov(R8::C, R8::A));
 						data.push(Asm::Mov(R8::A, R8::B));
 						data.push(Asm::CpN(0));
@@ -195,8 +200,8 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 					BinaryOp::BinOr => data.push(Asm::Or(R8::B)),
 					BinaryOp::BinXor => data.push(Asm::Xor(R8::B)),
 					BinaryOp::LogAnd => {
-						let set_true = section.inner_label(proc_name);
-						let end = section.inner_label(proc_name);
+						let set_true = inner_label(proc_name, &mut label_id);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::CpN(0));
 						data.push(Asm::JrZ(set_true.clone()));
 						data.push(Asm::Mov(R8::A, R8::B));
@@ -207,8 +212,8 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::LogOr => {
-						let set_true = section.inner_label(proc_name);
-						let end = section.inner_label(proc_name);
+						let set_true = inner_label(proc_name, &mut label_id);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::CpN(0));
 						data.push(Asm::JrNZ(set_true.clone()));
 						data.push(Asm::Mov(R8::A, R8::B));
@@ -220,9 +225,9 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::LogXor => {
-						let a_is_true = section.inner_label(proc_name);
-						let set_true = section.inner_label(proc_name);
-						let end = section.inner_label(proc_name);
+						let a_is_true = inner_label(proc_name, &mut label_id);
+						let set_true = inner_label(proc_name, &mut label_id);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::CpN(0));
 						data.push(Asm::Mov(R8::A, R8::B));
 						data.push(Asm::JrZ(a_is_true.clone()));
@@ -238,7 +243,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::CmpEQ => {
-						let end = section.inner_label(proc_name);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Cp(R8::B));
 						data.push(Asm::Mov8(0));
 						data.push(Asm::JrNZ(end.clone()));
@@ -246,7 +251,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::CmpNE => {
-						let end = section.inner_label(proc_name);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Cp(R8::B));
 						data.push(Asm::Mov8(1));
 						data.push(Asm::JrNZ(end.clone()));
@@ -254,7 +259,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::CmpGE => {
-						let end = section.inner_label(proc_name);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Cp(R8::B));
 						data.push(Asm::Mov8(1));
 						data.push(Asm::JrNC(end.clone()));
@@ -262,7 +267,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::CmpGT => {
-						let end = section.inner_label(proc_name);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Cp(R8::B));
 						data.push(Asm::Mov8(0));
 						data.push(Asm::JrZ(end.clone()));
@@ -271,7 +276,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::CmpLE => {
-						let end = section.inner_label(proc_name);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Cp(R8::B));
 						data.push(Asm::Mov8(1));
 						data.push(Asm::JrZ(end.clone()));
@@ -280,7 +285,7 @@ pub fn lower(proc_name: &str, proc_data: &mut ProcData) -> Vec<Asm> {
 						data.push(Asm::Label(end));
 					}
 					BinaryOp::CmpLT => {
-						let end = section.inner_label(proc_name);
+						let end = inner_label(proc_name, &mut label_id);
 						data.push(Asm::Cp(R8::B));
 						data.push(Asm::Mov8(0));
 						data.push(Asm::JrNC(end.clone()));

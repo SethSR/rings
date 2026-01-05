@@ -2,14 +2,16 @@
 use std::collections::hash_map::Entry;
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
-use crate::discovery::{ProcMap, Region, RegionMap};
+use crate::discovery::{Region, Data as DscData};
 use crate::error;
 use crate::identifier::{Id as IdentId, Identifier, Map as IdentMap};
+use crate::input::Data as InputData;
+use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
+use crate::parser::ProcData;
 use crate::rings_type::{Meet, Type};
-use crate::token::{self, Id as TokenId};
+use crate::token::Id as TokenId;
 use crate::{text, token_source};
-use crate::{ProcData, Span, SrcPos};
 
 enum Error {
 	InternalValue,
@@ -26,13 +28,13 @@ enum Error {
 }
 
 impl Error {
-	fn to_string(&self, source: &str, identifiers: &IdentMap<Span<SrcPos>>) -> String {
+	fn to_string(&self, input: &InputData, lex_data: &LexData) -> String {
 		match self {
 			Self::InternalValue => {
 				"Cannot define internal values, assign instead".to_string()
 			}
 			Self::AlreadyDefined(ident_id) => {
-				format!("'{}' already defined", text(source, identifiers, ident_id))
+				format!("'{}' already defined", text(input, lex_data, ident_id))
 			}
 			Self::MismatchedTypes(expected, found) => {
 				format!("Variable has type {expected}, but expression has type {found}")
@@ -56,75 +58,64 @@ impl Error {
 				format!("{msg} has no type: {ast_id:?}")
 			}
 			Self::MissingAstNode(proc_id, ast_id) => {
-				format!("{} not found in procedure '{}'", ast_id, text(source, identifiers, &proc_id))
+				format!("{} not found in procedure '{}'", ast_id, text(input, lex_data, &proc_id))
 			}
 		}
 	}
 }
 
 pub fn eval(
-	source: &str,
-	identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &token::KindList,
-	tok_pos: &token::PosList,
-	procedures: &ProcMap,
-	regions: &RegionMap,
-	proc_db: &mut IdentMap<ProcData>,
-) -> Result<(), error::Error> {
+	input: &InputData,
+	lex_data: &LexData,
+	dsc_data: &DscData,
+	mut proc_db: IdentMap<ProcData>,
+) -> Result<IdentMap<ProcData>, error::Error> {
 	// Check for 'main' procedure
 	if !proc_db.contains_key(&"main".id()) {
-		let tok_src = token_source(source, identifiers, tok_list, tok_pos, TokenId::default());
+		let tok_src = token_source(input, lex_data, TokenId::default());
 		let message = "missing 'main' procedure";
 		let err = error::Error::new(tok_src, message);
-		return Err(err.with_kind(error::Kind::Checker)
-			//.display(&data.source_file, &data.source, &data.line_pos)
-		);
+		return Err(err.with_kind(error::Kind::Checker));
 	}
 
 	// Check for stack regions
-	let has_call_stack = regions.contains_key(&"CallStack".id());
-	let has_data_stack = regions.contains_key(&"DataStack".id());
-	if let Some(stack_src_loc) = regions.get(&"Stack".id()) {
+	let has_call_stack = dsc_data.regions.contains_key(&"CallStack".id());
+	let has_data_stack = dsc_data.regions.contains_key(&"DataStack".id());
+	if let Some(stack_src_loc) = dsc_data.regions.get(&"Stack".id()) {
 		// call and data stack are combined, reject explicitly named regions
 		if has_call_stack || has_data_stack {
-			let tok_src = token_source(source, identifiers, tok_list, tok_pos, (stack_src_loc.span.start as usize).into());
+			let tok_src = token_source(input, lex_data, (stack_src_loc.span.start as usize).into());
 			let message = "Combined Call/Data stack already defined";
 			let err = error::Error::new(tok_src, message);
-			return Err(err.with_kind(error::Kind::Checker)
-				//.display(&data.source_file, &data.source, &data.line_pos)
-			);
+			return Err(err.with_kind(error::Kind::Checker));
 		}
 	} else {
 		// no combined stack region, call and data stack are required
 		if !has_call_stack {
-			let tok_src = token_source(source, identifiers, tok_list, tok_pos, TokenId::default());
+			let tok_src = token_source(input, lex_data, TokenId::default());
 			let message = "No combined Call/Data stack defined, declare a dedicated 'CallStack' region.";
 			let err = error::Error::new(tok_src, message);
-			return Err(err.with_kind(error::Kind::Checker)
-				//.display(&data.source_file, &data.source, &data.line_pos)
-			);
+			return Err(err.with_kind(error::Kind::Checker));
 		} else if !has_data_stack {
-			let tok_src = token_source(source, identifiers, tok_list, tok_pos, TokenId::default());
+			let tok_src = token_source(input, lex_data, TokenId::default());
 			let message = "No combined Call/Data stack defined, declare a dedicated 'DataStack' region.";
 			let err = error::Error::new(tok_src, message);
-			return Err(err.with_kind(error::Kind::Checker)
-				//.display(&data.source_file, &data.source, &data.line_pos)
-			);
+			return Err(err.with_kind(error::Kind::Checker));
 		}
 	}
 
 	// Check for region overlap
-	let regions_vec: Vec<(&IdentId, &Region)> = regions.iter().collect();
+	let regions_vec: Vec<(&IdentId, &Region)> = dsc_data.regions.iter().collect();
 
 	for i in 0..regions_vec.len() {
 		for j in i+1..regions_vec.len() {
 			let (i_name, i_span) = regions_vec[i];
 			let (j_name, j_span) = regions_vec[j];
 			if !(i_span.span.start >= j_span.span.end || i_span.span.end <= j_span.span.start) {
-				let i_src_loc = identifiers[i_name];
-				let j_src_loc = identifiers[j_name];
-				let i_text = text(source, identifiers, i_name);
-				let j_text = text(source, identifiers, j_name);
+				let i_src_loc = lex_data.identifiers[i_name];
+				let j_src_loc = lex_data.identifiers[j_name];
+				let i_text = text(input, lex_data, i_name);
+				let j_text = text(input, lex_data, j_name);
 				let msg = format!("regions {i_text} and {j_text} overlap");
 				let i_msg = format!("{i_text} has a memory range of {i_span:?}");
 				let j_msg = format!("{j_text} has a memory range of {j_span:?}");
@@ -132,7 +123,6 @@ pub fn eval(
 					.with_note_at(i_src_loc, &i_msg)
 					.with_note_at(j_src_loc, &j_msg)
 					.with_kind(error::Kind::Checker);
-					//.display(&data.source_file, &data.source, &data.line_pos);
 				return Err(err);
 			}
 		}
@@ -144,7 +134,7 @@ pub fn eval(
 	// Check procedures
 	let completed_procs = proc_db.clone();
 	for (proc_id, mut proc_data) in completed_procs {
-		let proc_type = &procedures[&proc_id];
+		let proc_type = &dsc_data.procedures[&proc_id];
 
 		for (param_name, param_type) in &proc_type.params {
 			proc_data.ident_to_type.insert(*param_name, *param_type);
@@ -155,21 +145,17 @@ pub fn eval(
 
 		let ret_type = proc_type.ret_type;
 		if let Err(err) = check_stmt(&mut proc_data, proc_id, proc_start, ret_type) {
-			let tok_src = token_source(
-				source, identifiers,
-				tok_list, tok_pos,
-				range.start);
-			let message = err.to_string(source, identifiers);
+			let tok_src = token_source(input, lex_data, range.start);
+			let message = err.to_string(input, lex_data);
 			let err = error::Error::new(tok_src, message)
 				.with_kind(error::Kind::Checker);
-				//.display(&data.source_file, &data.source, &data.line_pos);
 			return Err(err);
 		}
 		proc_db.entry(proc_id)
 			.and_modify(|data| *data = proc_data);
 	}
 
-	Ok(())
+	Ok(proc_db)
 }
 
 fn check_stmt(proc_data: &mut ProcData,

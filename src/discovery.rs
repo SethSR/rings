@@ -2,13 +2,15 @@
 use std::collections::VecDeque;
 
 use crate::cursor::{Cursor, Error};
-use crate::identifier::{self, Id as IdentId, Identifier, Map as IdentMap};
+use crate::identifier::{self, Id as IdentId, Identifier};
+use crate::input::Data as InputData;
+use crate::lexer::Data as LexData;
 use crate::rings_type::Type;
 use crate::task::{Kind as TaskKind, Task};
-use crate::token::{Id as TokenId, Kind as TokenKind, KindList, PosList};
+use crate::token::{Id as TokenId, Kind as TokenKind};
 use crate::value::Kind as ValueKind;
-use crate::type_size;
-use crate::{Span, SrcPos, Target};
+use crate::{fmt_size, type_size};
+use crate::{Span, Target};
 
 pub type ValueMap = identifier::Map<Value>;
 pub type RegionMap = identifier::Map<Region>;
@@ -80,80 +82,198 @@ impl Table {
 
 type DiscResult<T> = Result<T, Error>;
 
-pub fn eval(
-	source: &str,
-	identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList,
-	tok_pos: &PosList,
-	task_queue: &mut VecDeque<Task>,
-	procedures: &mut ProcMap,
-	records: &mut RecordMap,
-	regions: &mut RegionMap,
-	values: &mut ValueMap,
-) -> DiscResult<()> {
+#[derive(Debug, Default)]
+pub struct Data {
+	pub procedures: ProcMap,
+	pub records: RecordMap,
+	pub regions: RegionMap,
+	pub values: ValueMap,
+}
+
+pub fn print(
+	dsc_data: &Data,
+	task_queue: &VecDeque<Task>,
+	input: &InputData,
+	lex_data: &LexData,
+) {
+	fn fields_to_str(input: &InputData,
+		lex_data: &LexData,
+		fields: &[(IdentId, Type)],
+	) -> String {
+		fields.iter()
+			.map(|(field_id, field_type)| {
+				let field_name = crate::text(input, lex_data, field_id);
+				let type_name = crate::type_text(input, lex_data, field_type);
+				format!("{field_name}:{type_name}")
+			})
+			.collect::<Vec<_>>()
+			.join(", ")
+	}
+
+	println!("{:<16} | {:<9} | {:<9}", "REGION", "ADDRESS", "SIZE");
+	println!("{:-<16} | {:-<9} | {:-<9}", "", "", "");
+	for (ident_id, data) in dsc_data.regions.iter() {
+		let name = crate::text(input, lex_data, ident_id);
+		let address = data.span.start;
+		let size = fmt_size((data.span.end - data.span.start) as usize);
+		println!("{name:<16} | #{address:0>8X} | {size:<8}");
+	}
+
+	println!();
+	println!("{:<16} | {:<8} | {:<9} | FIELDS",
+		"RECORD", "SIZE", "ADDRESS");
+	println!("{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "");
+	for (ident_id, record) in dsc_data.records.iter() {
+		let name = crate::text(input, lex_data, ident_id);
+		let size = record.size(&dsc_data.records);
+		let address = record.region
+			.map(|id| format!("#{:0>8X}", dsc_data.regions[&id].span.start))
+			.unwrap_or("-".to_string());
+		let field_str = fields_to_str(input, lex_data, &record.fields);
+		println!("{name:<16} | {size:<8} | {address:9} | {field_str}");
+	}
+
+	#[cfg(feature="table")]
+	{
+		println!(f)?;
+		println!("{:<16} | {:<10} | {:<8} | {:<9} | {:<9} | COLUMNS",
+			"TABLE", "TOTAL SIZE", "ROW SIZE", "ROW COUNT", "ADDRESS")?;
+		println!("{:-<16} | {:-<10} | {:-<8} | {:-<9} | {:-<9} | {:-<16}", "", "", "", "", "", "")?;
+		for (ident_id, table) in dsc_data.tables.iter() {
+			let name = dsc_data.text(ident_id);
+			let size = table.size(dsc_data);
+			let row_size = size / table.row_count;
+			let address = table.address
+					.map(|num| format!("#{num:0>8X}"))
+					.unwrap_or("-".to_string());
+			let field_str = fields_to_str(sel&table.column_spec);
+			println!("{name:<16} | {size:<10} | {row_size:<8} | {:<9} | {address:9} | {field_str}", table.row_count)?;
+		}
+	}
+
+	if !dsc_data.procedures.is_empty() {
+		let (types, params): (Vec<_>, Vec<_>) = dsc_data.procedures.iter()
+			.map(|(ident_id, data)| {
+				let name = crate::text(input, lex_data, ident_id);
+				let params = data.params.iter()
+					.map(|(p_name, p_type)| {
+						let param_name = crate::text(input, lex_data, p_name);
+						let param_type = crate::type_text(input, lex_data, p_type);
+						format!("{name:<32} | {param_name:<16} | {param_type:<16}")
+					})
+					.collect::<Vec<_>>()
+					.join("\n");
+				(
+					format!("{name:<32} | {:<16?} | {:<16?}", data.ret_type, data.target),
+					params,
+				)
+			})
+			.unzip();
+
+		println!();
+		println!("{:<32} | {:<16} | TARGET",
+			"PROCEDURE", "RETURN-TYPE");
+		println!("{:-<32} | {:-<16} | {:-<16}", "", "", "");
+		println!("{}", types.join("\n"));
+
+		let params = params.into_iter()
+				.filter(|p| !p.is_empty())
+				.collect::<Vec<_>>();
+		if !params.is_empty() {
+			println!();
+			println!("{:<32} | {:<16} | PARAM-TYPE",
+				"PROCEDURE", "PARAM-NAME");
+			println!("{:-<32} | {:-<16} | {:-<16}", "", "", "");
+			println!("{}", params.join("\n"));
+		}
+	}
+
+	if !task_queue.is_empty() {
+		println!();
+		println!("{:<32} | {:<11} | {:<11} | {:<10} | PREV QUEUE LENGTH",
+			"TASK", "KIND", "START TOKEN", "LATEST TOKEN");
+		println!("{:-<32} | {:-<11} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "", "");
+		for task in task_queue.iter() {
+			println!("{:<32} | {:<11?} | {:<11} | {:<10} | {:?}",
+				crate::text(input, lex_data, &task.name_id),
+				task.kind,
+				task.tok_start.index(),
+				task.prev_furthest_token.index(),
+				task.prev_queue_length,
+			);
+		}
+	}
+
+	println!();
+}
+
+pub fn eval(input: &InputData, lex_data: &LexData) -> DiscResult<(Data, VecDeque<Task>)> {
 	let mut cursor = Cursor::default();
+	let mut out = Data::default();
+	let mut task_queue = VecDeque::default();
+
 	loop {
-		match cursor.current(tok_list) {
+		match cursor.current(&lex_data) {
 			TokenKind::Main => {
-				let tok_start = discover_init_proc(&mut cursor, tok_list)?;
+				let tok_start = discover_init_proc(&mut cursor, &lex_data)?;
 				let name_id = "main".id();
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
-				procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
+				out.procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
 			}
 
 			TokenKind::Sub => {
-				let tok_start = discover_init_proc(&mut cursor, tok_list)?;
+				let tok_start = discover_init_proc(&mut cursor, &lex_data)?;
 				let name_id = "sub".id();
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
-				procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
+				out.procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
 			}
 
 			TokenKind::Proc => {
-				let (name_id, tok_start, params, ret_type) = discover_proc(&mut cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_proc(&mut cursor, &lex_data, &out.records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
-				procedures.insert(name_id, ProcType { params, ret_type, target: None });
+				out.procedures.insert(name_id, ProcType { params, ret_type, target: None });
 			}
 
 			TokenKind::M68k => {
 				cursor.advance();
-				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, &lex_data, &out.records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
-				procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::M68k) });
+				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::M68k) });
 			}
 
 			TokenKind::SH2 => {
 				cursor.advance();
-				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, &lex_data, &out.records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
-				procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::SH2) });
+				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::SH2) });
 			}
 
 			TokenKind::X64 => {
 				cursor.advance();
-				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, &lex_data, &out.records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
-				procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::X86_64) });
+				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::X86_64) });
 			}
 
 			TokenKind::Z80 => {
 				cursor.advance();
-				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, tok_list, records)?;
+				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, &lex_data, &out.records)?;
 				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
-				procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::Z80) });
+				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::Z80) });
 			}
 
 			TokenKind::Region => {
 				cursor.advance();
-				let name_id = cursor.expect_identifier(tok_list, "region name")?;
-				let region = discover_region(&mut cursor, source, identifiers, tok_list, tok_pos)?;
-				regions.insert(name_id, region);
+				let name_id = cursor.expect_identifier(&lex_data, "region name")?;
+				let region = discover_region(&mut cursor, &input, &lex_data)?;
+				out.regions.insert(name_id, region);
 			}
 
 			TokenKind::Record => {
 				cursor.advance();
-				let ident_id = cursor.expect_identifier(tok_list, "record name")?;
-				let record = discover_record(&mut cursor, tok_list, records, regions)?;
-				records.insert(ident_id, record);
+				let ident_id = cursor.expect_identifier(&lex_data, "record name")?;
+				let record = discover_record(&mut cursor, &lex_data, &out.records, &out.regions)?;
+				out.records.insert(ident_id, record);
 			}
 
 			#[cfg(feature="table")]
@@ -171,16 +291,16 @@ pub fn eval(
 
 			TokenKind::Value => {
 				cursor.advance();
-				let name_id = cursor.expect_identifier(tok_list, "value name")?;
-				cursor.expect(tok_list, TokenKind::Eq)?;
+				let name_id = cursor.expect_identifier(&lex_data, "value name")?;
+				cursor.expect(&lex_data, TokenKind::Eq)?;
 				let tok_start = cursor.index();
-				let expr = crate::value::value_expression(&mut cursor, tok_list, &[TokenKind::Semicolon], None)?;
+				let expr = crate::value::value_expression(&mut cursor, &lex_data, &[TokenKind::Semicolon], None)?;
 				match expr.kind {
 					ValueKind::Int(num) => {
-						values.insert(name_id, Value::Integer(num));
+						out.values.insert(name_id, Value::Integer(num));
 					}
 					ValueKind::Dec(num) => {
-						values.insert(name_id, Value::Decimal(num));
+						out.values.insert(name_id, Value::Decimal(num));
 					}
 					ValueKind::Unfinished => {
 						task_queue.push_back(Task::new(TaskKind::Value, name_id, tok_start));
@@ -193,17 +313,14 @@ pub fn eval(
 		}
 	}
 
-	Ok(())
+	Ok((out, task_queue))
 }
 
-fn check_braces(
-	cursor: &mut Cursor,
-	tok_list: &KindList,
-) -> DiscResult<()> {
-	cursor.expect(tok_list, TokenKind::OBrace)?;
+fn check_braces(cursor: &mut Cursor, lex_data: &LexData) -> DiscResult<()> {
+	cursor.expect(lex_data, TokenKind::OBrace)?;
 	let mut brace_count = 1;
-	while brace_count > 0 && cursor.current(tok_list) != TokenKind::Eof {
-		brace_count += match cursor.current(tok_list) {
+	while brace_count > 0 && cursor.current(lex_data) != TokenKind::Eof {
+		brace_count += match cursor.current(lex_data) {
 			TokenKind::OBrace => 1,
 			TokenKind::CBrace => -1,
 			TokenKind::Eof => {
@@ -217,65 +334,57 @@ fn check_braces(
 	Ok(())
 }
 
-fn discover_init_proc(
-	cursor: &mut Cursor,
-	tok_list: &KindList,
+fn discover_init_proc(cursor: &mut Cursor, lex_data: &LexData,
 ) -> DiscResult<TokenId> {
 	cursor.advance();
 	let tok_start = cursor.index();
-	check_braces(cursor, tok_list)?;
+	check_braces(cursor, lex_data)?;
 	Ok(tok_start)
 }
 
-fn discover_proc(
-	cursor: &mut Cursor,
-	tok_list: &KindList,
+fn discover_proc(cursor: &mut Cursor, lex_data: &LexData,
 	records: &RecordMap,
 ) -> DiscResult<(IdentId, TokenId, Vec<Param>, Type)> {
-	cursor.expect(tok_list, TokenKind::Proc)?;
-	let name_id = cursor.expect_identifier(tok_list, "procedure name")?;
-	cursor.expect(tok_list, TokenKind::OParen)?;
-	let params = discover_fields(cursor, tok_list, records, TokenKind::CParen)?;
-	cursor.expect(tok_list, TokenKind::CParen)?;
-	let ret_type = if cursor.expect(tok_list, TokenKind::Arrow).is_ok() {
-		cursor.expect_type(tok_list, records)?
+	cursor.expect(lex_data, TokenKind::Proc)?;
+	let name_id = cursor.expect_identifier(lex_data, "procedure name")?;
+	cursor.expect(lex_data, TokenKind::OParen)?;
+	let params = discover_fields(cursor, lex_data, records, TokenKind::CParen)?;
+	cursor.expect(lex_data, TokenKind::CParen)?;
+	let ret_type = if cursor.expect(lex_data, TokenKind::Arrow).is_ok() {
+		cursor.expect_type(lex_data, records)?
 	} else {
 		Type::Unit
 	};
 	let tok_start = cursor.index();
-	check_braces(cursor, tok_list)?;
+	check_braces(cursor, lex_data)?;
 	Ok((name_id, tok_start, params, ret_type))
 }
 
-fn discover_target_proc(
-	cursor: &mut Cursor,
-	tok_list: &KindList,
+fn discover_target_proc(cursor: &mut Cursor, lex_data: &LexData,
 	records: &RecordMap,
 ) -> DiscResult<(IdentId, TokenId, Vec<Param>, Type)> {
-	Ok(match cursor.current(tok_list) {
+	Ok(match cursor.current(lex_data) {
 		TokenKind::Main => {
-			("main".id(), discover_init_proc(cursor, tok_list)?, vec![], Type::Unit)
+			("main".id(), discover_init_proc(cursor, lex_data)?, vec![], Type::Unit)
 		}
 		TokenKind::Sub => {
-			("sub".id(), discover_init_proc(cursor, tok_list)?, vec![], Type::Unit)
+			("sub".id(), discover_init_proc(cursor, lex_data)?, vec![], Type::Unit)
 		}
-		_ => discover_proc(cursor, tok_list, records)?,
+		_ => discover_proc(cursor, lex_data, records)?,
 	})
 }
 
-fn discover_fields(
-	cursor: &mut Cursor,
-	tok_list: &KindList,
+fn discover_fields(cursor: &mut Cursor, lex_data: &LexData,
 	records: &RecordMap,
 	end_token: TokenKind,
 ) -> DiscResult<Vec<Param>> {
 	let mut fields = Vec::default();
-	while end_token != cursor.current(tok_list) {
-		let field_id = cursor.expect_identifier(tok_list, "field name")?;
-		cursor.expect(tok_list, TokenKind::Colon)?;
-		let field_type = cursor.expect_type(tok_list, records)?;
+	while end_token != cursor.current(lex_data) {
+		let field_id = cursor.expect_identifier(lex_data, "field name")?;
+		cursor.expect(lex_data, TokenKind::Colon)?;
+		let field_type = cursor.expect_type(lex_data, records)?;
 		fields.push((field_id, field_type));
-		if cursor.current(tok_list) != TokenKind::Comma {
+		if cursor.current(lex_data) != TokenKind::Comma {
 			break;
 		}
 		cursor.advance();
@@ -283,19 +392,14 @@ fn discover_fields(
 	Ok(fields)
 }
 
-fn discover_region(
-	cursor: &mut Cursor,
-	source: &str,
-	identifiers: &IdentMap<Span<SrcPos>>,
-	tok_list: &KindList,
-	tok_pos: &PosList,
+fn discover_region(cursor: &mut Cursor, input: &InputData, lex_data: &LexData,
 ) -> DiscResult<Region> {
-	cursor.expect(tok_list, TokenKind::OBracket)?;
-	let byte_count = cursor.expect_u32(source, identifiers, tok_list, tok_pos, "region size")?;
-	cursor.expect(tok_list, TokenKind::CBracket)?;
-	cursor.expect(tok_list, TokenKind::At)?;
-	let address = cursor.expect_u32(source, identifiers, tok_list, tok_pos, "region address")?;
-	cursor.expect(tok_list, TokenKind::Semicolon)?;
+	cursor.expect(lex_data, TokenKind::OBracket)?;
+	let byte_count = cursor.expect_u32(input, lex_data, "region size")?;
+	cursor.expect(lex_data, TokenKind::CBracket)?;
+	cursor.expect(lex_data, TokenKind::At)?;
+	let address = cursor.expect_u32(input, lex_data, "region address")?;
+	cursor.expect(lex_data, TokenKind::Semicolon)?;
 	Ok(Region {
 		span: Span { start: address, end: address + byte_count },
 		alloc_position: 0,
@@ -303,13 +407,11 @@ fn discover_region(
 }
 
 /// Check after an '@' for a defined region or an address location
-fn discover_address(
-	cursor: &mut Cursor,
-	tok_list: &KindList,
+fn discover_address(cursor: &mut Cursor, lex_data: &LexData,
 	regions: &RegionMap,
 ) -> DiscResult<Option<IdentId>> {
-	if cursor.expect(tok_list, TokenKind::At).is_ok() {
-		if let Ok(id) = cursor.expect_identifier(tok_list, "region name") {
+	if cursor.expect(lex_data, TokenKind::At).is_ok() {
+		if let Ok(id) = cursor.expect_identifier(lex_data, "region name") {
 			if regions.contains_key(&id) {
 				return Ok(Some(id));
 			}
@@ -324,16 +426,13 @@ fn discover_address(
 	}
 }
 
-fn discover_record(
-	cursor: &mut Cursor,
-	tok_list: &KindList,
-	records: &RecordMap,
-	regions: &RegionMap,
+fn discover_record(cursor: &mut Cursor, lex_data: &LexData,
+	records: &RecordMap, regions: &RegionMap,
 ) -> DiscResult<Record> {
-	let region = discover_address(cursor, tok_list, regions)?;
-	cursor.expect(tok_list, TokenKind::OBrace)?;
-	let fields = discover_fields(cursor, tok_list, records, TokenKind::CBrace)?;
-	cursor.expect(tok_list, TokenKind::CBrace)?;
+	let region = discover_address(cursor, lex_data, regions)?;
+	cursor.expect(lex_data, TokenKind::OBrace)?;
+	let fields = discover_fields(cursor, lex_data, records, TokenKind::CBrace)?;
+	cursor.expect(lex_data, TokenKind::CBrace)?;
 	Ok(Record { region, fields })
 }
 
@@ -356,59 +455,34 @@ fn discover_table(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Table> {
 #[cfg(test)]
 mod can_parse {
 	use crate::{error, lexer};
-	use crate::Data;
 
 	use super::*;
 
-	fn setup(source: &str) -> Data {
-		let mut db = Data::new(file!().to_string(), source.into());
-		db .DEBUG_show_tokens = true;
+	fn setup(source: &str) -> (Data, VecDeque<Task>) {
+		let input = crate::input::eval(file!().to_string(), source.into());
 
-		let result = {
-			lexer::eval(
-				&db.source,
-				&mut db.identifiers,
-				&mut db.tok_list,
-				&mut db.tok_pos,
-				&mut db.line_pos,
-			).map_err(|e| e.with_kind(error::Kind::Lexer))
-		}.and_then(|_| {
-			eval(
-				&db.source,
-				&db.identifiers,
-				&db.tok_list,
-				&db.tok_pos,
-				&mut db.task_queue,
-				&mut db.procedures,
-				&mut db.records,
-				&mut db.regions,
-				&mut db.values,
-			).map_err(|e| e.into_comp_error(&db, error::Kind::Discovery))
-		});
+		let lex_data = lexer::eval(&input.source)
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		match result {
-			Ok(_) => db,
-			Err(e) => {
-				let msg = e.display(
-					&db.source_file, &db.source, &db.line_pos);
-				panic!("{msg}");
-			}
-		}
+		let (dsc_data, task_queue) = eval(&input, &lex_data)
+			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Discovery))
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+		(dsc_data, task_queue)
 	}
 
 	#[test]
 	fn constant_values() {
-		let data = setup("value a = 3; value b = 4.2;");
+		let (data, _) = setup("value a = 3; value b = 4.2;");
 		assert_eq!(data.values.len(), 2);
-		assert_eq!(data.values[&"a".id()], Value::Integer(3), "{data}");
-		assert_eq!(data.values[&"b".id()], Value::Decimal(4.2), "{data}");
+		assert_eq!(data.values[&"a".id()], Value::Integer(3));
+		assert_eq!(data.values[&"b".id()], Value::Decimal(4.2));
 	}
 
 	#[test]
 	fn procedures() {
-		let data = setup("value a = 5; proc b() {}");
-		assert_eq!(data.task_queue.len(), 1);
-		assert_eq!(data.task_queue[0], Task::new(
+		let (data, task_queue) = setup("value a = 5; proc b() {}");
+		assert_eq!(task_queue.len(), 1);
+		assert_eq!(task_queue[0], Task::new(
 			TaskKind::Proc,
 			"b".id(),
 			TokenId::new(9),
@@ -423,9 +497,9 @@ mod can_parse {
 
 	#[test]
 	fn procedure_with_params() {
-		let data = setup("proc a(b: s8, c: s8) {}");
-		assert_eq!(data.task_queue.len(), 1);
-		assert_eq!(data.task_queue[0], Task::new(
+		let (data, task_queue) = setup("proc a(b: s8, c: s8) {}");
+		assert_eq!(task_queue.len(), 1);
+		assert_eq!(task_queue[0], Task::new(
 			TaskKind::Proc,
 			"a".id(),
 			TokenId::new(11),
@@ -443,9 +517,9 @@ mod can_parse {
 
 	#[test]
 	fn procedure_with_return() {
-		let data = setup("proc a() -> s8 {}");
-		assert_eq!(data.task_queue.len(), 1);
-		assert_eq!(data.task_queue[0], Task::new(
+		let (data, task_queue) = setup("proc a() -> s8 {}");
+		assert_eq!(task_queue.len(), 1);
+		assert_eq!(task_queue[0], Task::new(
 			TaskKind::Proc,
 			"a".id(),
 			TokenId::new(6),
@@ -460,9 +534,9 @@ mod can_parse {
 
 	#[test]
 	fn procedure_with_target() {
-		let data = setup("sh2 proc a() {}");
-		assert_eq!(data.task_queue.len(), 1);
-		assert_eq!(data.task_queue[0], Task::new(
+		let (data, task_queue) = setup("sh2 proc a() {}");
+		assert_eq!(task_queue.len(), 1);
+		assert_eq!(task_queue[0], Task::new(
 			TaskKind::Proc,
 			"a".id(),
 			TokenId::new(5),
@@ -477,9 +551,9 @@ mod can_parse {
 
 	#[test]
 	fn init_procedure_with_target() {
-		let data = setup("sh2 main {} z80 sub {}");
-		assert_eq!(data.task_queue.len(), 2);
-		assert_eq!(data.task_queue, [
+		let (data, task_queue) = setup("sh2 main {} z80 sub {}");
+		assert_eq!(task_queue.len(), 2);
+		assert_eq!(task_queue, [
 			Task::new(
 				TaskKind::Proc,
 				"main".id(),
@@ -506,7 +580,7 @@ mod can_parse {
 
 	#[test]
 	fn region() {
-		let data = setup("region a[1024] @ 0x0020_0000;");
+		let (data, _) = setup("region a[1024] @ 0x0020_0000;");
 		assert_eq!(data.regions.len(), 1);
 		assert_eq!(data.regions[&"a".id()], Region {
 			span: (0x20_0000..0x20_0400).into(),
@@ -516,7 +590,7 @@ mod can_parse {
 
 	#[test]
 	fn empty_record() {
-		let data = setup("record a {}");
+		let (data, _) = setup("record a {}");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data.records), 0);
@@ -526,7 +600,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_one_field_no_trailing_comma() {
-		let data = setup("record a { b: s8 }");
+		let (data, _) = setup("record a { b: s8 }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data.records), 1);
@@ -536,7 +610,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_one_field_and_trailing_comma() {
-		let data = setup("record a { b: s8, }");
+		let (data, _) = setup("record a { b: s8, }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data.records), 1);
@@ -546,7 +620,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_multiple_fields() {
-		let data = setup("record a { b: s8, c: s8 }");
+		let (data, _) = setup("record a { b: s8, c: s8 }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
 		assert_eq!(record.size(&data.records), 2);
@@ -559,7 +633,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_user_defined_field() {
-		let data = setup("record a {} record b { c: a }");
+		let (data, _) = setup("record a {} record b { c: a }");
 		assert_eq!(data.records.len(), 2);
 		let record = &data.records[&"b".id()];
 		assert_eq!(record.size(&data.records), 0);
@@ -571,7 +645,7 @@ mod can_parse {
 
 	#[test]
 	fn record_with_region() {
-		let data = setup("
+		let (data, _) = setup("
 			region b[8] @ 32;
 			record a @ b {}
 		");
@@ -590,7 +664,7 @@ mod can_parse {
 	#[cfg(feature="table")]
 	#[test]
 	fn empty_table() {
-		let data = setup("table a[10] {}");
+		let (data, task_queue) = setup("table a[10] {}");
 		assert_eq!(data.tables.len(), 1);
 		let table = &data.tables[&"a".id()];
 		assert_eq!(table.row_count, 10);
@@ -602,7 +676,7 @@ mod can_parse {
 	#[cfg(feature="table")]
 	#[test]
 	fn table_with_one_field() {
-		let data = setup("table a[10] { b: u32 }");
+		let (data, task_queue) = setup("table a[10] { b: u32 }");
 		assert_eq!(data.tables.len(), 1);
 		let table = &data.tables[&"a".id()];
 		assert_eq!(table.row_count, 10);
@@ -614,7 +688,7 @@ mod can_parse {
 	#[cfg(feature="table")]
 	#[test]
 	fn table_with_multiple_field() {
-		let data = setup("table a[10] { b: u32, c: s16 }");
+		let (data, task_queue) = setup("table a[10] { b: u32, c: s16 }");
 		assert_eq!(data.tables.len(), 1);
 		let table = &data.tables[&"a".id()];
 		assert_eq!(table.row_count, 10);
@@ -629,7 +703,7 @@ mod can_parse {
 	#[cfg(feature="table")]
 	#[test]
 	fn table_with_user_defined_field() {
-		let data = setup("record a { a1: s16 } table b[10] { b1: a }");
+		let (data, task_queue) = setup("record a { a1: s16 } table b[10] { b1: a }");
 		assert_eq!(data.tables.len(), 1);
 		let table = &data.tables[&"b".id()];
 		assert_eq!(table.row_count, 10);

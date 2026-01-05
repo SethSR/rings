@@ -1,13 +1,15 @@
 
 use crate::discovery::RecordMap;
 use crate::error;
-use crate::identifier::{Id as IdentId, Map as IdentMap};
+use crate::identifier::Id as IdentId;
+use crate::input::Data as InputData;
+use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::rings_type::Type;
-use crate::token::{Id as TokenId, Kind as TokenKind, KindList, PosList};
+use crate::token::{Id as TokenId, Kind as TokenKind};
 use crate::{
-	token_source,
-	Data, Span, SrcPos,
+	text, token_source,
+	Span, SrcPos,
 };
 
 pub enum Error {
@@ -17,16 +19,20 @@ pub enum Error {
 }
 
 impl Error {
-	pub fn into_comp_error(self, db: &Data, kind: error::Kind) -> error::Error {
+	pub fn into_comp_error(self,
+		input: &InputData,
+		lex_data: &LexData,
+		kind: error::Kind,
+	) -> error::Error {
 		match self {
 			Self::ExpectedToken { expected, found: token_id } => {
-				let found = db.tok_list[token_id];
+				let found = lex_data.tok_list[token_id];
 				let message = if let TokenKind::Identifier(ident_id) = found {
-					format!("Expected {expected}, found '{}'", db.text(&ident_id))
+					format!("Expected {expected}, found '{}'", text(&input, &lex_data, &ident_id))
 				} else {
 					format!("Expected {expected}, found {found:?}")
 				};
-				error::Error::new(db.token_source(token_id), message)
+				error::Error::new(token_source(&input, &lex_data, token_id), message)
 			}
 			Self::Expected { span, expected, found } => {
 				error::Error::new(span, format!("Expected {expected}, found {found}"))
@@ -54,19 +60,19 @@ impl Cursor {
 		self.0 += 1;
 	}
 
-	pub fn peek(&self, tok_list: &KindList, offset: usize) -> TokenKind {
-		tok_list
+	pub fn peek(&self, lex_data: &LexData, offset: usize) -> TokenKind {
+		lex_data.tok_list
 			.get(self.0 + offset)
 			.copied()
 			.unwrap_or(TokenKind::Eof)
 	}
 
-	pub fn current(&self, tok_list: &KindList) -> TokenKind {
-		self.peek(tok_list, 0)
+	pub fn current(&self, lex_data: &LexData) -> TokenKind {
+		self.peek(lex_data, 0)
 	}
 
-	pub fn expect(&mut self, tok_list: &KindList, expected: TokenKind) -> Result<(), Error> {
-		if self.current(tok_list) == expected {
+	pub fn expect(&mut self, lex_data: &LexData, expected: TokenKind) -> Result<(), Error> {
+		if self.current(lex_data) == expected {
 			self.advance();
 			Ok(())
 		} else {
@@ -74,10 +80,10 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_identifier(&mut self, tok_list: &KindList,
+	pub fn expect_identifier(&mut self, lex_data: &LexData,
 		expected: &str,
 	) -> Result<IdentId, Error> {
-		if let TokenKind::Identifier(ident_id) = self.current(tok_list) {
+		if let TokenKind::Identifier(ident_id) = self.current(lex_data) {
 			self.advance();
 			Ok(ident_id)
 		} else {
@@ -85,10 +91,10 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_integer(&mut self, tok_list: &KindList,
+	pub fn expect_integer(&mut self, lex_data: &LexData,
 		expected: &str,
 	) -> Result<i64, Error> {
-		if let TokenKind::Integer(num) = self.current(tok_list) {
+		if let TokenKind::Integer(num) = self.current(lex_data) {
 			self.advance();
 			Ok(num)
 		} else {
@@ -97,16 +103,14 @@ impl Cursor {
 	}
 
 	pub fn expect_u32(&mut self,
-		source: &str,
-		identifiers: &IdentMap<Span<SrcPos>>,
-		tok_list: &KindList,
-		tok_pos: &PosList,
+		input: &InputData,
+		lex_data: &LexData,
 		expected: &str,
 	) -> Result<u32, Error> {
-		self.expect_integer(tok_list, expected)
+		self.expect_integer(&lex_data, expected)
 			.and_then(|num| {
-				let start = token_source(source, identifiers, tok_list, tok_pos, self.index() - 1);
-				let end = token_source(source, identifiers, tok_list, tok_pos, self.index());
+				let start = token_source(input, lex_data, self.index() - 1);
+				let end = token_source(input, lex_data, self.index());
 				check_integer_as_u32(
 					&format!("valid {expected}"),
 					num,
@@ -116,10 +120,10 @@ impl Cursor {
 	}
 
 	pub fn expect_type(&mut self,
-		tok_list: &KindList,
+		lex_data: &LexData,
 		records: &RecordMap,
 	) -> Result<Type, Error> {
-		let result = match self.current(tok_list) {
+		let result = match self.current(lex_data) {
 			TokenKind::Identifier(ident_id) if records.contains_key(&ident_id) => {
 				Ok(Type::Record(ident_id))
 			}
@@ -146,8 +150,8 @@ impl Cursor {
 		result
 	}
 
-	pub fn expect_bin_op(&mut self, tok_list: &KindList) -> Result<BinaryOp, Error> {
-		match self.current(tok_list) {
+	pub fn expect_bin_op(&mut self, lex_data: &LexData) -> Result<BinaryOp, Error> {
+		match self.current(lex_data) {
 			TokenKind::Amp     => { self.advance(); Ok(BinaryOp::BinAnd) }
 			TokenKind::Amp2    => { self.advance(); Ok(BinaryOp::LogAnd) }
 			TokenKind::BangEq  => { self.advance(); Ok(BinaryOp::CmpNE) }
@@ -171,8 +175,8 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_unary_op(&mut self, tok_list: &KindList) -> Option<UnaryOp> {
-		match self.current(tok_list) {
+	pub fn expect_unary_op(&mut self, lex_data: &LexData) -> Option<UnaryOp> {
+		match self.current(lex_data) {
 			TokenKind::Dash => { self.advance(); Some(UnaryOp::Neg) }
 			TokenKind::Bang => { self.advance(); Some(UnaryOp::Not) }
 			_ => None,
