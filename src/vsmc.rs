@@ -1,6 +1,8 @@
 
+use std::collections::HashMap;
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
-use crate::identifier::{Id as IdentId, Map as IdentMap};
+use crate::discovery::Data as DscData;
+use crate::identifier::{Id as IdentId, Identifier, Map as IdentMap};
 use crate::rings_type::Type;
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
@@ -47,7 +49,45 @@ pub fn print(
 	}
 }
 
-pub fn eval(proc_db: &IdentMap<ProcData>) -> Result<IdentMap<Section>, Error> {
+pub fn place_records(
+	input: &InputData,
+	lex_data: &LexData,
+	dsc_data: &mut DscData,
+) -> IdentMap<u32> {
+	let mut out = IdentMap::with_capacity(dsc_data.records.len());
+
+	for (rec_id, rec_data) in &dsc_data.records {
+		let Some(reg_id) = rec_data.region else {
+			// Skip records without static locations
+			continue;
+		};
+		let Some(region) = dsc_data.regions.get_mut(&reg_id) else {
+			panic!();
+		};
+		let allocation = region.alloc_position + rec_data.size(&dsc_data.records);
+		if allocation > region.span.end {
+			panic!();
+		}
+
+		for (p_id, p_type) in &rec_data.fields {
+			let rec_name = text(input, lex_data, &rec_id);
+			let p_name = text(input, lex_data, p_id);
+			let location = format!("{rec_name}_{p_name}");
+			out.insert(location.id(), region.alloc_position);
+			region.alloc_position += crate::type_size(&dsc_data.records, p_type);
+		}
+	}
+
+	out
+}
+
+pub fn eval(
+	input: &InputData,
+	lex_data: &LexData,
+	proc_db: &IdentMap<ProcData>,
+	dsc_data: &mut DscData,
+) -> Result<(IdentMap<Section>, IdentMap<u32>), Error> {
+	let records = place_records(input, lex_data, dsc_data);
 	let mut out = IdentMap::<Section>::with_capacity(proc_db.len());
 
 	for (proc_id, proc_data) in proc_db {
@@ -61,11 +101,13 @@ pub fn eval(proc_db: &IdentMap<ProcData>) -> Result<IdentMap<Section>, Error> {
 			next_label: 0,
 		};
 
-		section.lower(proc_data)?;
+		let proc_start = proc_data.ast_start;
+
+		section.lower_node(&proc_start, proc_data, &records)?;
 		out.insert(*proc_id, section);
 	}
 
-	Ok(out)
+	Ok((out, records))
 }
 
 /// Virtual Stack-Machine Code
@@ -161,19 +203,10 @@ pub struct Section {
 }
 
 impl Section {
-	fn lower(&mut self, proc_data: &ProcData) -> Result<(), Error> {
-		let proc_start = proc_data.ast_start;
-
-		if let Err(err) = self.lower_node(&proc_start, proc_data) {
-			//let range = &proc_data.ast_pos_tok[proc_start];
-			//error::error(proc_data, &err_msg, range.start);
-			return Err(err);
-		}
-
-		Ok(())
-	}
-
-	fn lower_node(&mut self, id: &AstId, proc_data: &ProcData,
+	fn lower_node(&mut self,
+		id: &AstId,
+		proc_data: &ProcData,
+		records: &HashMap<IdentId, u32>,
 	) -> Result<Option<IdentId>, Error> {
 		let Some(kind) = proc_data.ast_nodes.get(*id) else {
 			return Err(Error::missing_ast_node(self.name, *id));
@@ -212,14 +245,14 @@ impl Section {
 			}
 
 			Kind::Assign(var_id, expr_id) => {
-				let Some(ident_id) = self.lower_node(var_id, proc_data)? else {
+				let Some(ident_id) = self.lower_node(var_id, proc_data, records)? else {
 					return Err(Error::missing_ast_node(self.name, *var_id));
 				};
 				if matches!(self.instructions.last(), Some(Vsmc::Load(_))) {
 					self.instructions.pop();
 				}
 
-				self.lower_node(expr_id, proc_data)?;
+				self.lower_node(expr_id, proc_data, records)?;
 
 				let idx = self.locals.iter()
 						.position(|(local_id,_)| local_id == &ident_id)
@@ -230,21 +263,21 @@ impl Section {
 			}
 
 			Kind::BinOp(op, left_id, right_id) => {
-				self.lower_node(left_id, proc_data)?;
-				self.lower_node(right_id, proc_data)?;
+				self.lower_node(left_id, proc_data, records)?;
+				self.lower_node(right_id, proc_data, records)?;
 				self.emit(Vsmc::BinOp(*op));
 				Ok(None)
 			}
 
 			Kind::UnOp(op, right_id) => {
-				self.lower_node(right_id, proc_data)?;
+				self.lower_node(right_id, proc_data, records)?;
 				self.emit(Vsmc::UnOp(*op));
 				Ok(None)
 			}
 
 			Kind::Return(maybe_expr) => {
 				if let Some(expr_id) = maybe_expr {
-					self.lower_node(expr_id, proc_data)?;
+					self.lower_node(expr_id, proc_data, records)?;
 					self.emit(Vsmc::Return(true));
 				} else {
 					self.emit(Vsmc::Return(false));
@@ -254,13 +287,13 @@ impl Section {
 
 			Kind::Block(stmts) => {
 				for stmt_id in &stmts.0 {
-					self.lower_node(stmt_id, proc_data)?;
+					self.lower_node(stmt_id, proc_data, records)?;
 				}
 				Ok(None)
 			}
 
 			Kind::If(cond_id, then_block, else_block) => {
-				self.lower_node(cond_id, proc_data)?;
+				self.lower_node(cond_id, proc_data, records)?;
 
 				let else_label = self.alloc_label();
 				let end_label = self.alloc_label();
@@ -271,14 +304,14 @@ impl Section {
 
 				// then block
 				for stmt_id in &then_block.0 {
-					self.lower_node(stmt_id, proc_data)?;
+					self.lower_node(stmt_id, proc_data, records)?;
 				}
 				self.emit(Vsmc::Jump(end_label));
 
 				// else block
 				self.emit(Vsmc::Label(else_label));
 				for stmt_id in &else_block.0 {
-					self.lower_node(stmt_id, proc_data)?;
+					self.lower_node(stmt_id, proc_data, records)?;
 				}
 
 				// end
@@ -298,14 +331,14 @@ impl Section {
 
 				// body
 				for stmt_id in &body_block.0 {
-					self.lower_node(stmt_id, proc_data)?;
+					self.lower_node(stmt_id, proc_data, records)?;
 				}
 
 				// check:
 				self.emit(Vsmc::Label(cond_label));
 
 				// if cond goto loop
-				self.lower_node(cond_id, proc_data)?;
+				self.lower_node(cond_id, proc_data, records)?;
 				self.emit(Vsmc::JumpIf(loop_label));
 
 				Ok(None)
@@ -324,7 +357,7 @@ impl Section {
 				//   body
 				//   i = i + 1
 
-				self.lower_for_loop(proc_data, id, iter_vars, table_id, bounds, body_block)?;
+				self.lower_for_loop(proc_data, records, id, iter_vars, table_id, bounds, body_block)?;
 
 				Ok(None)
 			}
@@ -440,6 +473,7 @@ impl Section {
 	fn lower_for_loop(
 		&mut self,
 		proc_data: &ProcData,
+		records: &HashMap<IdentId, u32>,
 		ast_id: &AstId,
 		iter_vars: &[IdentId],
 		table_id: &Option<IdentId>,
@@ -475,7 +509,7 @@ impl Section {
 
 			// body
 			for stmt_id in &body_block.0 {
-				self.lower_node(stmt_id, proc_data)?;
+				self.lower_node(stmt_id, proc_data, records)?;
 			}
 
 			// i = i + 1
@@ -587,12 +621,13 @@ impl Error {
 #[cfg(test)]
 mod tests {
 	use crate::{input, lexer, discovery, parser, type_checker};
+	use crate::discovery::RegionMap;
 	use crate::identifier::Identifier;
 	use crate::rings_type::Type;
 
 	use super::*;
 
-	fn setup(source: &str) -> IdentMap<Section> {
+	fn setup(source: &str) -> (IdentMap<Section>, RegionMap, IdentMap<u32>) {
 		let mut source_str = String::new();
 		source_str.push_str("region Stack[0] @ 0;");
 		source_str.push_str(source);
@@ -602,27 +637,27 @@ mod tests {
 		let lex_data = lexer::eval(&input.source)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let (mut dsc_out, task_queue) = discovery::eval(&input, &lex_data)
+		let (mut dsc_data, task_queue) = discovery::eval(&input, &lex_data)
 			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Discovery))
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let proc_db = parser::eval(&input, &lex_data, &mut dsc_out, task_queue)
+		let proc_db = parser::eval(&input, &lex_data, &mut dsc_data, task_queue)
 			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Parser))
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let proc_db = type_checker::eval(&input, &lex_data, &dsc_out, proc_db)
+		let proc_db = type_checker::eval(&input, &lex_data, &dsc_data, proc_db)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let sections = eval(&proc_db)
+		let (sections, records) = eval(&input, &lex_data, &proc_db, &mut dsc_data)
 			.map_err(|e| e.into_comp_error(&input, &lex_data, &proc_db))
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		sections
+		(sections, dsc_data.regions, records)
 	}
 
 	#[test]
 	fn return_void() {
-		let section_db = setup("main {}
+		let (section_db,_,_) = setup("main {}
 		proc a() {
 			return;
 		}");
@@ -635,7 +670,7 @@ mod tests {
 
 	#[test]
 	fn return_expression() {
-		let section_db = setup("main {}
+		let (section_db,_,_) = setup("main {}
 		proc a() -> s8 {
 			return 100 - 200;
 		}");
@@ -651,7 +686,7 @@ mod tests {
 
 	#[test]
 	fn proc_if() {
-		let section_db = setup("main {}
+		let (section_db,_,_) = setup("main {}
 		proc a() -> s8 {
 			let b: s8 = 5;
 			let c: s8 = 3;
@@ -693,7 +728,7 @@ mod tests {
 
 	#[test]
 	fn proc_while() {
-		let section_db = setup("main {}
+		let (section_db,_,_) = setup("main {}
 		proc a() {
 			let b: s8 = 5;
 			while b > 0 {
@@ -724,7 +759,7 @@ mod tests {
 
 	#[test]
 	fn proc_for() {
-		let section_db = setup("main {
+		let (section_db,_,_) = setup("main {
 			let b: s8 = 4;
 			let c: s8 = 0;
 			for i in [0..10] {
@@ -770,7 +805,7 @@ mod tests {
 
 	#[test]
 	fn proc_internal_sub_expressions() {
-		let section_db = setup("main {
+		let (section_db,_,_) = setup("main {
 			let a: s8 = (2 + 3) * (4 - 5);
 		}");
 		let section = &section_db[&"main".id()];
@@ -788,6 +823,23 @@ mod tests {
 			Vsmc::Store(0),
 			Vsmc::Return(false),
 		]);
+	}
+
+	#[test]
+	fn static_record_placement() {
+		let (_, regions, records) = setup("
+		region a[4] @ 0;
+		record b @ a {
+			c: s8,
+			d: s8,
+			e: s8,
+		}
+		main {}
+		");
+		assert_eq!(regions[&"a".id()].alloc_position, 3);
+		assert_eq!(records.get(&"b_c".id()), Some(&0));
+		assert_eq!(records.get(&"b_d".id()), Some(&1));
+		assert_eq!(records.get(&"b_e".id()), Some(&2));
 	}
 }
 

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
+// TODO - srenshaw - We might want to switch to a HashMap with non-random state, so builds are deterministic.
 pub type Map<T> = HashMap<Id, T>;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]

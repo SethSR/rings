@@ -65,7 +65,7 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		.map_err(|e| e.display(&input))?;
 	//println!("{proc_db:?}");
 
-	let section_db = vsmc::eval(&proc_db)
+	let (section_db,_) = vsmc::eval(&input, &lex_data, &proc_db, &mut dsc_data)
 		.map_err(|e| e.into_comp_error(&input, &lex_data, &proc_db))
 		.map_err(|e| e.display(&input))?;
 	vsmc::print(&section_db, &input, &lex_data);
