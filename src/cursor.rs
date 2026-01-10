@@ -138,12 +138,10 @@ impl Cursor {
 			TokenKind::S8 => Ok(Type::s8_top()),
 			#[cfg(feature="types")]
 			TokenKind::U16 => Ok(Type::U16),
-			#[cfg(feature="types")]
-			TokenKind::S16 => Ok(Type::S16),
+			TokenKind::S16 => Ok(Type::s16_top()),
 			#[cfg(feature="types")]
 			TokenKind::U32 => Ok(Type::U32),
-			#[cfg(feature="types")]
-			TokenKind::S32 => Ok(Type::S32),
+			TokenKind::S32 => Ok(Type::s32_top()),
 			_ => return Err(self.expected_token("type-specifier")),
 		};
 		self.advance();

@@ -23,6 +23,8 @@ pub enum Type {
 	// Language Types
 	Record(IdentId),
 	S8(Lattice<i8>),
+	S16(Lattice<i16>),
+	S32(Lattice<i32>),
 	// TODO - srenshaw - Add S32 type
 	Unit,
 }
@@ -31,6 +33,8 @@ impl Type {
 	pub fn int() -> Self { Self::Int }
 
 	pub fn s8_top() -> Self { Self::S8(Lattice::Top) }
+	pub fn s16_top() -> Self { Self::S16(Lattice::Top) }
+	pub fn s32_top() -> Self { Self::S32(Lattice::Top) }
 }
 
 impl std::fmt::Display for Type {
@@ -41,6 +45,8 @@ impl std::fmt::Display for Type {
 			Self::Int => write!(f, "int"),
 			Self::Record(_) => write!(f, "rec"),
 			Self::S8(_) => write!(f, "s8"),
+			Self::S16(_) => write!(f, "s16"),
+			Self::S32(_) => write!(f, "s32"),
 			Self::Unit => write!(f, "unit"),
 		}
 	}
