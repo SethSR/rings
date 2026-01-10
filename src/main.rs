@@ -8,7 +8,6 @@ use std::process::{Command, Stdio};
 mod asm;
 mod ast;
 mod cursor;
-mod discovery;
 mod error;
 mod identifier;
 mod input;
@@ -51,15 +50,8 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		.map_err(|e| e.display(&input))?;
 	lex_data.print(&input, false);
 
-	let (mut dsc_data, task_queue) = discovery::eval(&input, &lex_data)
-		.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Discovery))
+	let (mut dsc_data, proc_db) = parser::eval(&input, &lex_data, true)
 		.map_err(|e| e.display(&input))?;
-	discovery::print(&dsc_data, &task_queue, &input, &lex_data);
-
-	let proc_db = parser::eval(&input, &lex_data, &mut dsc_data, task_queue)
-		.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Parser))
-		.map_err(|e| e.display(&input))?;
-	parser::print(&proc_db, &input, &lex_data);
 
 	let proc_db = type_checker::eval(&input, &lex_data, &dsc_data, proc_db)
 		.map_err(|e| e.display(&input))?;
@@ -228,7 +220,7 @@ fn token_source(
 }
 
 fn type_size(
-	records: &discovery::RecordMap,
+	records: &parser::RecordMap,
 	#[cfg(feature="table")]
 	tables: &discovery::TableMap,
 	ring_type: &rings_type::Type,

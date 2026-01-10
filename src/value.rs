@@ -1,8 +1,8 @@
 
 use crate::cursor::{Cursor, Error};
-use crate::discovery::{Value, ValueMap};
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
+use crate::parser::{Value, ValueMap};
 use crate::token::{Id as TokenId, Kind as TKind};
 use crate::Span;
 

@@ -1,13 +1,12 @@
 
 use std::collections::HashMap;
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
-use crate::discovery::Data as DscData;
 use crate::identifier::{Id as IdentId, Identifier, Map as IdentMap};
 use crate::rings_type::Type;
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::parser::ProcData;
+use crate::parser::{DscData, ProcData};
 use crate::{
 	error,
 	text,
@@ -620,8 +619,8 @@ impl Error {
 
 #[cfg(test)]
 mod tests {
-	use crate::{input, lexer, discovery, parser, type_checker};
-	use crate::discovery::RegionMap;
+	use crate::{input, lexer, parser, type_checker};
+	use crate::parser::RegionMap;
 	use crate::identifier::Identifier;
 	use crate::rings_type::Type;
 
@@ -637,12 +636,7 @@ mod tests {
 		let lex_data = lexer::eval(&input.source)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let (mut dsc_data, task_queue) = discovery::eval(&input, &lex_data)
-			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Discovery))
-			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
-
-		let proc_db = parser::eval(&input, &lex_data, &mut dsc_data, task_queue)
-			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Parser))
+		let (mut dsc_data, proc_db) = parser::eval(&input, &lex_data, false)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
 		let proc_db = type_checker::eval(&input, &lex_data, &dsc_data, proc_db)

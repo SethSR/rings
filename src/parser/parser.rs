@@ -4,7 +4,6 @@ use std::ops::Range;
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind as AKind, PathSegment};
 use crate::cursor::{Cursor, Error};
-use crate::discovery::{Data as DscData, RecordMap, Value, ValueMap};
 use crate::identifier::{Id as IdentId, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
@@ -12,6 +11,8 @@ use crate::operators::BinaryOp;
 use crate::task::{Kind as TaskKind, Task};
 use crate::token::{Id as TokenId, Kind as TKind, Kind};
 use crate::{ast, identifier, rings_type, Bounds, Target};
+
+use super::discovery::{Data as DscData, RecordMap, Value, ValueMap};
 
 type ParseResult<T> = Result<T, Error>;
 
@@ -591,7 +592,7 @@ fn parse_primary(
 
 #[cfg(test)]
 mod can_parse_proc {
-	use crate::{ error, input, lexer, discovery, ast };
+	use crate::{ input, lexer, ast };
 	use crate::identifier::Identifier;
 
 	use super::*;
@@ -602,15 +603,8 @@ mod can_parse_proc {
 		let lex_data = lexer::eval(&input.source)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let (mut dsc_out, task_queue) = discovery::eval(&input, &lex_data)
-			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Discovery))
-			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
-
-		let proc_db = eval(&input, &lex_data, &mut dsc_out, task_queue)
-			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Parser))
-			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
-
-		(dsc_out, proc_db)
+		crate::parser::eval(&input, &lex_data, false)
+			.unwrap_or_else(|e| panic!("{}", e.display(&input)))
 	}
 
 	#[test]

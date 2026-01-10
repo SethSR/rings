@@ -1,10 +1,10 @@
 
-use crate::discovery::RecordMap;
 use crate::error;
 use crate::identifier::Id as IdentId;
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
+use crate::parser::RecordMap;
 use crate::rings_type::Type;
 use crate::token::{Id as TokenId, Kind as TokenKind};
 use crate::{

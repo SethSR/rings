@@ -2,13 +2,12 @@
 use std::collections::hash_map::Entry;
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
-use crate::discovery::{Region, Data as DscData};
 use crate::error;
 use crate::identifier::{Id as IdentId, Identifier, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::parser::ProcData;
+use crate::parser::{DscData, ProcData};
 use crate::rings_type::{Meet, Type};
 use crate::token::Id as TokenId;
 use crate::{text, token_source};
@@ -105,7 +104,7 @@ pub fn eval(
 	}
 
 	// Check for region overlap
-	let regions_vec: Vec<(&IdentId, &Region)> = dsc_data.regions.iter().collect();
+	let regions_vec: Vec<_> = dsc_data.regions.iter().collect();
 
 	for i in 0..regions_vec.len() {
 		for j in i+1..regions_vec.len() {
