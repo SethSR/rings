@@ -19,7 +19,6 @@ mod span;
 mod task;
 mod token;
 mod type_checker;
-mod value;
 mod vsmc;
 
 use span::Span;

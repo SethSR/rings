@@ -15,7 +15,6 @@ use crate::{
 pub enum Error {
 	ExpectedToken { expected: String, found: TokenId },
 	Expected { span: Span<SrcPos>, expected: String, found: String },
-	UnresolvedType { span: Span<SrcPos>, msg: String },
 }
 
 impl Error {
@@ -36,9 +35,6 @@ impl Error {
 			}
 			Self::Expected { span, expected, found } => {
 				error::Error::new(span, format!("Expected {expected}, found {found}"))
-			}
-			Self::UnresolvedType { span, msg } => {
-				error::Error::new(span, msg)
 			}
 		}.with_kind(kind)
 	}

@@ -8,11 +8,11 @@ use crate::identifier::{Id as IdentId, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::BinaryOp;
-use crate::task::{Kind as TaskKind, Task};
-use crate::token::{Id as TokenId, Kind as TKind, Kind};
+use crate::task::Task;
+use crate::token::{Id as TokenId, Kind as TKind};
 use crate::{ast, identifier, rings_type, Bounds, Target};
 
-use super::discovery::{Data as DscData, RecordMap, Value, ValueMap};
+use super::discovery::{Data as DscData, RecordMap};
 
 type ParseResult<T> = Result<T, Error>;
 
@@ -123,50 +123,7 @@ fn parse(
 	proc_db: &mut IdentMap<ProcData>,
 	task: &Task,
 ) -> Result<(), (TokenId, Error)> {
-	let cursor = Cursor::new(task.tok_start);
-	match task.kind {
-		TaskKind::Value => parse_value(cursor, lex_data, &dsc_data.values)
-			.map(|value| {
-				dsc_data.values.insert(task.name_id, value);
-			}),
-		TaskKind::Proc => parse_procedure(cursor, input, lex_data, &dsc_data.records)
-			.map(|proc_data| {
-				proc_db.insert(task.name_id, proc_data);
-			}),
-	}
-}
-
-fn parse_value(
-	mut cursor: Cursor,
-	lex_data: &LexData,
-	values: &ValueMap,
-) -> Result<Value, (TokenId, Error)> {
-	use crate::value::{Kind as VKind, value_expression};
-
-	value_expression(&mut cursor, &lex_data, &[Kind::Semicolon], Some(values))
-		.map_err(|e| (cursor.index(), e))
-		.and_then(|result| match result.kind {
-			VKind::Int(num) => Ok(Value::Integer(num)),
-			VKind::Dec(num) => Ok(Value::Decimal(num)),
-			VKind::Unfinished => {
-				let start = lex_data.tok_pos[result.loc.start];
-				let end = lex_data.tok_pos[result.loc.end];
-				let err = Error::UnresolvedType {
-					span: (start..end).into(),
-					msg: format!("{:?}", result.kind),
-				};
-				Err((cursor.index(), err))
-			},
-		})
-}
-
-fn parse_procedure(
-	mut cursor: Cursor,
-	input: &InputData,
-	lex_data: &LexData,
-	records: &RecordMap,
-) -> Result<ProcData, (TokenId, Error)> {
-	let cursor = &mut cursor;
+	let mut cursor = Cursor::new(task.tok_start);
 	let mut proc_data = ProcData::default();
 	let start = AstId::new(proc_data.ast_nodes.len());
 
@@ -176,15 +133,15 @@ fn parse_procedure(
 	}
 
 	let tok_start = cursor.index();
-	let mut block = parse_block(cursor, input, lex_data, records, &mut proc_data)
-		.map_err(|e| (cursor.index(), e))?;
+	let mut block = parse_block(&mut cursor, input, lex_data, &dsc_data.records, &mut proc_data)
+			.map_err(|e| (cursor.index(), e))?;
 	let tok_end = cursor.index();
 
 	let end = AstId::new(proc_data.ast_nodes.len());
 
 	let has_return = proc_data.ast_nodes[start..end]
-		.iter()
-		.any(|kind| matches!(kind, AKind::Return(_)));
+			.iter()
+			.any(|kind| matches!(kind, AKind::Return(_)));
 
 	if !has_return {
 		let tok_pos = cursor.index();
@@ -197,7 +154,9 @@ fn parse_procedure(
 	proc_data.ast_start = proc_data.add_ast(AKind::Block(block),
 		tok_start..tok_end,
 	);
-	Ok(proc_data)
+	proc_db.insert(task.name_id, proc_data);
+
+	Ok(())
 }
 
 fn parse_block(
@@ -592,8 +551,9 @@ fn parse_primary(
 
 #[cfg(test)]
 mod can_parse_proc {
-	use crate::{ input, lexer, ast };
+	use crate::{ input, lexer };
 	use crate::identifier::Identifier;
+	use crate::parser::Value;
 
 	use super::*;
 
@@ -611,8 +571,8 @@ mod can_parse_proc {
 	fn main() {
 		let (_, proc_db) = setup("main{}");
 		assert_eq!(proc_db[&"main".id()].ast_nodes, [
-			ast::Kind::Return(None),
-			ast::Kind::Block(ast::Block(vec![0.into()])),
+			AKind::Return(None),
+			AKind::Block(AstBlock(vec![0.into()])),
 		]);
 	}
 

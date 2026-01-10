@@ -6,13 +6,12 @@ use crate::identifier::{self, Id as IdentId, Identifier};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::rings_type::Type;
-use crate::task::{Kind as TaskKind, Task};
+use crate::task::Task;
 use crate::token::{Id as TokenId, Kind as TokenKind};
-use crate::value::Kind as ValueKind;
 use crate::{fmt_size, type_size};
 use crate::{Span, Target};
+use super::ValueMap;
 
-pub type ValueMap = identifier::Map<Value>;
 pub type RegionMap = identifier::Map<Region>;
 pub type ProcMap = identifier::Map<ProcType>;
 pub type RecordMap = identifier::Map<Record>;
@@ -25,12 +24,6 @@ pub struct Param {
 	pub typ: Type,
 	pub size: u32,
 	pub offset: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Value {
-	Integer(i64),
-	Decimal(f64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,13 +218,12 @@ pub fn print(
 
 	if !task_queue.is_empty() {
 		println!();
-		println!("{:<32} | {:<11} | {:<11} | {:<10} | PREV QUEUE LENGTH",
-			"TASK", "KIND", "START TOKEN", "LATEST TOKEN");
-		println!("{:-<32} | {:-<11} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "", "");
+		println!("{:<32} | {:<11} | {:<10} | PREV QUEUE LENGTH",
+			"TASK", "START TOKEN", "LATEST TOKEN");
+		println!("{:-<32} | {:-<11} | {:-<10} | {:-<16}", "", "", "", "");
 		for task in task_queue.iter() {
-			println!("{:<32} | {:<11?} | {:<11} | {:<10} | {:?}",
+			println!("{:<32} | {:<11} | {:<10} | {:?}",
 				crate::text(input, lex_data, &task.name_id),
-				task.kind,
 				task.tok_start.index(),
 				task.prev_furthest_token.index(),
 				task.prev_queue_length,
@@ -252,48 +244,48 @@ pub fn eval(input: &InputData, lex_data: &LexData) -> DiscResult<(Data, VecDeque
 			TokenKind::Main => {
 				let tok_start = discover_init_proc(&mut cursor, &lex_data)?;
 				let name_id = "main".id();
-				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				task_queue.push_back(Task::new(name_id, tok_start));
 				out.procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
 			}
 
 			TokenKind::Sub => {
 				let tok_start = discover_init_proc(&mut cursor, &lex_data)?;
 				let name_id = "sub".id();
-				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				task_queue.push_back(Task::new(name_id, tok_start));
 				out.procedures.insert(name_id, ProcType { params: vec![], ret_type: Type::Unit, target: None });
 			}
 
 			TokenKind::Proc => {
 				let (name_id, tok_start, params, ret_type) = discover_proc(&mut cursor, &lex_data, &out.records)?;
-				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				task_queue.push_back(Task::new(name_id, tok_start));
 				out.procedures.insert(name_id, ProcType { params, ret_type, target: None });
 			}
 
 			TokenKind::M68k => {
 				cursor.advance();
 				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, &lex_data, &out.records)?;
-				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				task_queue.push_back(Task::new(name_id, tok_start));
 				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::M68k) });
 			}
 
 			TokenKind::SH2 => {
 				cursor.advance();
 				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, &lex_data, &out.records)?;
-				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				task_queue.push_back(Task::new(name_id, tok_start));
 				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::SH2) });
 			}
 
 			TokenKind::X64 => {
 				cursor.advance();
 				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, &lex_data, &out.records)?;
-				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				task_queue.push_back(Task::new(name_id, tok_start));
 				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::X86_64) });
 			}
 
 			TokenKind::Z80 => {
 				cursor.advance();
 				let (name_id, tok_start, params, ret_type) = discover_target_proc(&mut cursor, &lex_data, &out.records)?;
-				task_queue.push_back(Task::new(TaskKind::Proc, name_id, tok_start));
+				task_queue.push_back(Task::new(name_id, tok_start));
 				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::Z80) });
 			}
 
@@ -324,22 +316,11 @@ pub fn eval(input: &InputData, lex_data: &LexData) -> DiscResult<(Data, VecDeque
 				"indexes not yet implemented",
 				cursor.index())),
 
-			TokenKind::Value => {
-				cursor.advance();
-				let name_id = cursor.expect_identifier(&lex_data, "value name")?;
-				cursor.expect(&lex_data, TokenKind::Eq)?;
-				let tok_start = cursor.index();
-				let expr = crate::value::value_expression(&mut cursor, &lex_data, &[TokenKind::Semicolon], None)?;
-				match expr.kind {
-					ValueKind::Int(num) => {
-						out.values.insert(name_id, Value::Integer(num));
-					}
-					ValueKind::Dec(num) => {
-						out.values.insert(name_id, Value::Decimal(num));
-					}
-					ValueKind::Unfinished => {
-						task_queue.push_back(Task::new(TaskKind::Value, name_id, tok_start));
-					}
+			TokenKind::Value => loop {
+				match cursor.current(lex_data) {
+					TokenKind::Eof => return Err(cursor.expected_token("top-level statement")),
+					TokenKind::Semicolon => break cursor.advance(),
+					_ => cursor.advance(),
 				}
 			}
 
@@ -506,19 +487,10 @@ mod can_parse {
 	}
 
 	#[test]
-	fn constant_values() {
-		let (data, _) = setup("value a = 3; value b = 4.2;");
-		assert_eq!(data.values.len(), 2);
-		assert_eq!(data.values[&"a".id()], Value::Integer(3));
-		assert_eq!(data.values[&"b".id()], Value::Decimal(4.2));
-	}
-
-	#[test]
 	fn procedures() {
 		let (data, task_queue) = setup("value a = 5; proc b() {}");
 		assert_eq!(task_queue.len(), 1);
 		assert_eq!(task_queue[0], Task::new(
-			TaskKind::Proc,
 			"b".id(),
 			TokenId::new(9),
 		));
@@ -535,7 +507,6 @@ mod can_parse {
 		let (data, task_queue) = setup("proc a(b: s8, c: s8) {}");
 		assert_eq!(task_queue.len(), 1);
 		assert_eq!(task_queue[0], Task::new(
-			TaskKind::Proc,
 			"a".id(),
 			TokenId::new(11),
 		));
@@ -555,7 +526,6 @@ mod can_parse {
 		let (data, task_queue) = setup("proc a() -> s8 {}");
 		assert_eq!(task_queue.len(), 1);
 		assert_eq!(task_queue[0], Task::new(
-			TaskKind::Proc,
 			"a".id(),
 			TokenId::new(6),
 		));
@@ -572,7 +542,6 @@ mod can_parse {
 		let (data, task_queue) = setup("sh2 proc a() {}");
 		assert_eq!(task_queue.len(), 1);
 		assert_eq!(task_queue[0], Task::new(
-			TaskKind::Proc,
 			"a".id(),
 			TokenId::new(5),
 		));
@@ -589,16 +558,8 @@ mod can_parse {
 		let (data, task_queue) = setup("sh2 main {} z80 sub {}");
 		assert_eq!(task_queue.len(), 2);
 		assert_eq!(task_queue, [
-			Task::new(
-				TaskKind::Proc,
-				"main".id(),
-				TokenId::new(2),
-			),
-			Task::new(
-				TaskKind::Proc,
-				"sub".id(),
-				TokenId::new(6),
-			),
+			Task::new("main".id(), TokenId::new(2)),
+			Task::new("sub".id(), TokenId::new(6)),
 		]);
 		assert_eq!(data.procedures.len(), 2);
 		assert_eq!(data.procedures[&"main".id()], ProcType {
