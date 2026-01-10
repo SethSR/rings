@@ -19,7 +19,13 @@ pub type RecordMap = identifier::Map<Record>;
 #[cfg(feature="table")]
 pub type TableMap = identifier::Map<Table>;
 
-pub type Param = (IdentId, Type);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Param {
+	pub name: IdentId,
+	pub typ: Type,
+	pub size: u32,
+	pub offset: u16,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
@@ -35,7 +41,7 @@ pub struct Region {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcType {
-	pub params: Vec<Param>,
+	pub params: Vec<(IdentId, Type)>,
 	pub ret_type: Type,
 	pub target: Option<Target>,
 }
@@ -44,13 +50,42 @@ pub struct ProcType {
 pub struct Record {
 	pub fields: Vec<Param>,
 	pub region: Option<IdentId>,
+	pub size: u32,
 }
 
 impl Record {
-	pub fn size(&self, records: &RecordMap) -> u32 {
-		self.fields.iter()
-			.map(|(_, field_type)| type_size(records, field_type))
-			.sum()
+	fn new(
+		records: &RecordMap,
+		fields: Vec<(IdentId, Type)>,
+		region: Option<IdentId>,
+	) -> Self {
+		let mut offset = 0;
+		let mut offsets = vec![];
+
+		for (f_name, f_type) in fields {
+			let f_size = type_size(records, &f_type);
+			offset += match f_size {
+				1 => 0,
+				2 => offset & 1,
+				_ => (4 - (offset & 3)) & 3,
+			};
+			offsets.push(Param { name: f_name, typ: f_type, size: f_size, offset });
+			offset += match f_size {
+				1 => 1,
+				2 => 2,
+				_ => f_size as u16,
+			}
+		}
+
+		Self {
+			fields: offsets,
+			region,
+			size: offset as u32,
+		}
+	}
+
+	pub fn size(&self) -> u32 {
+		self.size
 	}
 }
 
@@ -98,12 +133,12 @@ pub fn print(
 ) {
 	fn fields_to_str(input: &InputData,
 		lex_data: &LexData,
-		fields: &[(IdentId, Type)],
+		fields: &[Param],
 	) -> String {
 		fields.iter()
-			.map(|(field_id, field_type)| {
-				let field_name = crate::text(input, lex_data, field_id);
-				let type_name = crate::type_text(input, lex_data, field_type);
+			.map(|param| {
+				let field_name = crate::text(input, lex_data, &param.name);
+				let type_name = crate::type_text(input, lex_data, &param.typ);
 				format!("{field_name}:{type_name}")
 			})
 			.collect::<Vec<_>>()
@@ -125,7 +160,7 @@ pub fn print(
 	println!("{:-<16} | {:-<8} | {:-<9} | {:-<16}", "", "", "", "");
 	for (ident_id, record) in dsc_data.records.iter() {
 		let name = crate::text(input, lex_data, ident_id);
-		let size = record.size(&dsc_data.records);
+		let size = record.size();
 		let address = record.region
 			.map(|id| format!("#{:0>8X}", dsc_data.regions[&id].span.start))
 			.unwrap_or("-".to_string());
@@ -156,9 +191,9 @@ pub fn print(
 			.map(|(ident_id, data)| {
 				let name = crate::text(input, lex_data, ident_id);
 				let params = data.params.iter()
-					.map(|(p_name, p_type)| {
-						let param_name = crate::text(input, lex_data, p_name);
-						let param_type = crate::type_text(input, lex_data, p_type);
+					.map(|(param_name, param_type)| {
+						let param_name = crate::text(input, lex_data, param_name);
+						let param_type = crate::type_text(input, lex_data, param_type);
 						format!("{name:<32} | {param_name:<16} | {param_type:<16}")
 					})
 					.collect::<Vec<_>>()
@@ -344,7 +379,7 @@ fn discover_init_proc(cursor: &mut Cursor, lex_data: &LexData,
 
 fn discover_proc(cursor: &mut Cursor, lex_data: &LexData,
 	records: &RecordMap,
-) -> DiscResult<(IdentId, TokenId, Vec<Param>, Type)> {
+) -> DiscResult<(IdentId, TokenId, Vec<(IdentId, Type)>, Type)> {
 	cursor.expect(lex_data, TokenKind::Proc)?;
 	let name_id = cursor.expect_identifier(lex_data, "procedure name")?;
 	cursor.expect(lex_data, TokenKind::OParen)?;
@@ -362,7 +397,7 @@ fn discover_proc(cursor: &mut Cursor, lex_data: &LexData,
 
 fn discover_target_proc(cursor: &mut Cursor, lex_data: &LexData,
 	records: &RecordMap,
-) -> DiscResult<(IdentId, TokenId, Vec<Param>, Type)> {
+) -> DiscResult<(IdentId, TokenId, Vec<(IdentId, Type)>, Type)> {
 	Ok(match cursor.current(lex_data) {
 		TokenKind::Main => {
 			("main".id(), discover_init_proc(cursor, lex_data)?, vec![], Type::Unit)
@@ -377,7 +412,7 @@ fn discover_target_proc(cursor: &mut Cursor, lex_data: &LexData,
 fn discover_fields(cursor: &mut Cursor, lex_data: &LexData,
 	records: &RecordMap,
 	end_token: TokenKind,
-) -> DiscResult<Vec<Param>> {
+) -> DiscResult<Vec<(IdentId, Type)>> {
 	let mut fields = Vec::default();
 	while end_token != cursor.current(lex_data) {
 		let field_id = cursor.expect_identifier(lex_data, "field name")?;
@@ -433,7 +468,7 @@ fn discover_record(cursor: &mut Cursor, lex_data: &LexData,
 	cursor.expect(lex_data, TokenKind::OBrace)?;
 	let fields = discover_fields(cursor, lex_data, records, TokenKind::CBrace)?;
 	cursor.expect(lex_data, TokenKind::CBrace)?;
-	Ok(Record { region, fields })
+	Ok(Record::new(records, fields, region))
 }
 
 #[cfg(feature="table")]
@@ -593,7 +628,7 @@ mod can_parse {
 		let (data, _) = setup("record a {}");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data.records), 0);
+		assert_eq!(record.size(), 0);
 		assert_eq!(record.region, None);
 		assert_eq!(record.fields.len(), 0);
 	}
@@ -603,9 +638,9 @@ mod can_parse {
 		let (data, _) = setup("record a { b: s8 }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data.records), 1);
+		assert_eq!(record.size(), 1);
 		assert_eq!(record.region, None);
-		assert_eq!(record.fields, [("b".id(), Type::s8_top())]);
+		assert_eq!(record.fields, [Param { name: "b".id(), typ: Type::s8_top(), size: 1, offset: 0 }]);
 	}
 
 	#[test]
@@ -613,9 +648,9 @@ mod can_parse {
 		let (data, _) = setup("record a { b: s8, }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data.records), 1);
+		assert_eq!(record.size(), 1);
 		assert_eq!(record.region, None);
-		assert_eq!(record.fields, [("b".id(), Type::s8_top())]);
+		assert_eq!(record.fields, [Param { name: "b".id(), typ: Type::s8_top(), size: 1, offset: 0 }]);
 	}
 
 	#[test]
@@ -623,11 +658,11 @@ mod can_parse {
 		let (data, _) = setup("record a { b: s8, c: s8 }");
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data.records), 2);
+		assert_eq!(record.size(), 2);
 		assert_eq!(record.region, None);
 		assert_eq!(record.fields, [
-			("b".id(), Type::s8_top()),
-			("c".id(), Type::s8_top()),
+			Param { name: "b".id(), typ: Type::s8_top(), size: 1, offset: 0 },
+			Param { name: "c".id(), typ: Type::s8_top(), size: 1, offset: 1 },
 		]);
 	}
 
@@ -636,10 +671,10 @@ mod can_parse {
 		let (data, _) = setup("record a {} record b { c: a }");
 		assert_eq!(data.records.len(), 2);
 		let record = &data.records[&"b".id()];
-		assert_eq!(record.size(&data.records), 0);
+		assert_eq!(record.size(), 0);
 		assert_eq!(record.region, None);
 		assert_eq!(record.fields, [
-			("c".id(), Type::Record("a".id())),
+			Param { name: "c".id(), typ: Type::Record("a".id()), size: 0, offset: 0 },
 		]);
 	}
 
@@ -656,7 +691,7 @@ mod can_parse {
 		});
 		assert_eq!(data.records.len(), 1);
 		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(&data.records), 0);
+		assert_eq!(record.size(), 0);
 		assert_eq!(record.region, Some("b".id()));
 		assert!(record.fields.is_empty());
 	}

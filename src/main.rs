@@ -247,7 +247,7 @@ fn type_size(
 		rings_type::Type::U32 => 4,
 		#[cfg(feature="types")]
 		rings_type::Type::S32 => 4,
-		rings_type::Type::Record(ident_id) => records[ident_id].size(records),
+		rings_type::Type::Record(ident_id) => records[ident_id].size(),
 		#[cfg(feature="table")]
 		rings_type::Type::Table(ident_id) => {
 			tables[&ident_id].size(self)

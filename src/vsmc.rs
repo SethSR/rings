@@ -64,17 +64,17 @@ pub fn place_records(
 		let Some(region) = dsc_data.regions.get_mut(&reg_id) else {
 			panic!();
 		};
-		let allocation = region.alloc_position + rec_data.size(&dsc_data.records);
+		let allocation = region.alloc_position + rec_data.size();
 		if allocation > region.span.end {
 			panic!();
 		}
 
-		for (p_id, p_type) in &rec_data.fields {
+		for param in &rec_data.fields {
 			let rec_name = text(input, lex_data, &rec_id);
-			let p_name = text(input, lex_data, p_id);
+			let p_name = text(input, lex_data, &param.name);
 			let location = format!("{rec_name}_{p_name}");
 			out.insert(location.id(), region.alloc_position);
-			region.alloc_position += crate::type_size(&dsc_data.records, p_type);
+			region.alloc_position += crate::type_size(&dsc_data.records, &param.typ);
 		}
 	}
 
