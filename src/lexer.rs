@@ -103,6 +103,12 @@ impl Lexer {
 					"u32" => Kind::U32,
 					"u8" => Kind::U8,
 
+					// Targets
+					"m68k" => Kind::M68k,
+					"sh2" => Kind::SH2,
+					"x64" => Kind::X64,
+					"z80" => Kind::Z80,
+
 					// Keywords
 					"else" => Kind::Else,
 					"false" => Kind::False,
@@ -111,15 +117,12 @@ impl Lexer {
 					"if" => Kind::If,
 					"in" => Kind::In,
 					"let" => Kind::Let,
-					"m68k" => Kind::M68k,
 					"mark" => Kind::Mark,
 					"return" => Kind::Return,
-					"sh2" => Kind::SH2,
 					"true" => Kind::True,
+					"use" => Kind::Use,
 					"where" => Kind::Where,
 					"while" => Kind::While,
-					"x64" => Kind::X64,
-					"z80" => Kind::Z80,
 
 					text => {
 						let ident_id = text.id();

@@ -46,27 +46,30 @@ pub enum Kind {
 	Table,
 	Value,
 
-	// Keywords
+	// Targets
 	M68k,
 	SH2,
 	X64,
 	Z80,
-	Mark,
-	Free,
-	Let,
-	Return,
-	True,
-	False,
-	In,
-	If,
-	Else,
-	For,
-	Where,
-	While,
+
+	// Keywords
 	Arrow,
 	At,
-	Semicolon,
 	Comma,
+	Else,
+	False,
+	For,
+	Free,
+	If,
+	In,
+	Let,
+	Mark,
+	Return,
+	Semicolon,
+	True,
+	Use,
+	Where,
+	While,
 
 	// Operators
 	OParen,   CParen,
@@ -130,6 +133,7 @@ impl Kind {
 			Self::SH2 => 3,
 			Self::U16 => 3,
 			Self::U32 => 3,
+			Self::Use => 3,
 			Self::X64 => 3,
 			Self::Z80 => 3,
 
