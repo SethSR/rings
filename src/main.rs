@@ -7,7 +7,6 @@ use std::process::{Command, Stdio};
 
 mod asm;
 mod ast;
-mod cursor;
 mod error;
 mod identifier;
 mod input;
@@ -16,7 +15,6 @@ mod operators;
 mod parser;
 mod rings_type;
 mod span;
-mod task;
 mod token;
 mod type_checker;
 mod vsmc;

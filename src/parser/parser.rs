@@ -2,38 +2,43 @@
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 
-use crate::ast::{Block as AstBlock, Id as AstId, Kind as AKind, PathSegment};
-use crate::cursor::{Cursor, Error};
+use crate::ast::{
+	Block as AstBlock,
+	Id as AstId,
+	Kind as AKind,
+	KindList, LocList, PathSegment,
+};
 use crate::identifier::{Id as IdentId, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::BinaryOp;
-use crate::task::Task;
 use crate::token::{Id as TokenId, Kind as TKind};
-use crate::{ast, identifier, rings_type, Bounds, Target};
+use crate::{identifier, rings_type, Bounds, Target};
 
-use super::discovery::{Data as DscData, RecordMap};
-
-type ParseResult<T> = Result<T, Error>;
+use super::cursor::Cursor;
+use super::discovery::Data as DscData;
+use super::error::Error;
+use super::record::RecordMap;
+use super::task::Task;
 
 #[derive(Debug, Default, Clone)]
 pub struct ProcData {
 	pub target: Option<Target>,
-	pub ast_start: ast::Id,
-	pub ast_nodes: ast::KindList,
-	pub ast_pos_tok: ast::LocList,
+	pub ast_start: AstId,
+	pub ast_nodes: KindList,
+	pub ast_pos_tok: LocList,
 	/* Type Checking */
-	pub ast_to_type: HashMap<ast::Id, rings_type::Type>,
+	pub ast_to_type: HashMap<AstId, rings_type::Type>,
 	pub ident_to_type: identifier::Map<rings_type::Type>,
 }
 
 impl ProcData {
-	pub fn add_ast(&mut self, kind: ast::Kind,
+	pub fn add_ast(&mut self, kind: AKind,
 		tok_range: Range<TokenId>,
-	) -> ast::Id {
+	) -> AstId {
 		self.ast_nodes.push(kind);
 		self.ast_pos_tok.push(tok_range.into());
-		ast::Id::new(self.ast_nodes.len() - 1)
+		AstId::new(self.ast_nodes.len() - 1)
 	}
 }
 
@@ -165,7 +170,7 @@ fn parse_block(
 	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
-) -> ParseResult<AstBlock> {
+) -> Result<AstBlock, Error> {
 	cursor.expect(lex_data, TKind::OBrace)?;
 
 	let mut block = vec![];
@@ -197,7 +202,7 @@ fn parse_ident_statement(
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	ident_id: IdentId,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let left_id = parse_access(cursor, lex_data, proc_data, ident_id)?;
 
 	match cursor.current(lex_data) {
@@ -215,7 +220,7 @@ fn parse_let_statement(
 	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(lex_data, TKind::Let)?;
 	let tok_ident_start = cursor.index();
@@ -237,7 +242,7 @@ fn parse_access(
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	ident_id: IdentId,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.advance(); // skip the identifier
 	let mut accesses = vec![];
@@ -277,7 +282,7 @@ fn parse_assignment(
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	lvalue_id: AstId,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(lex_data, TKind::Eq)?;
 	let ast_id = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
@@ -291,7 +296,7 @@ fn parse_op_assignment(
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	lvalue_id: AstId, op: BinaryOp,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.advance(); // skip the operator token
 	let ast_id = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
@@ -306,7 +311,7 @@ fn parse_return_statement(
 	cursor: &mut Cursor,
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(lex_data, TKind::Return)?;
 	let ast_id = match cursor.expect(lex_data, TKind::Semicolon) {
@@ -327,7 +332,7 @@ fn parse_if_statement(
 	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(lex_data, TKind::If)?;
 	let cond_id = parse_expression(cursor, lex_data, proc_data, &[TKind::OBrace])?;
@@ -348,7 +353,7 @@ fn parse_while_statement(
 	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(lex_data, TKind::While)?;
 	let cond = parse_expression(cursor, lex_data, proc_data, &[TKind::OBrace])?;
@@ -363,7 +368,7 @@ fn parse_for_statement(
 	lex_data: &LexData,
 	records: &RecordMap,
 	proc_data: &mut ProcData,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(lex_data, TKind::For)?;
 
@@ -431,7 +436,7 @@ fn parse_call(
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	ident_id: IdentId,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.advance();
 	cursor.expect(lex_data, TKind::OParen)?;
@@ -462,7 +467,7 @@ fn parse_expression(
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	end_tokens: &[TKind],
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	parse_expr_main(cursor, lex_data, proc_data, 0, end_tokens)
 }
 
@@ -471,7 +476,7 @@ fn parse_expr_main(
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
 	min_binding_power: usize, end_tokens: &[TKind],
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	let left = parse_primary(cursor, lex_data, proc_data)?;
 	parse_expr_sub(cursor, lex_data, proc_data, min_binding_power, tok_start, left, end_tokens)
@@ -483,7 +488,7 @@ fn parse_expr_sub(
 	proc_data: &mut ProcData,
 	min_binding_power: usize, tok_start: TokenId, left: AstId,
 	end_tokens: &[TKind],
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	if end_tokens.contains(&cursor.current(lex_data)) {
 		return Ok(left);
 	}
@@ -508,7 +513,7 @@ fn parse_primary(
 	cursor: &mut Cursor,
 	lex_data: &LexData,
 	proc_data: &mut ProcData,
-) -> ParseResult<AstId> {
+) -> Result<AstId, Error> {
 	let tok_start_op = cursor.index();
 	let unary_op = cursor.expect_unary_op(lex_data);
 	let tok_end_op = cursor.index();
@@ -553,7 +558,7 @@ fn parse_primary(
 mod can_parse_proc {
 	use crate::{ input, lexer };
 	use crate::identifier::Identifier;
-	use crate::parser::Value;
+	use crate::parser::value::Value;
 
 	use super::*;
 

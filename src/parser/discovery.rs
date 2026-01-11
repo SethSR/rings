@@ -1,85 +1,31 @@
 
 use std::collections::VecDeque;
 
-use crate::cursor::{Cursor, Error};
 use crate::identifier::{self, Id as IdentId, Identifier};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::rings_type::Type;
-use crate::task::Task;
 use crate::token::{Id as TokenId, Kind as TokenKind};
-use crate::{fmt_size, type_size};
-use crate::{Span, Target};
-use super::ValueMap;
+use crate::fmt_size;
+use crate::Target;
 
-pub type RegionMap = identifier::Map<Region>;
+use super::cursor::Cursor;
+use super::error::Error;
+use super::record::RecordMap;
+use super::region::RegionMap;
+use super::task::Task;
+use super::value::ValueMap;
+use super::Param;
+
 pub type ProcMap = identifier::Map<ProcType>;
-pub type RecordMap = identifier::Map<Record>;
 #[cfg(feature="table")]
 pub type TableMap = identifier::Map<Table>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Param {
-	pub name: IdentId,
-	pub typ: Type,
-	pub size: u32,
-	pub offset: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Region {
-	pub span: Span<u32>,
-	pub alloc_position: u32,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcType {
 	pub params: Vec<(IdentId, Type)>,
 	pub ret_type: Type,
 	pub target: Option<Target>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Record {
-	pub fields: Vec<Param>,
-	pub region: Option<IdentId>,
-	pub size: u32,
-}
-
-impl Record {
-	fn new(
-		records: &RecordMap,
-		fields: Vec<(IdentId, Type)>,
-		region: Option<IdentId>,
-	) -> Self {
-		let mut offset = 0;
-		let mut offsets = vec![];
-
-		for (f_name, f_type) in fields {
-			let f_size = type_size(records, &f_type);
-			offset += match f_size {
-				1 => 0,
-				2 => offset & 1,
-				_ => (4 - (offset & 3)) & 3,
-			};
-			offsets.push(Param { name: f_name, typ: f_type, size: f_size, offset });
-			offset += match f_size {
-				1 => 1,
-				2 => 2,
-				_ => f_size as u16,
-			}
-		}
-
-		Self {
-			fields: offsets,
-			region,
-			size: offset as u32,
-		}
-	}
-
-	pub fn size(&self) -> u32 {
-		self.size
-	}
 }
 
 #[cfg(feature="table")]
@@ -234,7 +180,7 @@ pub fn print(
 	println!();
 }
 
-pub fn eval(input: &InputData, lex_data: &LexData) -> DiscResult<(Data, VecDeque<Task>)> {
+pub fn eval(lex_data: &LexData) -> DiscResult<(Data, VecDeque<Task>)> {
 	let mut cursor = Cursor::default();
 	let mut out = Data::default();
 	let mut task_queue = VecDeque::default();
@@ -289,18 +235,15 @@ pub fn eval(input: &InputData, lex_data: &LexData) -> DiscResult<(Data, VecDeque
 				out.procedures.insert(name_id, ProcType { params, ret_type, target: Some(Target::Z80) });
 			}
 
-			TokenKind::Region => {
-				cursor.advance();
-				let name_id = cursor.expect_identifier(&lex_data, "region name")?;
-				let region = discover_region(&mut cursor, &input, &lex_data)?;
-				out.regions.insert(name_id, region);
+			TokenKind::Region |
+			TokenKind::Value => {
+				super::skip_through(&mut cursor, lex_data, TokenKind::Semicolon)?;
+				cursor.expect(lex_data, TokenKind::Semicolon)?;
 			}
 
 			TokenKind::Record => {
-				cursor.advance();
-				let ident_id = cursor.expect_identifier(&lex_data, "record name")?;
-				let record = discover_record(&mut cursor, &lex_data, &out.records, &out.regions)?;
-				out.records.insert(ident_id, record);
+				super::skip_through(&mut cursor, lex_data, TokenKind::CBrace)?;
+				cursor.expect(lex_data, TokenKind::CBrace)?;
 			}
 
 			#[cfg(feature="table")]
@@ -316,16 +259,8 @@ pub fn eval(input: &InputData, lex_data: &LexData) -> DiscResult<(Data, VecDeque
 				"indexes not yet implemented",
 				cursor.index())),
 
-			TokenKind::Value => loop {
-				match cursor.current(lex_data) {
-					TokenKind::Eof => return Err(cursor.expected_token("top-level statement")),
-					TokenKind::Semicolon => break cursor.advance(),
-					_ => cursor.advance(),
-				}
-			}
-
 			TokenKind::Eof => break,
-			_ => return Err(cursor.expected_token("top-level statement")),
+			_ => return Err(cursor.expected_token("top-level statement").into()),
 		}
 	}
 
@@ -340,7 +275,7 @@ fn check_braces(cursor: &mut Cursor, lex_data: &LexData) -> DiscResult<()> {
 			TokenKind::OBrace => 1,
 			TokenKind::CBrace => -1,
 			TokenKind::Eof => {
-				return Err(cursor.expected_token("end of procedure"));
+				return Err(cursor.expected_token("end of procedure").into());
 			}
 			_ => 0,
 		};
@@ -364,7 +299,7 @@ fn discover_proc(cursor: &mut Cursor, lex_data: &LexData,
 	cursor.expect(lex_data, TokenKind::Proc)?;
 	let name_id = cursor.expect_identifier(lex_data, "procedure name")?;
 	cursor.expect(lex_data, TokenKind::OParen)?;
-	let params = discover_fields(cursor, lex_data, records, TokenKind::CParen)?;
+	let params = super::parse_fields(cursor, lex_data, records, TokenKind::CParen)?;
 	cursor.expect(lex_data, TokenKind::CParen)?;
 	let ret_type = if cursor.expect(lex_data, TokenKind::Arrow).is_ok() {
 		cursor.expect_type(lex_data, records)?
@@ -388,68 +323,6 @@ fn discover_target_proc(cursor: &mut Cursor, lex_data: &LexData,
 		}
 		_ => discover_proc(cursor, lex_data, records)?,
 	})
-}
-
-fn discover_fields(cursor: &mut Cursor, lex_data: &LexData,
-	records: &RecordMap,
-	end_token: TokenKind,
-) -> DiscResult<Vec<(IdentId, Type)>> {
-	let mut fields = Vec::default();
-	while end_token != cursor.current(lex_data) {
-		let field_id = cursor.expect_identifier(lex_data, "field name")?;
-		cursor.expect(lex_data, TokenKind::Colon)?;
-		let field_type = cursor.expect_type(lex_data, records)?;
-		fields.push((field_id, field_type));
-		if cursor.current(lex_data) != TokenKind::Comma {
-			break;
-		}
-		cursor.advance();
-	}
-	Ok(fields)
-}
-
-fn discover_region(cursor: &mut Cursor, input: &InputData, lex_data: &LexData,
-) -> DiscResult<Region> {
-	cursor.expect(lex_data, TokenKind::OBracket)?;
-	let byte_count = cursor.expect_u32(input, lex_data, "region size")?;
-	cursor.expect(lex_data, TokenKind::CBracket)?;
-	cursor.expect(lex_data, TokenKind::At)?;
-	let address = cursor.expect_u32(input, lex_data, "region address")?;
-	cursor.expect(lex_data, TokenKind::Semicolon)?;
-	Ok(Region {
-		span: Span { start: address, end: address + byte_count },
-		alloc_position: 0,
-	})
-}
-
-/// Check after an '@' for a defined region or an address location
-fn discover_address(cursor: &mut Cursor, lex_data: &LexData,
-	regions: &RegionMap,
-) -> DiscResult<Option<IdentId>> {
-	if cursor.expect(lex_data, TokenKind::At).is_ok() {
-		if let Ok(id) = cursor.expect_identifier(lex_data, "region name") {
-			if regions.contains_key(&id) {
-				return Ok(Some(id));
-			}
-		}
-
-		Err(Error::ExpectedToken {
-			expected: "address or region ID".to_string(),
-			found: cursor.index(),
-		})
-	} else {
-		Ok(None)
-	}
-}
-
-fn discover_record(cursor: &mut Cursor, lex_data: &LexData,
-	records: &RecordMap, regions: &RegionMap,
-) -> DiscResult<Record> {
-	let region = discover_address(cursor, lex_data, regions)?;
-	cursor.expect(lex_data, TokenKind::OBrace)?;
-	let fields = discover_fields(cursor, lex_data, records, TokenKind::CBrace)?;
-	cursor.expect(lex_data, TokenKind::CBrace)?;
-	Ok(Record::new(records, fields, region))
 }
 
 #[cfg(feature="table")]
@@ -480,9 +353,10 @@ mod can_parse {
 		let lex_data = lexer::eval(&input.source)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let (dsc_data, task_queue) = eval(&input, &lex_data)
+		let (dsc_data, task_queue) = eval(&lex_data)
 			.map_err(|e| e.into_comp_error(&input, &lex_data, error::Kind::Discovery))
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+
 		(dsc_data, task_queue)
 	}
 
@@ -572,89 +446,6 @@ mod can_parse {
 			ret_type: Type::Unit,
 			target: Some(Target::Z80),
 		});
-	}
-
-	#[test]
-	fn region() {
-		let (data, _) = setup("region a[1024] @ 0x0020_0000;");
-		assert_eq!(data.regions.len(), 1);
-		assert_eq!(data.regions[&"a".id()], Region {
-			span: (0x20_0000..0x20_0400).into(),
-			alloc_position: 0,
-		});
-	}
-
-	#[test]
-	fn empty_record() {
-		let (data, _) = setup("record a {}");
-		assert_eq!(data.records.len(), 1);
-		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(), 0);
-		assert_eq!(record.region, None);
-		assert_eq!(record.fields.len(), 0);
-	}
-
-	#[test]
-	fn record_with_one_field_no_trailing_comma() {
-		let (data, _) = setup("record a { b: s8 }");
-		assert_eq!(data.records.len(), 1);
-		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(), 1);
-		assert_eq!(record.region, None);
-		assert_eq!(record.fields, [Param { name: "b".id(), typ: Type::s8_top(), size: 1, offset: 0 }]);
-	}
-
-	#[test]
-	fn record_with_one_field_and_trailing_comma() {
-		let (data, _) = setup("record a { b: s8, }");
-		assert_eq!(data.records.len(), 1);
-		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(), 1);
-		assert_eq!(record.region, None);
-		assert_eq!(record.fields, [Param { name: "b".id(), typ: Type::s8_top(), size: 1, offset: 0 }]);
-	}
-
-	#[test]
-	fn record_with_multiple_fields() {
-		let (data, _) = setup("record a { b: s8, c: s8 }");
-		assert_eq!(data.records.len(), 1);
-		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(), 2);
-		assert_eq!(record.region, None);
-		assert_eq!(record.fields, [
-			Param { name: "b".id(), typ: Type::s8_top(), size: 1, offset: 0 },
-			Param { name: "c".id(), typ: Type::s8_top(), size: 1, offset: 1 },
-		]);
-	}
-
-	#[test]
-	fn record_with_user_defined_field() {
-		let (data, _) = setup("record a {} record b { c: a }");
-		assert_eq!(data.records.len(), 2);
-		let record = &data.records[&"b".id()];
-		assert_eq!(record.size(), 0);
-		assert_eq!(record.region, None);
-		assert_eq!(record.fields, [
-			Param { name: "c".id(), typ: Type::Record("a".id()), size: 0, offset: 0 },
-		]);
-	}
-
-	#[test]
-	fn record_with_region() {
-		let (data, _) = setup("
-			region b[8] @ 32;
-			record a @ b {}
-		");
-		assert_eq!(data.regions.len(), 1);
-		assert_eq!(data.regions[&"b".id()], Region {
-			span: (32..40).into(),
-			alloc_position: 0,
-		});
-		assert_eq!(data.records.len(), 1);
-		let record = &data.records[&"a".id()];
-		assert_eq!(record.size(), 0);
-		assert_eq!(record.region, Some("b".id()));
-		assert!(record.fields.is_empty());
 	}
 
 	#[cfg(feature="table")]

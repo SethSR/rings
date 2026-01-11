@@ -1,44 +1,15 @@
 
-use crate::error;
 use crate::identifier::Id as IdentId;
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::parser::RecordMap;
 use crate::rings_type::Type;
 use crate::token::{Id as TokenId, Kind as TokenKind};
-use crate::{
-	text, token_source,
-	Span, SrcPos,
-};
+use crate::token_source;
+use crate::{Span, SrcPos};
 
-pub enum Error {
-	ExpectedToken { expected: String, found: TokenId },
-	Expected { span: Span<SrcPos>, expected: String, found: String },
-}
-
-impl Error {
-	pub fn into_comp_error(self,
-		input: &InputData,
-		lex_data: &LexData,
-		kind: error::Kind,
-	) -> error::Error {
-		match self {
-			Self::ExpectedToken { expected, found: token_id } => {
-				let found = lex_data.tok_list[token_id];
-				let message = if let TokenKind::Identifier(ident_id) = found {
-					format!("Expected {expected}, found '{}'", text(&input, &lex_data, &ident_id))
-				} else {
-					format!("Expected {expected}, found {found:?}")
-				};
-				error::Error::new(token_source(&input, &lex_data, token_id), message)
-			}
-			Self::Expected { span, expected, found } => {
-				error::Error::new(span, format!("Expected {expected}, found {found}"))
-			}
-		}.with_kind(kind)
-	}
-}
+use super::error::Error;
+use super::record::RecordMap;
 
 #[derive(Default)]
 pub struct Cursor(TokenId);
@@ -127,6 +98,9 @@ impl Cursor {
 			TokenKind::Identifier(ident_id) if data.tables.contains_key(&ident_id) => {
 				Ok(Type::Table(ident_id));
 			}
+			TokenKind::Identifier(ident_id) => return Err(
+				Error::UndefinedType { location: self.index(), ident_id },
+			),
 			#[cfg(feature="types")]
 			TokenKind::Bool => Ok(Type::Bool),
 			#[cfg(feature="types")]
