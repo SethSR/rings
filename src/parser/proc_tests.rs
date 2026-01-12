@@ -1,5 +1,5 @@
 
-use crate::ast::AstKind;
+use crate::parser::ast::AstKind;
 use crate::operators::BinaryOp;
 use crate::Bounds;
 
@@ -81,7 +81,7 @@ fn main() {
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, [
 		AstKind::Return(None),
-		AstKind::Block(crate::ast::Block(vec![0.into()])),
+		AstKind::Block(vec![0.into()]),
 	]);
 }
 
@@ -117,7 +117,7 @@ fn with_internal_expressions() {
 		AstKind::Define(3.into(), Type::S8),
 		AstKind::Assign(4.into(), 2.into()),
 		AstKind::Return(None),
-		AstKind::Block(crate::ast::Block(vec![5.into(), 6.into()])),
+		AstKind::Block(vec![5.into(), 6.into()]),
 	]);
 }
 
@@ -141,7 +141,7 @@ fn with_internal_sub_expressions() {
 		AstKind::Define(7.into(), Type::S8),
 		AstKind::Assign(8.into(), 6.into()),
 		AstKind::Return(None),
-		AstKind::Block(crate::ast::Block(vec![9.into(), 10.into()])),
+		AstKind::Block(vec![9.into(), 10.into()]),
 	]);
 }
 
@@ -195,10 +195,10 @@ fn with_basic_for_loop() {
 			vec!["i".id()],
 			None,
 			Some(Bounds::Full { start: 0, end: 10}),
-			crate::ast::Block(vec![]),
+			vec![],
 		),
 		AstKind::Return(None),
-		AstKind::Block(crate::ast::Block(vec![0.into(), 1.into()])),
+		AstKind::Block(vec![0.into(), 1.into()]),
 	]);
 }
 
@@ -212,10 +212,10 @@ fn with_multi_element_for_loop() {
 			vec!["i".id(), "j".id()],
 			None,
 			Some(Bounds::Full { start: 0, end: 10 }),
-			crate::ast::Block(vec![]),
+			vec![],
 		),
 		AstKind::Return(None),
-		AstKind::Block(crate::ast::Block(vec![0.into(), 1.into()])),
+		AstKind::Block(vec![0.into(), 1.into()]),
 	]);
 }
 
@@ -228,10 +228,10 @@ fn with_internal_while_loop() {
 		AstKind::Int(1),
 		AstKind::While(
 			0.into(),
-			crate::ast::Block(vec![]),
+			vec![],
 		),
 		AstKind::Return(None),
-		AstKind::Block(crate::ast::Block(vec![1.into(), 2.into()])),
+		AstKind::Block(vec![1.into(), 2.into()]),
 	]);
 }
 

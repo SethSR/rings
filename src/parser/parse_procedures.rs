@@ -1,15 +1,10 @@
 
-use crate::ast::{
-	Block as AstBlock,
-	AstId,
-	AstKind,
-	KindList, PathSegment,
-};
 use crate::identifier::IdentId;
 use crate::operators::BinaryOp;
 use crate::token::Kind as TKind;
 use crate::Bounds;
 
+use super::ast::{AstId, AstKind, KindList, PathSegment};
 use super::cursor::Cursor;
 use super::error::Error;
 use super::record::RecordMap;
@@ -18,7 +13,7 @@ pub fn parse_block(
 	cursor: &mut Cursor,
 	nodes: &mut KindList,
 	records: &RecordMap,
-) -> Result<AstBlock, Error> {
+) -> Result<Vec<AstId>, Error> {
 	cursor.expect(TKind::OBrace)?;
 
 	let mut block = vec![];
@@ -40,7 +35,7 @@ pub fn parse_block(
 
 	cursor.expect(TKind::CBrace)?;
 
-	Ok(AstBlock(block))
+	Ok(block)
 }
 
 fn parse_ident_statement(
@@ -108,7 +103,7 @@ fn parse_access(
 		AstKind::Ident(ident_id)
 	} else {
 		#[cfg(feature="access")]
-		AstKind::Access(ident_id, accesses);
+		AstKind::Access(ident_id, accesses)
 		todo!()
 	};
 	Ok(nodes.push(kind))
@@ -165,7 +160,7 @@ fn parse_if_statement(
 		cursor.advance();
 		parse_block(cursor, nodes, records)?
 	} else {
-		AstBlock(vec![])
+		vec![]
 	};
 	Ok(nodes.push(AstKind::If(cond_id, then_block, else_block)))
 }

@@ -5,8 +5,6 @@ use std::{env, fmt, fs};
 //use std::path::PathBuf;
 //use std::process::{Command, Stdio};
 
-//mod asm;
-mod ast;
 mod error;
 mod identifier;
 mod input;

@@ -1,13 +1,13 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::ast::{AstId, AstKind, KindList};
 use crate::identifier::{IdentId, Identifier};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::token::{Id as TokenId, Kind as TokenKind};
 use crate::Target;
 
+mod ast;
 mod cursor;
 mod error;
 mod expression;
@@ -29,11 +29,13 @@ mod record_tests;
 mod proc_tests;
 
 use expression::{evaluate_address, evaluate_expr};
+use ast::KindList;
 use procedure::Procedure;
 use record::Record;
 use region::Region;
 use value::Value;
 
+pub use ast::{AstId, AstKind};
 pub use procedure::ProcMap;
 pub use record::RecordMap;
 pub use region::RegionMap;
@@ -523,7 +525,7 @@ fn process_proc(
 
 	if !has_return {
 		let ast_id = proc.body.push(AstKind::Return(None));
-		block.0.push(ast_id);
+		block.push(ast_id);
 	}
 
 	proc.body.push(AstKind::Block(block));

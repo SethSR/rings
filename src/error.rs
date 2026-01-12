@@ -31,7 +31,6 @@ const RESET : &str = "\x1b[0m";
 pub enum Kind {
 	// User facing Errors
 	Lexer,
-	Discovery,
 	Parser,
 	Checker,
 	LoweringVSMC,

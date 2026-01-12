@@ -1,5 +1,5 @@
 
-use crate::ast::KindList;
+use crate::parser::ast::KindList;
 use crate::identifier::{IdentId, Map as IdentMap};
 use crate::Target;
 
