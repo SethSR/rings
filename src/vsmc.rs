@@ -365,7 +365,6 @@ impl Section {
 				todo!("lower proc-call")
 			}
 
-			#[cfg(feature="access")]
 			Kind::Access(base_id, segments) => {
 				let temp = Location::Temp(self.alloc_temp());
 				let address = if let Some(record) = proc_data.records.get(base_id) {

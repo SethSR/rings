@@ -274,7 +274,6 @@ fn check_stmt(proc_data: &mut ProcData,
 			todo!("procedure-call: {proc_id} {exprs:?}")
 		}
 
-		#[cfg(feature="access")]
 		Kind::Access(base_id, segments) => {
 			let mut curr_id = base_id;
 			for segment in segments {

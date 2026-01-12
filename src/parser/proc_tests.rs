@@ -1,5 +1,5 @@
 
-use crate::parser::ast::AstKind;
+use crate::parser::ast::{AstKind, PathSegment};
 use crate::operators::BinaryOp;
 use crate::Bounds;
 
@@ -235,6 +235,55 @@ fn with_internal_while_loop() {
 	]);
 }
 
+#[test]
+fn with_record_param() {
+	let data = setup("main{} record a {} proc b(c:a) {}")
+			.unwrap_or_else(|e| panic!("{e}"));
+	assert!(data.procedures.contains_key(&"main".id()));
+	assert!(data.records.contains_key(&"a".id()));
+	let proc = &data.procedures[&"b".id()];
+	assert_eq!(proc.target, None);
+	assert_eq!(proc.params, [
+		("c".id(), Type::Record("a".id())),
+	]);
+	assert_eq!(proc.ret_type, Type::Void);
+	assert_eq!(proc.body.len(), 2);
+}
+
+#[test]
+fn with_out_of_order_record_param() {
+	let data = setup("main{} proc b(c:a) {} record a {}")
+			.unwrap_or_else(|e| panic!("{e}"));
+	assert!(data.procedures.contains_key(&"main".id()));
+	assert!(data.records.contains_key(&"a".id()));
+	let proc = &data.procedures[&"b".id()];
+	assert_eq!(proc.target, None);
+	assert_eq!(proc.params, [
+		("c".id(), Type::Record("a".id())),
+	]);
+	assert_eq!(proc.ret_type, Type::Void);
+	assert_eq!(proc.body.len(), 2);
+}
+
+#[test]
+fn with_internal_field_assign() {
+	let data = setup("main { a.b = 2; }")
+			.unwrap_or_else(|e| panic!("{e}"));
+	let proc = &data.procedures[&"main".id()];
+	assert_eq!(proc.target, None);
+	assert!(proc.params.is_empty());
+	assert_eq!(proc.ret_type, Type::Void);
+	assert_eq!(proc.body, [
+		AstKind::Access("a".id(), vec![
+			PathSegment::Field("b".id()),
+		]),
+		AstKind::Int(2),
+		AstKind::Assign(0.into(), 1.into()),
+		AstKind::Return(None),
+		AstKind::Block(vec![2.into(), 3.into()]),
+	]);
+}
+
 #[cfg(feature="table")]
 #[test]
 fn empty_table() {
@@ -292,32 +341,6 @@ fn table_with_user_defined_field() {
 	assert_eq!(table.address, None);
 }
 
-#[cfg(feature="record")]
-#[test]
-fn with_record_param() {
-	let data = setup("main{} record a {} proc b(c:a) {}")
-		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
-	assert_eq!(proc.target, None);
-	assert!(proc.params.is_empty());
-	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"b".id()));
-}
-
-#[cfg(feature="record")]
-#[test]
-fn with_out_of_order_record_param() {
-	let data = setup("main{} proc b(c:a) {} record a {}")
-		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
-	assert_eq!(proc.target, None);
-	assert!(proc.params.is_empty());
-	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"b".id()));
-}
-
 #[cfg(feature="table")]
 #[test]
 fn with_table_param() {
@@ -328,7 +351,6 @@ fn with_table_param() {
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"b".id()));
 }
 
 #[cfg(feature="forloop")]
@@ -336,12 +358,11 @@ fn with_table_param() {
 fn with_table_for_loop() {
 	let data = setup("main { for i in a {} }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="forloop")]
@@ -349,12 +370,11 @@ fn with_table_for_loop() {
 fn with_table_index_for_loop() {
 	let data = setup("main { for i in a[0..10] {} }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="forloop")]
@@ -362,12 +382,11 @@ fn with_table_index_for_loop() {
 fn with_table_from_for_loop() {
 	let data = setup("main { for i in a[0..] {} }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="forloop")]
@@ -375,12 +394,11 @@ fn with_table_from_for_loop() {
 fn with_table_to_for_loop() {
 	let data = setup("main { for i in a[..10] {} }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="forloop")]
@@ -388,12 +406,11 @@ fn with_table_to_for_loop() {
 fn with_table_full_for_loop() {
 	let data = setup("main { for i in a[..] {} }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="index")]
@@ -401,12 +418,11 @@ fn with_table_full_for_loop() {
 fn with_internal_table_index() {
 	let data = setup("main { return a[10].b; }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="index")]
@@ -414,12 +430,11 @@ fn with_internal_table_index() {
 fn with_internal_table_expression_indexing() {
 	let data = setup("main { return a[2 + 4].b; }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="call")]
@@ -429,7 +444,6 @@ fn with_internal_proc_call() {
 		.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="call")]
@@ -437,12 +451,11 @@ fn with_internal_proc_call() {
 fn with_internal_proc_call_in_subexpression() {
 	let data = setup("main { return 3 * a(3); }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="call")]
@@ -450,12 +463,11 @@ fn with_internal_proc_call_in_subexpression() {
 fn with_internal_proc_call_with_expression_argument() {
 	let data = setup("main { return a(b + 4); }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
 #[cfg(feature="call")]
@@ -463,36 +475,21 @@ fn with_internal_proc_call_with_expression_argument() {
 fn with_internal_proc_call_with_multiple_arguments() {
 	let data = setup("main { return a(2, 4 / b, b + 4); }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }
 
-#[cfg(feature="access")]
-#[test]
-fn with_internal_field_assign() {
-	let data = setup("main { a.b = 2; }")
-		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
-	assert_eq!(proc.target, None);
-	assert!(proc.params.is_empty());
-	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
-}
-
-#[cfg(feature="access")]
+#[cfg(feature="table")]
 #[test]
 fn with_internal_table_assign() {
 	let data = setup("main { a[3].b = 2; }")
 		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"b".id()];
+	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, []);
-	assert!(data.procedures.contains_key(&"main".id()));
 }

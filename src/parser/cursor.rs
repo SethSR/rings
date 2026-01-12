@@ -30,13 +30,6 @@ impl<'a> Cursor<'a> {
 		}
 	}
 
-	pub fn from_range(lex_data: &'a LexData, start: TokenId, end: TokenId) -> Self {
-		Self {
-			tokens: &lex_data.tok_list.raw,
-			range: start.index()..end.index(),
-		}
-	}
-
 	pub fn index(&self) -> TokenId {
 		self.range.start.into()
 	}
@@ -109,17 +102,13 @@ impl<'a> Cursor<'a> {
 			TokenKind::Identifier(ident_id) => {
 				Err(Error::UndefinedType { location: self.index(), ident_id })
 			}
-			#[cfg(feature="types")]
 			TokenKind::Bool => Ok(Type::Bool),
-			#[cfg(feature="types")]
-			TokenKind::U8 => Ok(Type::U8),
-			TokenKind::S8 => Ok(Type::S8),
-			#[cfg(feature="types")]
-			TokenKind::U16 => Ok(Type::U16),
 			TokenKind::S16 => Ok(Type::S16),
-			#[cfg(feature="types")]
-			TokenKind::U32 => Ok(Type::U32),
 			TokenKind::S32 => Ok(Type::S32),
+			TokenKind::S8 => Ok(Type::S8),
+			TokenKind::U16 => Ok(Type::U16),
+			TokenKind::U32 => Ok(Type::U32),
+			TokenKind::U8 => Ok(Type::U8),
 			_ => return Err(self.expected_token("type-specifier")),
 		};
 		self.advance();

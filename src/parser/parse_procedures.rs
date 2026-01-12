@@ -102,9 +102,7 @@ fn parse_access(
 	let kind = if accesses.is_empty() {
 		AstKind::Ident(ident_id)
 	} else {
-		#[cfg(feature="access")]
 		AstKind::Access(ident_id, accesses)
-		todo!()
 	};
 	Ok(nodes.push(kind))
 }

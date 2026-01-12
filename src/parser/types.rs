@@ -1,6 +1,7 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
+	Bool,
 	Record(crate::identifier::IdentId),
 	S16,
 	S32,
