@@ -9,42 +9,42 @@ use crate::token;
 use crate::{Bounds, Span};
 
 define_index_type! {
-	pub struct Id = usize;
-	DEFAULT = Id::from_raw_unchecked(0);
+	pub struct AstId = usize;
+	DEFAULT = AstId::from_raw_unchecked(0);
 	DEBUG_FORMAT = "ast::Id({})";
 	DISPLAY_FORMAT = "{}";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Block(pub Vec<Id>);
+pub struct Block(pub Vec<AstId>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathSegment {
 	Field(IdentId),
-	Index(Id, IdentId),
+	Index(AstId, IdentId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Kind {
+pub enum AstKind {
 	Ident(IdentId),
 	Int(i64),
 	Dec(f64),
-	Define(Id, Type),
-	Assign(Id, Id),
-	BinOp(BinaryOp, Id, Id),
-	UnOp(UnaryOp, Id),
-	Return(Option<Id>),
-	If(Id, Block, Block),
+	Define(AstId, Type),
+	Assign(AstId, AstId),
+	BinOp(BinaryOp, AstId, AstId),
+	UnOp(UnaryOp, AstId),
+	Return(Option<AstId>),
+	If(AstId, Block, Block),
 	Block(Block),
-	While(Id, Block),
+	While(AstId, Block),
 	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Block),
-	Call(IdentId, Vec<Id>),
+	Call(IdentId, Vec<AstId>),
 	#[cfg(feature="access")]
 	Access(IdentId, Vec<PathSegment>),
 }
 
-pub type KindList = IndexVec<Id, Kind>;
-pub type LocList = IndexVec<Id, Span<token::Id>>;
+pub type KindList = IndexVec<AstId, AstKind>;
+pub type LocList = IndexVec<AstId, Span<token::Id>>;
 
 #[cfg(feature="optimize")]
 #[derive(Debug, Default)]

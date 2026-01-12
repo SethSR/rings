@@ -1,16 +1,18 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::identifier::IdentId;
+use crate::ast::{AstId, AstKind, KindList};
+use crate::identifier::{IdentId, Identifier};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::token::{Id as TokenId, Kind as TokenKind};
+use crate::Target;
 
 mod cursor;
-mod discovery;
 mod error;
 mod expression;
-mod parser;
+mod parse_procedures;
+mod procedure;
 mod record;
 mod region;
 mod task;
@@ -23,14 +25,16 @@ mod value_tests;
 mod region_tests;
 #[cfg(test)]
 mod record_tests;
+#[cfg(test)]
+mod proc_tests;
 
 use expression::{evaluate_address, evaluate_expr};
+use procedure::Procedure;
 use record::Record;
 use region::Region;
 use value::Value;
 
-//pub use discovery::Data as DscData;
-//pub use parser::ProcData;
+pub use procedure::ProcMap;
 pub use record::RecordMap;
 pub use region::RegionMap;
 pub use types::Type;
@@ -47,15 +51,7 @@ pub struct Data {
 	pub values: ValueMap,
 	pub regions: RegionMap,
 	pub records: RecordMap,
-	//procedures: discovery::ProcMap,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Param {
-	pub name: IdentId,
-	pub typ: Type,
-	pub size: u32,
-	pub offset: u16,
+	procedures: ProcMap,
 }
 
 pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
@@ -63,13 +59,13 @@ pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
 	let tasks = scan_tasks(lex_data)
 		.map_err(|e| e.into_comp_error(input, lex_data, crate::error::Kind::Parser))?;
 	if should_print {
-		println!("{tasks:?}");
+		eprintln!("{tasks:?}");
 	}
 
 	let data = process_tasks(lex_data, tasks)
 		.map_err(|e| e.into_comp_error(input, lex_data, crate::error::Kind::Parser))?;
 	if should_print {
-		println!("{data:?}");
+		eprintln!("{data:?}");
 	}
 
 	Ok(data)
@@ -92,36 +88,65 @@ enum Task {
 		start_address: Option<TokenId>,
 		start_fields: TokenId,
 	},
+	Proc {
+		ident: IdentId,
+		target: Option<Target>,
+		start: TokenId,
+	}
 }
 
 fn scan_tasks(lex_data: &LexData,
-) -> Result<Vec<Task>, error::Error> {
+) -> Result<VecDeque<Task>, error::Error> {
 	let mut tasks = vec![];
 
 	let mut cursor = cursor::Cursor::new(lex_data);
 	while cursor.current() != TokenKind::Eof {
 		let token = cursor.current();
+		cursor.advance();
 		match token {
 			TokenKind::Value => {
-				cursor.advance();
 				tasks.push(scan_value_task(&mut cursor)?);
 			}
 			TokenKind::Region => {
-				cursor.advance();
 				tasks.push(scan_region_task(&mut cursor)?);
 			}
 			TokenKind::Record => {
-				cursor.advance();
 				tasks.push(scan_record_task(&mut cursor)?);
 			}
+			TokenKind::Main => {
+				tasks.push(scan_proc(&mut cursor, "main".id(), None)?);
+			}
+
+			TokenKind::Sub => {
+				tasks.push(scan_proc(&mut cursor, "sub".id(), None)?);
+			}
+
+			TokenKind::Proc => {
+				tasks.push(scan_named_proc(&mut cursor, None)?);
+			}
+
+			TokenKind::M68k => {
+				tasks.push(scan_target_proc(&mut cursor, Some(Target::M68k))?);
+			}
+
+			TokenKind::SH2 => {
+				tasks.push(scan_target_proc(&mut cursor, Some(Target::SH2))?);
+			}
+
+			TokenKind::X64 => {
+				tasks.push(scan_target_proc(&mut cursor, Some(Target::X86_64))?);
+			}
+
+			TokenKind::Z80 => {
+				tasks.push(scan_target_proc(&mut cursor, Some(Target::Z80))?);
+			}
 			_ => {
-				eprintln!("WARNING - unexpected token {token:?}");
-				cursor.advance();
+				return Err(cursor.expected_token("top-level statement"))
 			}
 		}
 	}
 
-	Ok(tasks)
+	Ok(tasks.into_iter().collect())
 }
 
 fn scan_value_task(cursor: &mut cursor::Cursor,
@@ -160,6 +185,63 @@ fn scan_record_task(cursor: &mut cursor::Cursor,
 	Ok(Task::Record { ident, location, start_address, start_fields })
 }
 
+fn check_braces(cursor: &mut cursor::Cursor) -> Result<(), error::Error> {
+	skip_until(cursor, TokenKind::OBrace)?;
+	cursor.expect(TokenKind::OBrace)?;
+	let mut brace_count = 1;
+	while brace_count > 0 && cursor.current() != TokenKind::Eof {
+		brace_count += match cursor.current() {
+			TokenKind::OBrace => 1,
+			TokenKind::CBrace => -1,
+			TokenKind::Eof => {
+				return Err(cursor.expected_token("end of procedure").into());
+			}
+			_ => 0,
+		};
+		cursor.advance();
+	}
+
+	Ok(())
+}
+
+/// Matches `main {...}` and `sub {...}`
+fn scan_proc(cursor: &mut cursor::Cursor,
+	ident: IdentId,
+	target: Option<Target>,
+) -> Result<Task, error::Error> {
+	let start = cursor.index();
+	check_braces(cursor)?;
+	Ok(Task::Proc { ident, target, start })
+}
+
+/// Matches `proc <ident>(...) <return> {...}`
+fn scan_named_proc(cursor: &mut cursor::Cursor,
+	target: Option<Target>,
+) -> Result<Task, error::Error> {
+	let name_id = cursor.expect_identifier("procedure name")?;
+	scan_proc(cursor, name_id, target)
+}
+
+/// Matches `<target> proc <ident>(...) <return> {...}`, `<target> main {...}`, and `<target> sub {...}`
+fn scan_target_proc(cursor: &mut cursor::Cursor,
+	target: Option<Target>,
+) -> Result<Task, error::Error> {
+	match cursor.current() {
+		TokenKind::Main => {
+			cursor.advance();
+			scan_proc(cursor, "main".id(), target)
+		}
+		TokenKind::Sub => {
+			cursor.advance();
+			scan_proc(cursor, "sub".id(), target)
+		}
+		_ => {
+			cursor.expect(TokenKind::Proc)?;
+			scan_named_proc(cursor, target)
+		}
+	}
+}
+
 fn skip_until(cursor: &mut cursor::Cursor,
 	end_token: TokenKind,
 ) -> Result<TokenId, error::Error> {
@@ -174,12 +256,11 @@ fn skip_until(cursor: &mut cursor::Cursor,
 }
 
 fn process_tasks(lex_data: &LexData,
-	tasks: Vec<Task>,
+	mut queue: VecDeque<Task>,
 ) -> Result<Data, error::Error> {
 	let mut data = Data::default();
 	let mut locations = HashMap::default();
 
-	let mut queue: VecDeque<Task> = tasks.into_iter().collect();
 	let mut failed_tasks = HashSet::<IdentId>::new();
 	let mut consecutive_failures = 0;
 
@@ -207,10 +288,7 @@ fn process_tasks(lex_data: &LexData,
 			Task::Region { ident, start_size, start_address } => {
 				match process_region(lex_data, &data, start_size, start_address) {
 					Ok((start, end)) => {
-						data.regions.insert(ident, Region {
-							span: crate::Span { start, end },
-							alloc_position: 0,
-						});
+						data.regions.insert(ident, Region::new(start, end));
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
@@ -244,6 +322,24 @@ fn process_tasks(lex_data: &LexData,
 					Err(e) => return Err(e),
 				}
 			}
+
+			Task::Proc { ident, target, start } => {
+				match process_proc(lex_data, &data, target, start) {
+					Ok(proc) => {
+						data.procedures.insert(ident, proc);
+						failed_tasks.remove(&ident);
+						consecutive_failures = 0;
+					}
+					Err(error::Error::UndefinedType { location, ident_id }) => {
+						consecutive_failures = check_task_failure(
+							&queue, &mut failed_tasks, consecutive_failures,
+							location, ident, ident_id,
+						)?;
+						queue.push_back(task);
+					}
+					Err(e) => return Err(e),
+				}
+			}
 		}
 	}
 
@@ -263,6 +359,32 @@ fn process_tasks(lex_data: &LexData,
 	}
 
 	Ok(data)
+}
+
+fn check_task_failure(
+	queue: &VecDeque<Task>,
+	failed_tasks: &mut HashSet<IdentId>,
+	consecutive_failures: usize,
+	location: TokenId,
+	task_ident: IdentId,
+	item_id: IdentId,
+) -> Result<usize, error::Error> {
+	if failed_tasks.contains(&task_ident) {
+		let failure_count = consecutive_failures + 1;
+
+		if failure_count > queue.len() {
+			Err(error::Error::CircularDependency {
+				location,
+				name_id: task_ident,
+				ident_id: item_id,
+			})
+		} else {
+			Ok(failure_count)
+		}
+	} else {
+		failed_tasks.insert(task_ident);
+		Ok(consecutive_failures)
+	}
 }
 
 fn check_recursion(
@@ -362,28 +484,68 @@ fn process_fields(cursor: &mut cursor::Cursor,
 	Ok(fields)
 }
 
-fn check_task_failure(
-	queue: &VecDeque<Task>,
-	failed_tasks: &mut HashSet<IdentId>,
-	consecutive_failures: usize,
-	location: TokenId,
-	task_ident: IdentId,
-	item_id: IdentId,
-) -> Result<usize, error::Error> {
-	if failed_tasks.contains(&task_ident) {
-		let failure_count = consecutive_failures + 1;
+fn process_proc(
+	lex_data: &LexData,
+	data: &Data,
+	target: Option<Target>,
+	start: TokenId,
+) -> Result<Procedure, error::Error> {
+	let mut proc = Procedure {
+		target,
+		params: vec![],
+		body: KindList::default(),
+		ret_type: Type::Void,
+	};
 
-		if failure_count > queue.len() {
-			Err(error::Error::CircularDependency {
-				location,
-				name_id: task_ident,
-				ident_id: item_id,
-			})
-		} else {
-			Ok(failure_count)
-		}
+	let mut cursor = cursor::Cursor::from_start(lex_data, start);
+
+	proc.params = if cursor.expect(TokenKind::OParen).is_ok() {
+		let params = process_fields(&mut cursor, &data.records, TokenKind::CParen)?;
+		cursor.expect(TokenKind::CParen)?;
+		params
 	} else {
-		failed_tasks.insert(task_ident);
-		Ok(consecutive_failures)
+		vec![]
+	};
+
+	proc.ret_type = if cursor.expect(TokenKind::Arrow).is_ok() {
+		cursor.expect_type(&data.records)?
+	} else {
+		Type::Void
+	};
+
+	let start = AstId::new(proc.body.len());
+	let mut block = parse_procedures::parse_block(&mut cursor, &mut proc.body, &data.records)?;
+	let end = AstId::new(proc.body.len());
+
+	let has_return = proc.body[start..end]
+		.iter()
+		.any(|kind| matches!(kind, AstKind::Return(_)));
+
+	if !has_return {
+		let ast_id = proc.body.push(AstKind::Return(None));
+		block.0.push(ast_id);
 	}
+
+	proc.body.push(AstKind::Block(block));
+
+	Ok(proc)
+}
+
+#[cfg(feature="table")]
+pub type TableMap = identifier::Map<Table>;
+
+#[cfg(feature="table")]
+fn discover_table(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Table> {
+	cursor.expect(data, TokenKind::OBracket)?;
+	let row_count = cursor.expect_u32(data, "table size")?;
+	cursor.expect(data, TokenKind::CBracket)?;
+	let address = discover_address(cursor, data)?;
+	cursor.expect(data, TokenKind::OBrace)?;
+	let column_spec = discover_fields(cursor, data, TokenKind::CBrace)?;
+	cursor.expect(data, TokenKind::CBrace)?;
+	Ok(Table {
+		address,
+		row_count,
+		column_spec,
+	})
 }
