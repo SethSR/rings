@@ -2,9 +2,9 @@
 use index_vec::define_index_type;
 use index_vec::IndexVec;
 
-use crate::identifier::Id as IdentId;
+use crate::identifier::IdentId;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::rings_type::Type;
+use crate::parser::Type;
 use crate::token;
 use crate::{Bounds, Span};
 

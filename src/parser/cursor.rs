@@ -1,45 +1,63 @@
 
-use crate::identifier::Id as IdentId;
-use crate::input::Data as InputData;
+use std::ops::Range;
+
+use crate::identifier::IdentId;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::rings_type::Type;
 use crate::token::{Id as TokenId, Kind as TokenKind};
-use crate::token_source;
-use crate::{Span, SrcPos};
 
 use super::error::Error;
 use super::record::RecordMap;
+use super::types::Type;
 
-#[derive(Default)]
-pub struct Cursor(TokenId);
+pub struct Cursor<'a> {
+	tokens: &'a [TokenKind],
+	range: Range<usize>,
+}
 
-impl Cursor {
-	pub fn new(start: TokenId) -> Self {
-		Self(start)
+impl<'a> Cursor<'a> {
+	pub fn new(lex_data: &'a LexData) -> Self {
+		Self {
+			tokens: &lex_data.tok_list.raw,
+			range: 0..lex_data.tok_list.len(),
+		}
+	}
+
+	pub fn from_start(lex_data: &'a LexData, start: TokenId) -> Self {
+		Self {
+			tokens: &lex_data.tok_list.raw,
+			range: start.index()..lex_data.tok_list.len(),
+		}
+	}
+
+	pub fn from_range(lex_data: &'a LexData, start: TokenId, end: TokenId) -> Self {
+		Self {
+			tokens: &lex_data.tok_list.raw,
+			range: start.index()..end.index(),
+		}
 	}
 
 	pub fn index(&self) -> TokenId {
-		self.0
+		self.range.start.into()
 	}
 
 	pub fn advance(&mut self) {
-		self.0 += 1;
+		self.range.start += 1;
 	}
 
-	pub fn peek(&self, lex_data: &LexData, offset: usize) -> TokenKind {
-		lex_data.tok_list
-			.get(self.0 + offset)
+	pub fn peek(&self, offset: usize) -> TokenKind {
+		self.tokens[self.range.start..self.range.end]
+			.get(offset)
 			.copied()
 			.unwrap_or(TokenKind::Eof)
 	}
 
-	pub fn current(&self, lex_data: &LexData) -> TokenKind {
-		self.peek(lex_data, 0)
+	pub fn current(&self) -> TokenKind {
+		self.peek(0)
 	}
 
-	pub fn expect(&mut self, lex_data: &LexData, expected: TokenKind) -> Result<(), Error> {
-		if self.current(lex_data) == expected {
+	pub fn expect(&mut self, expected: TokenKind) -> Result<(), Error> {
+		if self.current() == expected {
 			self.advance();
 			Ok(())
 		} else {
@@ -47,10 +65,8 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_identifier(&mut self, lex_data: &LexData,
-		expected: &str,
-	) -> Result<IdentId, Error> {
-		if let TokenKind::Identifier(ident_id) = self.current(lex_data) {
+	pub fn expect_identifier(&mut self, expected: &str) -> Result<IdentId, Error> {
+		if let TokenKind::Identifier(ident_id) = self.current() {
 			self.advance();
 			Ok(ident_id)
 		} else {
@@ -58,10 +74,8 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_integer(&mut self, lex_data: &LexData,
-		expected: &str,
-	) -> Result<i64, Error> {
-		if let TokenKind::Integer(num) = self.current(lex_data) {
+	pub fn expect_integer(&mut self, expected: &str) -> Result<i64, Error> {
+		if let TokenKind::Integer(num) = self.current() {
 			self.advance();
 			Ok(num)
 		} else {
@@ -69,57 +83,51 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_u32(&mut self,
-		input: &InputData,
-		lex_data: &LexData,
-		expected: &str,
-	) -> Result<u32, Error> {
-		self.expect_integer(&lex_data, expected)
+	pub fn expect_u32(&mut self, expected: &str) -> Result<u32, Error> {
+		self.expect_integer(expected)
 			.and_then(|num| {
-				let start = token_source(input, lex_data, self.index() - 1);
-				let end = token_source(input, lex_data, self.index());
+				let location = self.index() - 1;
 				check_integer_as_u32(
 					&format!("valid {expected}"),
 					num,
-					start + end,
+					location,
 				)
 			})
 	}
 
 	pub fn expect_type(&mut self,
-		lex_data: &LexData,
 		records: &RecordMap,
 	) -> Result<Type, Error> {
-		let result = match self.current(lex_data) {
+		let result = match self.current() {
 			TokenKind::Identifier(ident_id) if records.contains_key(&ident_id) => {
 				Ok(Type::Record(ident_id))
 			}
 			#[cfg(feature="table")]
-			TokenKind::Identifier(ident_id) if data.tables.contains_key(&ident_id) => {
-				Ok(Type::Table(ident_id));
+			TokenKind::Identifier(ident_id) if tables.contains_key(ident_id) => {
+				Ok(Type::Table(ident_id))
 			}
-			TokenKind::Identifier(ident_id) => return Err(
-				Error::UndefinedType { location: self.index(), ident_id },
-			),
+			TokenKind::Identifier(ident_id) => {
+				Err(Error::UndefinedType { location: self.index(), ident_id })
+			}
 			#[cfg(feature="types")]
 			TokenKind::Bool => Ok(Type::Bool),
 			#[cfg(feature="types")]
 			TokenKind::U8 => Ok(Type::U8),
-			TokenKind::S8 => Ok(Type::s8_top()),
+			TokenKind::S8 => Ok(Type::S8),
 			#[cfg(feature="types")]
 			TokenKind::U16 => Ok(Type::U16),
-			TokenKind::S16 => Ok(Type::s16_top()),
+			TokenKind::S16 => Ok(Type::S16),
 			#[cfg(feature="types")]
 			TokenKind::U32 => Ok(Type::U32),
-			TokenKind::S32 => Ok(Type::s32_top()),
+			TokenKind::S32 => Ok(Type::S32),
 			_ => return Err(self.expected_token("type-specifier")),
 		};
 		self.advance();
 		result
 	}
 
-	pub fn expect_bin_op(&mut self, lex_data: &LexData) -> Result<BinaryOp, Error> {
-		match self.current(lex_data) {
+	pub fn expect_bin_op(&mut self) -> Result<BinaryOp, Error> {
+		match self.current() {
 			TokenKind::Amp     => { self.advance(); Ok(BinaryOp::BinAnd) }
 			TokenKind::Amp2    => { self.advance(); Ok(BinaryOp::LogAnd) }
 			TokenKind::BangEq  => { self.advance(); Ok(BinaryOp::CmpNE) }
@@ -143,8 +151,8 @@ impl Cursor {
 		}
 	}
 
-	pub fn expect_unary_op(&mut self, lex_data: &LexData) -> Option<UnaryOp> {
-		match self.current(lex_data) {
+	pub fn expect_unary_op(&mut self) -> Option<UnaryOp> {
+		match self.current() {
 			TokenKind::Dash => { self.advance(); Some(UnaryOp::Neg) }
 			TokenKind::Bang => { self.advance(); Some(UnaryOp::Not) }
 			_ => None,
@@ -156,9 +164,9 @@ impl Cursor {
 	}
 }
 
-fn check_integer_as_u32(expected: &str, found: i64, span: Span<SrcPos>) -> Result<u32, Error> {
+fn check_integer_as_u32(expected: &str, found: i64, location: TokenId) -> Result<u32, Error> {
 	if !(0..u32::MAX as i64).contains(&found) {
-		Err(Error::Expected { span, expected: expected.into(), found: found.to_string() })
+		Err(Error::Expected { location, expected: expected.into(), found: found.to_string() })
 	} else {
 		Ok(found as u32)
 	}

@@ -8,18 +8,19 @@ use crate::ast::{
 	Kind as AKind,
 	KindList, LocList, PathSegment,
 };
-use crate::identifier::{Id as IdentId, Map as IdentMap};
+use crate::identifier::{IdentId, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::BinaryOp;
 use crate::token::{Id as TokenId, Kind as TKind};
-use crate::{identifier, rings_type, Bounds, Target};
+use crate::{identifier, Bounds, Target};
 
 use super::cursor::Cursor;
 use super::discovery::Data as DscData;
 use super::error::Error;
 use super::record::RecordMap;
 use super::task::Task;
+use super::Type;
 
 #[derive(Debug, Default, Clone)]
 pub struct ProcData {
@@ -28,8 +29,8 @@ pub struct ProcData {
 	pub ast_nodes: KindList,
 	pub ast_pos_tok: LocList,
 	/* Type Checking */
-	pub ast_to_type: HashMap<AstId, rings_type::Type>,
-	pub ident_to_type: identifier::Map<rings_type::Type>,
+	pub ast_to_type: HashMap<AstId, Type>,
+	pub ident_to_type: identifier::Map<Type>,
 }
 
 impl ProcData {
@@ -61,8 +62,7 @@ pub fn print(
 			println!("{:-<32} | {:-<8} | {:-<8}", "", "", "");
 			for (ast_id, rings_type) in &proc_data.ast_to_type {
 				let ast = ast_id.to_string();
-				let ast_type = crate::type_text(input, lex_data, rings_type);
-				println!("{proc_name:<32} | {ast:<8} | {ast_type:<8}");
+				println!("{proc_name:<32} | {ast:<8} | {rings_type:<8?}");
 			}
 		}
 
@@ -73,8 +73,7 @@ pub fn print(
 			println!("{:-<32} | {:-<16} | {:-<8}", "", "", "");
 			for (ident_id, rings_type) in &proc_data.ident_to_type {
 				let var_name = crate::text(input, lex_data, ident_id);
-				let var_type = crate::type_text(input, lex_data, rings_type);
-				println!("{proc_name:<32} | {var_name:<16} | {var_type:<8}");
+				println!("{proc_name:<32} | {var_name:<16} | {rings_type:<8?}");
 			}
 		}
 	}
@@ -128,25 +127,25 @@ fn parse(
 	proc_db: &mut IdentMap<ProcData>,
 	task: &Task,
 ) -> Result<(), (TokenId, Error)> {
-	let mut cursor = Cursor::new(task.tok_start);
+	let mut cursor = Cursor::from_start(lex_data, task.tok_start);
 	let mut proc_data = ProcData::default();
 	let start = AstId::new(proc_data.ast_nodes.len());
 
 	// skip to the procedure body
-	while TKind::OBrace != cursor.peek(lex_data, 0) {
+	while TKind::OBrace != cursor.current() {
 		cursor.advance();
 	}
 
 	let tok_start = cursor.index();
 	let mut block = parse_block(&mut cursor, input, lex_data, &dsc_data.records, &mut proc_data)
-			.map_err(|e| (cursor.index(), e))?;
+		.map_err(|e| (cursor.index(), e))?;
 	let tok_end = cursor.index();
 
 	let end = AstId::new(proc_data.ast_nodes.len());
 
 	let has_return = proc_data.ast_nodes[start..end]
-			.iter()
-			.any(|kind| matches!(kind, AKind::Return(_)));
+		.iter()
+		.any(|kind| matches!(kind, AKind::Return(_)));
 
 	if !has_return {
 		let tok_pos = cursor.index();
@@ -171,11 +170,11 @@ fn parse_block(
 	records: &RecordMap,
 	proc_data: &mut ProcData,
 ) -> Result<AstBlock, Error> {
-	cursor.expect(lex_data, TKind::OBrace)?;
+	cursor.expect(TKind::OBrace)?;
 
 	let mut block = vec![];
-	while ![TKind::Eof, TKind::CBrace].contains(&cursor.current(lex_data)) {
-		block.push(match cursor.current(lex_data) {
+	while ![TKind::Eof, TKind::CBrace].contains(&cursor.current()) {
+		block.push(match cursor.current() {
 			TKind::Let => parse_let_statement(cursor, lex_data, records, proc_data)?,
 			TKind::Identifier(ident_id) => parse_ident_statement(cursor, lex_data, proc_data, ident_id)?,
 			TKind::OBrace => {
@@ -192,7 +191,7 @@ fn parse_block(
 		});
 	}
 
-	cursor.expect(lex_data, TKind::CBrace)?;
+	cursor.expect(TKind::CBrace)?;
 
 	Ok(AstBlock(block))
 }
@@ -205,7 +204,7 @@ fn parse_ident_statement(
 ) -> Result<AstId, Error> {
 	let left_id = parse_access(cursor, lex_data, proc_data, ident_id)?;
 
-	match cursor.current(lex_data) {
+	match cursor.current() {
 		TKind::Eq => parse_assignment(cursor, lex_data, proc_data, left_id),
 		TKind::PlusEq => parse_op_assignment(cursor, lex_data, proc_data, left_id, BinaryOp::Add),
 		TKind::DashEq => parse_op_assignment(cursor, lex_data, proc_data, left_id, BinaryOp::Sub),
@@ -222,15 +221,15 @@ fn parse_let_statement(
 	proc_data: &mut ProcData,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
-	cursor.expect(lex_data, TKind::Let)?;
+	cursor.expect(TKind::Let)?;
 	let tok_ident_start = cursor.index();
-	let ident_id = cursor.expect_identifier(lex_data, "variable identifier")?;
+	let ident_id = cursor.expect_identifier("variable identifier")?;
 	let tok_ident_range = tok_ident_start..cursor.index();
-	cursor.expect(lex_data, TKind::Colon)?;
-	let var_type = cursor.expect_type(lex_data, records)?;
-	cursor.expect(lex_data, TKind::Eq)?;
+	cursor.expect(TKind::Colon)?;
+	let var_type = cursor.expect_type(records)?;
+	cursor.expect(TKind::Eq)?;
 	let ast_id = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
-	cursor.expect(lex_data, TKind::Semicolon)?;
+	cursor.expect(TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
 	let ident = proc_data.add_ast(AKind::Ident(ident_id), tok_ident_range);
 	let define = proc_data.add_ast(AKind::Define(ident, var_type), tok_range.clone());
@@ -246,21 +245,21 @@ fn parse_access(
 	let tok_start = cursor.index();
 	cursor.advance(); // skip the identifier
 	let mut accesses = vec![];
-	while [TKind::Dot, TKind::OBracket].contains(&cursor.current(lex_data)) {
-		match cursor.current(lex_data) {
+	while [TKind::Dot, TKind::OBracket].contains(&cursor.current()) {
+		match cursor.current() {
 			// a.b -> location of 'a' + offset of 'b'
 			TKind::Dot => {
-				cursor.expect(lex_data, TKind::Dot)?;
-				let id = cursor.expect_identifier(lex_data, "field name")?;
+				cursor.expect(TKind::Dot)?;
+				let id = cursor.expect_identifier("field name")?;
 				accesses.push(PathSegment::Field(id));
 			}
 			// a[b].c -> location of 'a' + 'b' * size of 'c'
 			TKind::OBracket => {
-				cursor.expect(lex_data, TKind::OBracket)?;
+				cursor.expect(TKind::OBracket)?;
 				let index = parse_expression(cursor, lex_data, proc_data, &[TKind::CBracket])?;
-				cursor.expect(lex_data, TKind::CBracket)?;
-				cursor.expect(lex_data, TKind::Dot)?;
-				let id = cursor.expect_identifier(lex_data, "field name")?;
+				cursor.expect(TKind::CBracket)?;
+				cursor.expect(TKind::Dot)?;
+				let id = cursor.expect_identifier("field name")?;
 				accesses.push(PathSegment::Index(index, id));
 			}
 			_ => break,
@@ -284,9 +283,9 @@ fn parse_assignment(
 	lvalue_id: AstId,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
-	cursor.expect(lex_data, TKind::Eq)?;
+	cursor.expect(TKind::Eq)?;
 	let ast_id = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
-	cursor.expect(lex_data, TKind::Semicolon)?;
+	cursor.expect(TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
 	Ok(proc_data.add_ast(AKind::Assign(lvalue_id, ast_id), tok_range))
 }
@@ -300,7 +299,7 @@ fn parse_op_assignment(
 	let tok_start = cursor.index();
 	cursor.advance(); // skip the operator token
 	let ast_id = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
-	cursor.expect(lex_data, TKind::Semicolon)?;
+	cursor.expect(TKind::Semicolon)?;
 	let tok_range = tok_start..cursor.index();
 	let op_id = proc_data.add_ast(AKind::BinOp(op, lvalue_id, ast_id),
 		tok_range.clone());
@@ -313,12 +312,12 @@ fn parse_return_statement(
 	proc_data: &mut ProcData,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
-	cursor.expect(lex_data, TKind::Return)?;
-	let ast_id = match cursor.expect(lex_data, TKind::Semicolon) {
+	cursor.expect(TKind::Return)?;
+	let ast_id = match cursor.expect(TKind::Semicolon) {
 		Ok(_) => None,
 		Err(_) => {
 			let result = parse_expression(cursor, lex_data, proc_data, &[TKind::Semicolon])?;
-			cursor.expect(lex_data, TKind::Semicolon)?;
+			cursor.expect(TKind::Semicolon)?;
 			Some(result)
 		},
 	};
@@ -334,10 +333,10 @@ fn parse_if_statement(
 	proc_data: &mut ProcData,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
-	cursor.expect(lex_data, TKind::If)?;
+	cursor.expect(TKind::If)?;
 	let cond_id = parse_expression(cursor, lex_data, proc_data, &[TKind::OBrace])?;
 	let then_block = parse_block(cursor, input, lex_data, records, proc_data)?;
-	let else_block = if TKind::Else == cursor.current(lex_data) {
+	let else_block = if TKind::Else == cursor.current() {
 		cursor.advance();
 		parse_block(cursor, input, lex_data, records, proc_data)?
 	} else {
@@ -355,7 +354,7 @@ fn parse_while_statement(
 	proc_data: &mut ProcData,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
-	cursor.expect(lex_data, TKind::While)?;
+	cursor.expect(TKind::While)?;
 	let cond = parse_expression(cursor, lex_data, proc_data, &[TKind::OBrace])?;
 	let block = parse_block(cursor, input, lex_data, records, proc_data)?;
 	let tok_range = tok_start..cursor.index();
@@ -370,40 +369,40 @@ fn parse_for_statement(
 	proc_data: &mut ProcData,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
-	cursor.expect(lex_data, TKind::For)?;
+	cursor.expect(TKind::For)?;
 
 	let mut vars = vec![];
-	let ident_id = cursor.expect_identifier(lex_data, "identifier")?;
+	let ident_id = cursor.expect_identifier("identifier")?;
 	vars.push(ident_id);
 
-	while TKind::Comma == cursor.current(lex_data) {
+	while TKind::Comma == cursor.current() {
 		cursor.advance();
-		let ident_id = cursor.expect_identifier(lex_data, "identifier")?;
+		let ident_id = cursor.expect_identifier("identifier")?;
 		vars.push(ident_id);
 	}
 
-	while TKind::In != cursor.current(lex_data) {
-		let ident_id = cursor.expect_identifier(lex_data, "identifier")?;
+	while TKind::In != cursor.current() {
+		let ident_id = cursor.expect_identifier("identifier")?;
 		vars.push(ident_id);
-		if TKind::In == cursor.current(lex_data) {
+		if TKind::In == cursor.current() {
 			break;
 		}
-		cursor.expect(lex_data, TKind::Comma)?;
+		cursor.expect(TKind::Comma)?;
 	}
 
-	cursor.expect(lex_data, TKind::In)?;
+	cursor.expect(TKind::In)?;
 
 	// for x in Table {}
 	// for x in Table[..] {}
 	// for x in [0..10] {}
-	let (table_id, range) = if let Ok(table_id) = cursor.expect_identifier(lex_data, "COMPILER ERROR") {
+	let (table_id, range) = if let Ok(table_id) = cursor.expect_identifier("COMPILER ERROR") {
 		// Table loop
-		let range = if TKind::OBracket == cursor.current(lex_data) {
+		let range = if TKind::OBracket == cursor.current() {
 			cursor.advance();
-			let range_start = cursor.expect_u32(input, lex_data, "COMPILER ERROR").ok();
-			cursor.expect(lex_data, TKind::Dot2)?;
-			let range_end = cursor.expect_u32(input, lex_data, "COMPILER ERROR").ok();
-			cursor.expect(lex_data, TKind::CBracket)?;
+			let range_start = cursor.expect_u32("COMPILER ERROR").ok();
+			cursor.expect(TKind::Dot2)?;
+			let range_end = cursor.expect_u32("COMPILER ERROR").ok();
+			cursor.expect(TKind::CBracket)?;
 			match (range_start, range_end) {
 				(Some(start), Some(end)) => Some(Bounds::Full { start, end }),
 				(Some(start), None) => Some(Bounds::From { start }),
@@ -414,12 +413,12 @@ fn parse_for_statement(
 			None
 		};
 		(Some(table_id), range)
-	} else if TKind::OBracket == cursor.current(lex_data) {
+	} else if TKind::OBracket == cursor.current() {
 		cursor.advance();
-		let start = cursor.expect_u32(input, lex_data, "start (inclusive) value")?;
-		cursor.expect(lex_data, TKind::Dot2)?;
-		let end = cursor.expect_u32(input, lex_data, "end (exclusive) value")?;
-		cursor.expect(lex_data, TKind::CBracket)?;
+		let start = cursor.expect_u32("start (inclusive) value")?;
+		cursor.expect(TKind::Dot2)?;
+		let end = cursor.expect_u32("end (exclusive) value")?;
+		cursor.expect(TKind::CBracket)?;
 		(None, Some(Bounds::Full { start, end }))
 	} else {
 		return Err(cursor.expected_token("table name or bracketed range"));
@@ -439,25 +438,25 @@ fn parse_call(
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.advance();
-	cursor.expect(lex_data, TKind::OParen)?;
+	cursor.expect(TKind::OParen)?;
 	let end_tokens = &[TKind::CParen, TKind::Comma];
 
 	let mut exprs = vec![];
-	while TKind::CParen != cursor.current(lex_data) {
+	while TKind::CParen != cursor.current() {
 		let expr = parse_expression(cursor, lex_data, proc_data, end_tokens)?;
 		exprs.push(expr);
 
-		if TKind::Comma == cursor.current(lex_data) {
+		if TKind::Comma == cursor.current() {
 			cursor.advance();
-			if TKind::CParen == cursor.current(lex_data) {
+			if TKind::CParen == cursor.current() {
 				break;
 			}
-		} else if TKind::CParen != cursor.current(lex_data) {
+		} else if TKind::CParen != cursor.current() {
 			break;
 		}
 	}
 
-	cursor.expect(lex_data, TKind::CParen)?;
+	cursor.expect(TKind::CParen)?;
 	let tok_range = tok_start..cursor.index();
 	Ok(proc_data.add_ast(AKind::Call(ident_id, exprs), tok_range))
 }
@@ -489,10 +488,10 @@ fn parse_expr_sub(
 	min_binding_power: usize, tok_start: TokenId, left: AstId,
 	end_tokens: &[TKind],
 ) -> Result<AstId, Error> {
-	if end_tokens.contains(&cursor.current(lex_data)) {
+	if end_tokens.contains(&cursor.current()) {
 		return Ok(left);
 	}
-	let Ok(op) = cursor.expect_bin_op(lex_data) else {
+	let Ok(op) = cursor.expect_bin_op() else {
 		return Ok(left);
 	};
 	let op_binding_power = op.binding_power();
@@ -515,7 +514,7 @@ fn parse_primary(
 	proc_data: &mut ProcData,
 ) -> Result<AstId, Error> {
 	let tok_start_op = cursor.index();
-	let unary_op = cursor.expect_unary_op(lex_data);
+	let unary_op = cursor.expect_unary_op();
 	let tok_end_op = cursor.index();
 
 	fn primary_node(cursor: &mut Cursor, proc_data: &mut ProcData, kind: AKind) -> AstId {
@@ -525,9 +524,9 @@ fn parse_primary(
 		proc_data.add_ast(kind, tok_range)
 	}
 
-	let node = match cursor.current(lex_data) {
+	let node = match cursor.current() {
 		TKind::Identifier(ident_id) => {
-			match cursor.peek(lex_data, 1) {
+			match cursor.peek(1) {
 				TKind::OParen => parse_call(cursor, lex_data, proc_data, ident_id)?,
 				TKind::Dot | TKind::OBracket => parse_access(cursor, lex_data, proc_data, ident_id)?,
 				_ => primary_node(cursor, proc_data, AKind::Ident(ident_id)),
@@ -540,7 +539,7 @@ fn parse_primary(
 		TKind::OParen => {
 			cursor.advance();
 			let expr = parse_expression(cursor, lex_data, proc_data, &[TKind::CParen])?;
-			cursor.expect(lex_data, TKind::CParen)?;
+			cursor.expect(TKind::CParen)?;
 			expr
 		}
 		_ => return Err(cursor.expected_token("identifier or number")),
@@ -554,7 +553,7 @@ fn parse_primary(
 	}
 }
 
-#[cfg(test)]
+#[cfg(feature="procedures")]
 mod can_parse_proc {
 	use crate::{ input, lexer };
 	use crate::identifier::Identifier;
@@ -562,7 +561,7 @@ mod can_parse_proc {
 
 	use super::*;
 
-	fn setup(source: &str) -> (DscData, IdentMap<ProcData>) {
+	fn setup(source: &str) -> crate::parser::Data {
 		let input = input::eval("parser".to_string(), source.into());
 
 		let lex_data = lexer::eval(&input.source)
@@ -579,44 +578,6 @@ mod can_parse_proc {
 			AKind::Return(None),
 			AKind::Block(AstBlock(vec![0.into()])),
 		]);
-	}
-
-	#[test]
-	fn values_basic() {
-		let (dsc_data, _) = setup("value a = 2;");
-		let a_id = "a".id();
-		assert!(dsc_data.values.contains_key(&a_id));
-		assert_eq!(dsc_data.values[&a_id], Value::Integer(2));
-	}
-
-	#[test]
-	fn values_expressions() {
-		let (dsc_data, _) = setup("value a = 2 * 5;");
-		let a_id = "a".id();
-		assert!(dsc_data.values.contains_key(&a_id));
-		assert_eq!(dsc_data.values[&a_id], Value::Integer(10));
-	}
-
-	#[test]
-	fn values_compound() {
-		let (dsc_data, _) = setup("value a = 3; value b = a * 5;");
-		let a_id = "a".id();
-		let b_id = "b".id();
-		assert!(dsc_data.values.contains_key(&a_id));
-		assert!(dsc_data.values.contains_key(&b_id));
-		assert_eq!(dsc_data.values[&a_id], Value::Integer(3));
-		assert_eq!(dsc_data.values[&b_id], Value::Integer(15));
-	}
-
-	#[test]
-	fn values_compound_inverted() {
-		let (dsc_data, _) = setup("value b = a * 5; value a = 3;");
-		let a_id = "a".id();
-		let b_id = "b".id();
-		assert!(dsc_data.values.contains_key(&a_id));
-		assert!(dsc_data.values.contains_key(&b_id));
-		assert_eq!(dsc_data.values[&a_id], Value::Integer(3));
-		assert_eq!(dsc_data.values[&b_id], Value::Integer(15));
 	}
 
 	#[test]

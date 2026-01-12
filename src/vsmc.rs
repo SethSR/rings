@@ -1,8 +1,8 @@
 
 use std::collections::HashMap;
+
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
-use crate::identifier::{Id as IdentId, Identifier, Map as IdentMap};
-use crate::rings_type::Type;
+use crate::identifier::{IdentId, Identifier, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
@@ -10,7 +10,7 @@ use crate::parser::{DscData, ProcData};
 use crate::{
 	error,
 	text,
-	Bounds, Span, SrcPos, Target,
+	Bounds, Span, SrcPos, Target, Type,
 };
 
 pub type LabelId = u32;
@@ -56,7 +56,7 @@ pub fn place_records(
 	let mut out = IdentMap::with_capacity(dsc_data.records.len());
 
 	for (rec_id, rec_data) in &dsc_data.records {
-		let Some(reg_id) = rec_data.region else {
+		let Some(reg_id) = rec_data.placement else {
 			// Skip records without static locations
 			continue;
 		};
@@ -636,7 +636,7 @@ mod tests {
 		let lex_data = lexer::eval(&input.source)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let (mut dsc_data, proc_db) = parser::eval(&input, &lex_data, false)
+		let mut dsc_data = parser::eval(&input, &lex_data, false)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
 		let proc_db = type_checker::eval(&input, &lex_data, &dsc_data, proc_db)

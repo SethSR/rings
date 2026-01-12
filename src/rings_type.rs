@@ -1,5 +1,5 @@
 
-use crate::identifier::Id as IdentId;
+use crate::identifier::IdentId;
 
 pub trait Meet {
 	fn meet(&self, rhs: &Self) -> Self;

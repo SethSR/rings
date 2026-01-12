@@ -1,5 +1,5 @@
 
-use crate::identifier::Id as IdentId;
+use crate::identifier::IdentId;
 use crate::token::Id as TokenId;
 
 #[derive(Debug, Clone, PartialEq)]

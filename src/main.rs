@@ -1,11 +1,11 @@
 
 use std::{env, fmt, fs};
-use std::collections::HashMap;
-use std::fs::File;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+//use std::collections::HashMap;
+//use std::fs::File;
+//use std::path::PathBuf;
+//use std::process::{Command, Stdio};
 
-mod asm;
+//mod asm;
 mod ast;
 mod error;
 mod identifier;
@@ -16,8 +16,8 @@ mod parser;
 mod rings_type;
 mod span;
 mod token;
-mod type_checker;
-mod vsmc;
+//mod type_checker;
+//mod vsmc;
 
 use span::Span;
 
@@ -47,10 +47,12 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		.map_err(|e| e.display(&input))?;
 	lex_data.print(&input, false);
 
-	let (mut dsc_data, proc_db) = parser::eval(&input, &lex_data, true)
+	let mut dsc_data = parser::eval(&input, &lex_data, true)
 		.map_err(|e| e.display(&input))?;
+	println!("{dsc_data:?}");
 
-	let proc_db = type_checker::eval(&input, &lex_data, &dsc_data, proc_db)
+	/*
+	let proc_db = type_checker::eval(&input, &lex_data, &dsc_data)
 		.map_err(|e| e.display(&input))?;
 	//println!("{proc_db:?}");
 
@@ -63,6 +65,8 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	//println!("{asm_db:?}");
 
 	output(&input.source_file, asm_db);
+	*/
+
 	Ok(())
 }
 
@@ -82,6 +86,7 @@ pub enum Target {
 
 // TODO - srenshaw - Need to add Table location calculations.
 
+/*
 fn output(source_file: &str, asm_db: identifier::Map<asm::Data>) {
 	let mut out_path = PathBuf::from(source_file);
 	out_path.set_extension("");
@@ -172,6 +177,7 @@ fn output(source_file: &str, asm_db: identifier::Map<asm::Data>) {
 		}
 	}
 }
+*/
 
 fn fmt_size(size: usize) -> String {
 	let mut buffer = [size,0,0,0];
@@ -200,7 +206,7 @@ fn fmt_size(size: usize) -> String {
 fn text<'a>(
 	input: &'a input::Data,
 	lex_data: &lexer::Data,
-	ident_id: &identifier::Id,
+	ident_id: &identifier::IdentId,
 ) -> &'a str {
 	let Span { start, end } = lex_data.identifiers[ident_id];
 	&input.source[start..end]
@@ -214,35 +220,6 @@ fn token_source(
 	let kind = lex_data.tok_list[token_id];
 	let start = lex_data.tok_pos[token_id];
 	Span { start, end: start + kind.size(&input, &lex_data) }
-}
-
-fn type_size(
-	records: &parser::RecordMap,
-	#[cfg(feature="table")]
-	tables: &discovery::TableMap,
-	ring_type: &rings_type::Type,
-) -> u32 {
-	match ring_type {
-		#[cfg(feature="types")]
-		rings_type::Type::Bool => 1,
-		#[cfg(feature="types")]
-		rings_type::Type::U8 => 1,
-		rings_type::Type::S8(_) => 1,
-		#[cfg(feature="types")]
-		rings_type::Type::U16 => 2,
-		rings_type::Type::S16(_) => 2,
-		#[cfg(feature="types")]
-		rings_type::Type::U32 => 4,
-		rings_type::Type::S32(_) => 4,
-		rings_type::Type::Record(ident_id) => records[ident_id].size(),
-		#[cfg(feature="table")]
-		rings_type::Type::Table(ident_id) => {
-			tables[&ident_id].size(self)
-		}
-		rings_type::Type::Unit => 0,
-		rings_type::Type::Top | rings_type::Type::Bot => 0,
-		rings_type::Type::Int => 0,
-	}
 }
 
 fn type_text(

@@ -3,12 +3,12 @@ use std::collections::hash_map::Entry;
 
 use crate::ast::{Block as AstBlock, Id as AstId, Kind};
 use crate::error;
-use crate::identifier::{Id as IdentId, Identifier, Map as IdentMap};
+use crate::identifier::{IdentId, Identifier, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::parser::{DscData, ProcData};
-use crate::rings_type::{Meet, Type};
+use crate::parser::{DscData, ProcData, Type};
+use crate::rings_type::Meet;
 use crate::token::Id as TokenId;
 use crate::{text, token_source};
 
@@ -36,13 +36,13 @@ impl Error {
 				format!("'{}' already defined", text(input, lex_data, ident_id))
 			}
 			Self::MismatchedTypes(expected, found) => {
-				format!("Variable has type {expected}, but expression has type {found}")
+				format!("Variable has type {expected:?}, but expression has type {found:?}")
 			}
 			Self::InvalidBinOp(op, lhs, rhs) => {
-				format!("Unable to apply '{op}' to '{lhs}' and '{rhs}'")
+				format!("Unable to apply '{op}' to '{lhs:?}' and '{rhs:?}'")
 			}
 			Self::InvalidUnOp(op, rhs) => {
-				format!("Unable to apply '{op}' to '{rhs}'")
+				format!("Unable to apply '{op}' to '{rhs:?}'")
 			}
 			Self::TooManyLoopVariables => {
 				"simple for-loops require a single loop variable".to_string()
@@ -394,7 +394,7 @@ fn check_unop(proc_data: &mut ProcData,
 	op: UnaryOp, right: &AstId,
 ) -> Result<(), Error> {
 	let right_type = proc_data.ast_to_type[right];
-	if !matches!(right_type, Type::S8(_)) {
+	if !matches!(right_type, Type::S8) {
 		return Err(Error::InvalidUnOp(op, right_type));
 	};
 
@@ -417,7 +417,7 @@ fn check_return(proc_data: &mut ProcData,
 				None => return Err(Error::NoType { msg: "return expression", ast_id }),
 			}
 		}
-		None => Type::Unit,
+		None => Type::Void,
 	};
 
 	let meet_type = ret_type.meet(&proc_type);
@@ -441,7 +441,7 @@ fn check_condition(proc_data: &mut ProcData,
 ) -> Result<(), Error> {
 	check_stmt(proc_data, proc_id, cond_id, proc_type)?;
 	let cond_type = proc_data.ast_to_type[&cond_id];
-	if cond_type.meet(&Type::s8_top()) == Type::Bot
+	if cond_type.meet(&Type::S8) == Type::Bot
 	//&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
 	{
 		return Err(Error::MismatchedTypes(Type::Int, cond_type));

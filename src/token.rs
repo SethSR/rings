@@ -2,7 +2,7 @@
 use index_vec::IndexVec;
 use index_vec::define_index_type;
 
-use crate::identifier;
+use crate::identifier::IdentId;
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::text;
@@ -21,7 +21,7 @@ define_index_type! {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Kind {
 	// Basic Tokens
-	Identifier(identifier::Id),
+	Identifier(IdentId),
 	Integer(i64),
 	Decimal(f64),
 
