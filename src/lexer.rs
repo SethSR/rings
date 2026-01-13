@@ -139,82 +139,19 @@ impl Lexer {
 			}
 
 			Some(c) if c.is_numeric() => {
-				let mut inner_start = start;
-				self.advance(source);
-
-				#[derive(PartialEq)]
-				enum NumType { Bin, Hex, Dec }
-
-				let num_type = if c == '0' {
-					match self.peek(source, 0) {
-						Some('b') => NumType::Bin,
-						Some('x') => NumType::Hex,
-						_ => NumType::Dec,
-					}
-				} else {
-					NumType::Dec
-				};
-
-				if num_type != NumType::Dec {
-					self.advance(source);
-					inner_start = self.pos;
-				}
-
-				while let Some(c) = self.peek(source, 0) {
-					let valid = match num_type {
-						NumType::Bin => ['0', '1', '_'].contains(&c),
-						NumType::Hex => c.is_ascii_hexdigit() || c == '_',
-						NumType::Dec => c.is_ascii_digit() || c == '_',
-					};
-					if !valid { break; }
-					self.advance(source);
-				}
-				let mut is_fractional = false;
-				if self.peek(source, 0) == Some('.') && self.peek(source, 1) != Some('.') {
-
-					is_fractional = true;
-					self.advance(source);
-					while let Some(c) = self.peek(source, 0) {
-						if !c.is_numeric() && c != '_' {
-							break;
-						}
-						self.advance(source);
-					}
-				}
-
-				let text = &source[inner_start..self.pos];
-				let tok_src = (inner_start..self.pos).into();
-				if is_fractional {
-					match num_type {
-						NumType::Bin => return Err(Error::new(tok_src,
-							"parsing binary fixed-point numbers not implemented yet")),
-						NumType::Hex => return Err(Error::new(tok_src,
-							"parsing hexadecimal fixed-point numbers not implemented yet")),
-						NumType::Dec => text.replace('_', "").parse::<f64>()
-							.map_err(|_| Error::new(tok_src,
-								"unable to parse decimal fixed-point number"))
-							.map(Kind::Decimal)?,
-					}
-				} else {
-					let text = text.replace('_', "");
-					let num = match num_type {
-						NumType::Bin => i64::from_str_radix(&text, 2).map_err(|_| Error::new(tok_src,
-							"unable to parse binary integer"))?,
-						NumType::Hex => i64::from_str_radix(&text, 16).map_err(|_| Error::new(tok_src,
-							"unable to parse hexadecimal integer"))?,
-						NumType::Dec => text.parse::<i64>().map_err(|_| Error::new(tok_src,
-							"unable to parse decimal integer"))?,
-					};
-					Kind::Integer(num)
-				}
+				self.lex_number(source, start, c, false)?
 			}
 
 			Some('-') => {
 				self.advance(source);
-				self.item(source, &[
-					('=', Kind::DashEq),
-					('>', Kind::Arrow),
-				], Kind::Dash)
+				if let Some(c) = self.peek(source, 0).filter(|c| c.is_numeric()) {
+					self.lex_number(source, self.pos, c, true)?
+				} else {
+					self.item(source, &[
+						('=', Kind::DashEq),
+						('>', Kind::Arrow),
+					], Kind::Dash)
+				}
 			}
 
 			Some(':') => {
@@ -312,12 +249,88 @@ impl Lexer {
 
 			Some(',') => { self.advance(source); Kind::Comma }
 
-			Some(_) => { self.advance(source); Kind::Eof }
+			Some(ch) =>  return Err(Error::new((start..self.pos).into(),
+				format!("unknown character '{ch}'"))),
 		};
 
 		self.out.tok_list.push(kind);
 		self.out.tok_pos.push(start);
 		Ok(true)
+	}
+
+	fn lex_number(&mut self,
+		source: &str,
+		mut start: usize,
+		c: char,
+		is_negative: bool,
+	) -> Result<Kind, Error> {
+		self.advance(source);
+
+		#[derive(PartialEq)]
+		enum NumType { Bin, Hex, Dec }
+
+		let num_type = if c == '0' {
+			match self.peek(source, 0) {
+				Some('b') => NumType::Bin,
+				Some('x') => NumType::Hex,
+				_ => NumType::Dec,
+			}
+		} else {
+			NumType::Dec
+		};
+
+		if num_type != NumType::Dec {
+			self.advance(source);
+			start = self.pos;
+		}
+
+		while let Some(c) = self.peek(source, 0) {
+			let valid = match num_type {
+				NumType::Bin => ['0', '1', '_'].contains(&c),
+				NumType::Hex => c.is_ascii_hexdigit() || c == '_',
+				NumType::Dec => c.is_ascii_digit() || c == '_',
+			};
+			if !valid { break; }
+			self.advance(source);
+		}
+		let mut is_fractional = false;
+		if self.peek(source, 0) == Some('.') && self.peek(source, 1) != Some('.') {
+
+			is_fractional = true;
+			self.advance(source);
+			while let Some(c) = self.peek(source, 0) {
+				if !c.is_numeric() && c != '_' {
+					break;
+				}
+				self.advance(source);
+			}
+		}
+
+		let text = &source[start..self.pos];
+		let tok_src = (start..self.pos).into();
+		if is_fractional {
+			match num_type {
+				NumType::Bin => Err(Error::new(tok_src,
+					"parsing binary fixed-point numbers not implemented yet")),
+				NumType::Hex => Err(Error::new(tok_src,
+					"parsing hexadecimal fixed-point numbers not implemented yet")),
+				NumType::Dec => text.replace('_', "").parse::<f64>()
+						.map_err(|_| Error::new(tok_src,
+							"unable to parse decimal fixed-point number"))
+						.map(|n| Kind::Decimal(if is_negative { -n } else { n })),
+			}
+		} else {
+			let text = text.replace('_', "");
+			let num = match num_type {
+				NumType::Bin => i64::from_str_radix(&text, 2).map_err(|_| Error::new(tok_src,
+					"unable to parse binary integer"))?,
+				NumType::Hex => i64::from_str_radix(&text, 16).map_err(|_| Error::new(tok_src,
+					"unable to parse hexadecimal integer"))?,
+				NumType::Dec => text.parse::<i64>().map_err(|_| Error::new(tok_src,
+					"unable to parse decimal integer"))?,
+			};
+			Ok(Kind::Integer(if is_negative { -num } else { num }))
+		}
 	}
 
 	fn skip_whitespace_and_comments(&mut self, source: &str) {
@@ -425,6 +438,28 @@ mod can_lex {
 	}
 
 	#[test]
+	fn integer_numbers() {
+		let data = setup("4 0b110 0x45");
+		assert_eq!(data.tok_list, [
+			Kind::Integer(4),
+			Kind::Integer(0b110),
+			Kind::Integer(0x45),
+			Kind::Eof,
+		]);
+	}
+
+	#[test]
+	fn negative_integer_numbers() {
+		let data = setup("-4 -0b110 -0x45");
+		assert_eq!(data.tok_list, [
+			Kind::Integer(-4),
+			Kind::Integer(-0b110),
+			Kind::Integer(-0x45),
+			Kind::Eof,
+		]);
+	}
+
+	#[test]
 	fn decimal_numbers() {
 		let data = setup("5.6 4. 2_3.4_5");
 		assert_eq!(data.tok_list, [
@@ -433,6 +468,13 @@ mod can_lex {
 			Kind::Decimal(23.45),
 			Kind::Eof,
 		]);
+	}
+
+	#[test]
+	#[should_panic="unknown character"]
+	fn invalid_characters() {
+		let data = setup("table#users");
+		assert_eq!(data.tok_list, []);
 	}
 }
 
