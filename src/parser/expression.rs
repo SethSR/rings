@@ -3,11 +3,10 @@ use crate::token::Kind as TokenKind;
 
 use super::cursor::Cursor;
 use super::error::Error;
-use super::region::RegionMap;
-use super::value::{Value, ValueMap};
+use super::data::{RegionMap, Value, ValueMap};
 use super::MemoryPlacement;
 
-pub(super) fn evaluate_address(cursor: &mut Cursor,
+pub(super) fn evaluate_placement(cursor: &mut Cursor,
 	values: &ValueMap,
 	regions: &RegionMap,
 	end_token: TokenKind,
@@ -18,7 +17,7 @@ pub(super) fn evaluate_address(cursor: &mut Cursor,
 				Ok(MemoryPlacement::Region(id))
 			} else {
 				cursor.advance();
-				Err(cursor.expected_token("';' after region name"))
+				Err(cursor.expected_token(format!("'{end_token:?}' after region name")))
 			}
 		}
 		_ => {
@@ -35,7 +34,7 @@ pub(super) fn evaluate_address(cursor: &mut Cursor,
 						panic!("decimal values cannot be used in address specifiers")
 					}
 				}
-			})
+			}).map_err(|_| cursor.expected_token("placement specifier"))
 		}
 	}
 }

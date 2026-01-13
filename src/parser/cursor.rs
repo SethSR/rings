@@ -6,8 +6,8 @@ use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::token::{Id as TokenId, Kind as TokenKind};
 
+use super::data::RecordMap;
 use super::error::Error;
-use super::record::RecordMap;
 use super::types::Type;
 
 pub struct Cursor<'a> {

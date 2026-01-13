@@ -6,8 +6,8 @@ use crate::Bounds;
 
 use super::ast::{AstId, AstKind, KindList, PathSegment};
 use super::cursor::Cursor;
+use super::data::RecordMap;
 use super::error::Error;
-use super::record::RecordMap;
 
 pub fn parse_block(
 	cursor: &mut Cursor,

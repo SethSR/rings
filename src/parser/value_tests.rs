@@ -1,7 +1,7 @@
 
 use crate::identifier::Identifier;
 
-use super::value::{Value, ValueMap};
+use super::data::{Value, ValueMap};
 
 fn setup(source: &str) -> Result<ValueMap, String> {
 	let input = crate::input::eval(file!().into(), source.into());

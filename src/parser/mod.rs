@@ -9,14 +9,11 @@ use crate::Target;
 
 mod ast;
 mod cursor;
+mod data;
 mod error;
 mod expression;
 mod parse_procedures;
-mod procedure;
-mod record;
-mod region;
 mod types;
-mod value;
 
 #[cfg(test)]
 mod value_tests;
@@ -26,20 +23,16 @@ mod region_tests;
 mod record_tests;
 #[cfg(test)]
 mod proc_tests;
+#[cfg(test)]
+mod table_tests;
 
-use expression::{evaluate_address, evaluate_expr};
+use expression::{evaluate_placement, evaluate_expr};
 use ast::KindList;
-use procedure::Procedure;
-use record::Record;
-use region::Region;
-use value::Value;
+use data::{Procedure, Record, Region, Table, Value};
 
 pub use ast::{AstId, AstKind};
-pub use procedure::ProcMap;
-pub use record::RecordMap;
-pub use region::RegionMap;
+pub use data::{ProcMap, RecordMap, RegionMap, TableMap, ValueMap};
 pub use types::Type;
-pub use value::ValueMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryPlacement {
@@ -52,7 +45,8 @@ pub struct Data {
 	pub values: ValueMap,
 	pub regions: RegionMap,
 	pub records: RecordMap,
-	procedures: ProcMap,
+	pub tables: TableMap,
+	pub procedures: ProcMap,
 }
 
 pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
@@ -86,14 +80,20 @@ enum Task {
 	Record {
 		ident: IdentId,
 		location: TokenId,
-		start_address: Option<TokenId>,
+		start_placement: Option<TokenId>,
 		start_fields: TokenId,
+	},
+	Table {
+		ident: IdentId,
+		start_rows: TokenId,
+		start_fields: TokenId,
+		start_placement: Option<TokenId>,
 	},
 	Proc {
 		ident: IdentId,
 		target: Option<Target>,
 		start: TokenId,
-	}
+	},
 }
 
 fn scan_tasks(lex_data: &LexData,
@@ -108,12 +108,19 @@ fn scan_tasks(lex_data: &LexData,
 			TokenKind::Value => {
 				tasks.push(scan_value_task(&mut cursor)?);
 			}
+
 			TokenKind::Region => {
 				tasks.push(scan_region_task(&mut cursor)?);
 			}
+
 			TokenKind::Record => {
 				tasks.push(scan_record_task(&mut cursor)?);
 			}
+
+			TokenKind::Table => {
+				tasks.push(scan_table_task(&mut cursor)?);
+			}
+
 			TokenKind::Main => {
 				tasks.push(scan_proc(&mut cursor, "main".id(), None)?);
 			}
@@ -171,19 +178,49 @@ fn scan_region_task(cursor: &mut cursor::Cursor,
 	Ok(Task::Region { ident, start_size, start_address })
 }
 
+/// Matches record syntax:
+/// - `record <ident> @ <placement> {...}`
+/// - `record <ident> {...}`
 fn scan_record_task(cursor: &mut cursor::Cursor,
 ) -> Result<Task, error::Error> {
 	let location = cursor.index();
 	let ident = cursor.expect_identifier("record name")?;
-	let start_address = if cursor.expect(TokenKind::At).is_ok() {
+
+	let start_placement = if cursor.expect(TokenKind::At).is_ok() {
 		Some(skip_until(cursor, TokenKind::OBrace)?)
 	} else {
 		None
 	};
+
 	cursor.expect(TokenKind::OBrace)?;
 	let start_fields = skip_until(cursor, TokenKind::CBrace)?;
 	cursor.expect(TokenKind::CBrace)?;
-	Ok(Task::Record { ident, location, start_address, start_fields })
+
+	Ok(Task::Record { ident, location, start_placement, start_fields })
+}
+
+/// Matches Table syntax
+/// - `table <ident>[<rows>] @ <placement> {...}`
+/// - `table <ident>[<rows>] {...}`
+fn scan_table_task(cursor: &mut cursor::Cursor,
+) -> Result<Task, error::Error> {
+	let ident = cursor.expect_identifier("table name")?;
+
+	cursor.expect(TokenKind::OBracket)?;
+	let start_rows = skip_until(cursor, TokenKind::CBracket)?;
+	cursor.expect(TokenKind::CBracket)?;
+
+	let start_placement = if cursor.expect(TokenKind::At).is_ok() {
+		Some(skip_until(cursor, TokenKind::OBrace)?)
+	} else {
+		None
+	};
+
+	cursor.expect(TokenKind::OBrace)?;
+	let start_fields = skip_until(cursor, TokenKind::CBrace)?;
+	cursor.expect(TokenKind::CBrace)?;
+
+	Ok(Task::Table { ident, start_rows, start_placement, start_fields })
 }
 
 fn check_braces(cursor: &mut cursor::Cursor) -> Result<(), error::Error> {
@@ -205,7 +242,9 @@ fn check_braces(cursor: &mut cursor::Cursor) -> Result<(), error::Error> {
 	Ok(())
 }
 
-/// Matches `main {...}` and `sub {...}`
+/// Matches initial procedures:
+/// - `main {...}`
+/// - `sub {...}`
 fn scan_proc(cursor: &mut cursor::Cursor,
 	ident: IdentId,
 	target: Option<Target>,
@@ -215,7 +254,8 @@ fn scan_proc(cursor: &mut cursor::Cursor,
 	Ok(Task::Proc { ident, target, start })
 }
 
-/// Matches `proc <ident>(...) <return> {...}`
+/// Matches named procedures:
+/// - `proc <ident>(...) <return> {...}`
 fn scan_named_proc(cursor: &mut cursor::Cursor,
 	target: Option<Target>,
 ) -> Result<Task, error::Error> {
@@ -223,7 +263,10 @@ fn scan_named_proc(cursor: &mut cursor::Cursor,
 	scan_proc(cursor, name_id, target)
 }
 
-/// Matches `<target> proc <ident>(...) <return> {...}`, `<target> main {...}`, and `<target> sub {...}`
+/// Matches target specific procedures:
+/// - `<target> proc <ident>(...) <return> {...}`
+/// - `<target> main {...}`
+/// - `<target> sub {...}`
 fn scan_target_proc(cursor: &mut cursor::Cursor,
 	target: Option<Target>,
 ) -> Result<Task, error::Error> {
@@ -304,12 +347,30 @@ fn process_tasks(lex_data: &LexData,
 				}
 			}
 
-			Task::Record { ident, location, start_address, start_fields } => {
+			Task::Record { ident, location, start_placement, start_fields } => {
 				locations.insert(ident, location);
 
-				match process_record(lex_data, &data, start_address, start_fields) {
+				match process_record(lex_data, &data, start_placement, start_fields) {
 					Ok((placement, fields)) => {
 						data.records.insert(ident, Record { placement, fields });
+						failed_tasks.remove(&ident);
+						consecutive_failures = 0;
+					}
+					Err(error::Error::UndefinedType { location, ident_id }) => {
+						consecutive_failures = check_task_failure(
+							&queue, &mut failed_tasks, consecutive_failures,
+							location, ident, ident_id,
+						)?;
+						queue.push_back(task);
+					}
+					Err(e) => return Err(e),
+				}
+			}
+
+			Task::Table { ident, start_rows, start_placement, start_fields } => {
+				match process_table(lex_data, &data, start_placement, start_rows, start_fields) {
+					Ok((placement, row_count, fields)) => {
+						data.tables.insert(ident, Table { placement, row_count, fields});
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
@@ -450,20 +511,52 @@ fn process_region (
 fn process_record(
 	lex_data: &LexData,
 	data: &Data,
-	start_address: Option<TokenId>,
+	start_placement: Option<TokenId>,
 	start_fields: TokenId,
 ) -> Result<(Option<MemoryPlacement>, Vec<(IdentId, Type)>), error::Error> {
-	let placement = if let Some(start_address) = start_address {
-		let mut cursor = cursor::Cursor::from_start(lex_data, start_address);
-		let placement = evaluate_address(&mut cursor, &data.values, &data.regions, TokenKind::OBrace)?;
-		Some(placement)
-	} else {
-		None
-	};
+	let placement = process_placement(lex_data, data, start_placement, TokenKind::OBrace)?;
 
 	let mut cursor_fields = cursor::Cursor::from_start(lex_data, start_fields);
 	process_fields(&mut cursor_fields, &data.records, TokenKind::CBrace)
 		.map(|fields| (placement, fields))
+}
+
+fn process_table(
+	lex_data: &LexData,
+	data: &Data,
+	start_placement: Option<TokenId>,
+	start_rows: TokenId,
+	start_fields: TokenId,
+) -> Result<(Option<MemoryPlacement>, u16, Vec<(IdentId, Type)>), error::Error> {
+	let mut cursor_rows = cursor::Cursor::from_start(lex_data, start_rows);
+	let row_count = evaluate_expr(&mut cursor_rows, &data.values, TokenKind::CBracket)
+			.map_err(|_| cursor_rows.expected_token("capacity expression"))?;
+	let Value::Integer(row_count) = row_count else {
+		panic!("decimal values not allowed in table row count declarations")
+	};
+	if !(0..u16::MAX as i64).contains(&row_count) {
+		panic!("table row count ({row_count}) out of range")
+	}
+
+	let placement = process_placement(lex_data, data, start_placement, TokenKind::OBrace)?;
+
+	let mut cursor_fields = cursor::Cursor::from_start(lex_data, start_fields);
+	process_fields(&mut cursor_fields, &data.records, TokenKind::CBrace)
+			.map(|fields| (placement, row_count as u16, fields))
+}
+
+fn process_placement(
+	lex_data: &LexData,
+	data: &Data,
+	start_placement: Option<TokenId>,
+	end_token: TokenKind,
+) -> Result<Option<MemoryPlacement>, error::Error> {
+	if let Some(start_placement) = start_placement {
+		let mut cursor = cursor::Cursor::from_start(lex_data, start_placement);
+		Ok(Some(evaluate_placement(&mut cursor, &data.values, &data.regions, end_token)?))
+	} else {
+		Ok(None)
+	}
 }
 
 fn process_fields(cursor: &mut cursor::Cursor,
@@ -531,9 +624,6 @@ fn process_proc(
 
 	Ok(proc)
 }
-
-#[cfg(feature="table")]
-pub type TableMap = identifier::Map<Table>;
 
 #[cfg(feature="table")]
 fn discover_table(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Table> {
