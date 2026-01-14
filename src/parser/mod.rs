@@ -518,7 +518,7 @@ fn process_record(
 	let placement = process_placement(lex_data, data, start_placement, TokenKind::OBrace)?;
 
 	let mut cursor_fields = cursor::Cursor::from_start(lex_data, start_fields);
-	process_fields(&mut cursor_fields, &data.records, TokenKind::CBrace)
+	process_fields(&mut cursor_fields, data, TokenKind::CBrace)
 		.map(|fields| (placement, fields))
 }
 
@@ -542,7 +542,7 @@ fn process_table(
 	let placement = process_placement(lex_data, data, start_placement, TokenKind::OBrace)?;
 
 	let mut cursor_fields = cursor::Cursor::from_start(lex_data, start_fields);
-	process_fields(&mut cursor_fields, &data.records, TokenKind::CBrace)
+	process_fields(&mut cursor_fields, data, TokenKind::CBrace)
 			.map(|fields| (placement, row_count as u16, fields))
 }
 
@@ -561,7 +561,7 @@ fn process_placement(
 }
 
 fn process_fields(cursor: &mut cursor::Cursor,
-	records: &RecordMap,
+	data: &Data,
 	end_token: TokenKind,
 ) -> Result<Vec<(IdentId, Type)>, error::Error> {
 	let mut fields = vec![];
@@ -569,7 +569,7 @@ fn process_fields(cursor: &mut cursor::Cursor,
 	while cursor.current() != end_token {
 		let ident = cursor.expect_identifier("field name")?;
 		cursor.expect(TokenKind::Colon)?;
-		let typ = cursor.expect_type(records)?;
+		let typ = cursor.expect_type(data)?;
 		fields.push((ident, typ));
 		if cursor.expect(TokenKind::Comma).is_err() {
 			break;
@@ -593,10 +593,10 @@ fn process_proc(
 		ret_type: Type::Void,
 	};
 
-	let mut cursor = cursor::Cursor::from_start(lex_data, start);
+	let cursor = &mut cursor::Cursor::from_start(lex_data, start);
 
 	proc.params = if cursor.expect(TokenKind::OParen).is_ok() {
-		let params = process_fields(&mut cursor, &data.records, TokenKind::CParen)?;
+		let params = process_fields(cursor, data, TokenKind::CParen)?;
 		cursor.expect(TokenKind::CParen)?;
 		for (param_id, param_type) in &params {
 			data.types.insert((proc_id, 0, *param_id), *param_type);
@@ -607,15 +607,14 @@ fn process_proc(
 	};
 
 	proc.ret_type = if cursor.expect(TokenKind::Arrow).is_ok() {
-		cursor.expect_type(&data.records)?
+		cursor.expect_type(data)?
 	} else {
 		Type::Void
 	};
 
 	let start = AstId::new(proc.body.len());
 	let mut block = parse_procedures::parse_block(
-		&mut cursor, &mut proc.body, &mut data.types,
-		proc_id, 0, &data.records,
+		cursor, &mut proc.body, data, proc_id, 0,
 	)?;
 	let end = AstId::new(proc.body.len());
 

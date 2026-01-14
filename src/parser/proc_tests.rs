@@ -363,73 +363,92 @@ fn with_internal_field_assign() {
 	]);
 }
 
-#[cfg(feature="table")]
 #[test]
 fn empty_table() {
 	let data = setup("table a[10] {}")
-		.unwrap_or_else(|e| panic!("{e}"));
+			.unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(data.tables.len(), 1);
-	let table = &data.tables[&"a".id()];
+	let table = data.tables.get(&"a".id())
+			.expect("missing table 'a'");
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.column_spec, []);
-	assert_eq!(table.size(&data), 0);
-	assert_eq!(table.address, None);
+	assert_eq!(table.placement, None);
+	assert_eq!(table.fields, []);
 }
 
-#[cfg(feature="table")]
 #[test]
 fn table_with_one_field() {
 	let data = setup("table a[10] { b: u32 }")
-		.unwrap_or_else(|e| panic!("{e}"));
+			.unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(data.tables.len(), 1);
 	let table = &data.tables[&"a".id()];
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.column_spec, [("b".id(), Type::U32)]);
-	assert_eq!(table.size(&data), 40);
-	assert_eq!(table.address, None);
+	assert_eq!(table.placement, None);
+	assert_eq!(table.fields, [
+		("b".id(), Type::U32),
+	]);
 }
 
-#[cfg(feature="table")]
 #[test]
 fn table_with_multiple_field() {
 	let data = setup("table a[10] { b: u32, c: s16 }")
-		.unwrap_or_else(|e| panic!("{e}"));
+			.unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(data.tables.len(), 1);
 	let table = &data.tables[&"a".id()];
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.column_spec, [
+	assert_eq!(table.placement, None);
+	assert_eq!(table.fields, [
 		("b".id(), Type::U32),
 		("c".id(), Type::S16),
 	]);
-	assert_eq!(table.size(&data), 60);
-	assert_eq!(table.address, None);
 }
 
-#[cfg(feature="table")]
 #[test]
 fn table_with_user_defined_field() {
-	let data = setup("record a { a1: s16 } table b[10] { b1: a }")
-		.unwrap_or_else(|e| panic!("{e}"));
+	let data = setup("
+		record a { a1: s16 }
+		table b[10] { b1: a }
+	").unwrap_or_else(|e| panic!("{e}"));
+	assert!(data.records.contains_key(&"a".id()));
 	assert_eq!(data.tables.len(), 1);
 	let table = &data.tables[&"b".id()];
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.column_spec, [
+	assert_eq!(table.placement, None);
+	assert_eq!(table.fields, [
 		("b1".id(), Type::Record("a".id())),
 	]);
-	assert_eq!(table.size(&data), 20);
-	assert_eq!(table.address, None);
 }
 
-#[cfg(feature="table")]
 #[test]
 fn with_table_param() {
-	let data = setup("main{} table a[0] {} proc b(c:a) {}")
-		.unwrap_or_else(|e| panic!("{e}"));
+	let data = setup("
+		main{}
+		table a[0] {}
+		proc b(c:a) {}
+	").unwrap_or_else(|e| panic!("{e}"));
+	assert!(data.procedures.contains_key(&"main".id()));
+	assert!(data.procedures.contains_key(&"b".id()));
+	assert!(data.tables.contains_key(&"a".id()));
 	let proc = &data.procedures[&"b".id()];
-	assert_eq!(proc.target, None);
-	assert!(proc.params.is_empty());
-	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body, []);
+	assert_eq!(proc.params, [
+		("c".id(), Type::Table("a".id())),
+	]);
+}
+
+#[test]
+fn with_internal_table_assign() {
+	let data = setup("main { a[3].b = 2; }")
+			.unwrap_or_else(|e| panic!("{e}"));
+	let proc = &data.procedures[&"main".id()];
+	assert_eq!(proc.body, [
+		AstKind::Int(3),
+		AstKind::Access("a".id(), vec![
+			PathSegment::Index(0.into(), "b".id()),
+		]),
+		AstKind::Int(2),
+		AstKind::Assign(1.into(), 2.into()),
+		AstKind::Return(None),
+		AstKind::Block(vec![3.into(), 4.into()]),
+	]);
 }
 
 #[cfg(feature="forloop")]
@@ -553,18 +572,6 @@ fn with_internal_proc_call_with_expression_argument() {
 #[test]
 fn with_internal_proc_call_with_multiple_arguments() {
 	let data = setup("main { return a(2, 4 / b, b + 4); }")
-		.unwrap_or_else(|e| panic!("{e}"));
-	let proc = &data.procedures[&"main".id()];
-	assert_eq!(proc.target, None);
-	assert!(proc.params.is_empty());
-	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body, []);
-}
-
-#[cfg(feature="table")]
-#[test]
-fn with_internal_table_assign() {
-	let data = setup("main { a[3].b = 2; }")
 		.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.target, None);

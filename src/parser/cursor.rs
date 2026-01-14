@@ -6,9 +6,9 @@ use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::token::{Id as TokenId, Kind as TokenKind};
 
-use super::data::RecordMap;
 use super::error::Error;
 use super::types::Type;
+use super::Data;
 
 pub struct Cursor<'a> {
 	tokens: &'a [TokenKind],
@@ -89,14 +89,13 @@ impl<'a> Cursor<'a> {
 	}
 
 	pub fn expect_type(&mut self,
-		records: &RecordMap,
+		data: &Data,
 	) -> Result<Type, Error> {
 		let result = match self.current() {
-			TokenKind::Identifier(ident_id) if records.contains_key(&ident_id) => {
+			TokenKind::Identifier(ident_id) if data.records.contains_key(&ident_id) => {
 				Ok(Type::Record(ident_id))
 			}
-			#[cfg(feature="table")]
-			TokenKind::Identifier(ident_id) if tables.contains_key(ident_id) => {
+			TokenKind::Identifier(ident_id) if data.tables.contains_key(&ident_id) => {
 				Ok(Type::Table(ident_id))
 			}
 			TokenKind::Identifier(ident_id) => {
