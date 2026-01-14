@@ -34,6 +34,23 @@ pub enum AstKind {
 	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Vec<AstId>),
 	Call(IdentId, Vec<AstId>),
 	Access(IdentId, Vec<PathSegment>),
+	Mark { region_id: IdentId, mark_id: IdentId },
+	Free { region_id: IdentId, mark_id: Option<IdentId> },
+	Use { region_id: IdentId, ident: IdentId },
+}
+
+impl AstKind {
+	pub fn new_mark(region_id: IdentId, mark_id: IdentId) -> Self {
+		Self::Mark { region_id, mark_id }
+	}
+
+	pub fn new_free(region_id: IdentId, mark_id: Option<IdentId>) -> Self {
+		Self::Free { region_id, mark_id }
+	}
+
+	pub fn new_use(region_id: IdentId, ident: IdentId) -> Self {
+		Self::Use { region_id, ident }
+	}
 }
 
 pub type KindList = IndexVec<AstId, AstKind>;

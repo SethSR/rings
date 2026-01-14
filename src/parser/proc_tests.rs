@@ -451,6 +451,54 @@ fn with_internal_table_assign() {
 	]);
 }
 
+#[test]
+fn with_mark() {
+	let data = setup("main { mark start in base; }")
+			.unwrap_or_else(|e| panic!("{e}"));
+	let proc = &data.procedures[&"main".id()];
+	assert_eq!(proc.body, [
+		AstKind::new_mark("base".id(), "start".id()),
+		AstKind::Return(None),
+		AstKind::Block(vec![0.into(), 1.into()]),
+	]);
+}
+
+#[test]
+fn with_free_mark() {
+	let data = setup("main { free start in base; }")
+			.unwrap_or_else(|e| panic!("{e}"));
+	let proc = &data.procedures[&"main".id()];
+	assert_eq!(proc.body, [
+		AstKind::new_free("base".id(), Some("start".id())),
+		AstKind::Return(None),
+		AstKind::Block(vec![0.into(), 1.into()]),
+	]);
+}
+
+#[test]
+fn with_free_region() {
+	let data = setup("main { free base; }")
+			.unwrap_or_else(|e| panic!("{e}"));
+	let proc = &data.procedures[&"main".id()];
+	assert_eq!(proc.body, [
+		AstKind::new_free("base".id(), None),
+		AstKind::Return(None),
+		AstKind::Block(vec![0.into(), 1.into()]),
+	]);
+}
+
+#[test]
+fn with_use() {
+	let data = setup("main { use start in base; }")
+			.unwrap_or_else(|e| panic!("{e}"));
+	let proc = &data.procedures[&"main".id()];
+	assert_eq!(proc.body, [
+		AstKind::new_use("base".id(), "start".id()),
+		AstKind::Return(None),
+		AstKind::Block(vec![0.into(), 1.into()]),
+	]);
+}
+
 #[cfg(feature="forloop")]
 #[test]
 fn with_table_for_loop() {

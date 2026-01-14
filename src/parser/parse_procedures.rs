@@ -31,6 +31,9 @@ pub fn parse_block(
 			TKind::If => parse_if_statement(cursor, nodes, data, proc_id, depth)?,
 			TKind::For => parse_for_statement(cursor, nodes, data, proc_id, depth)?,
 			TKind::While => parse_while_statement(cursor, nodes, data, proc_id, depth)?,
+			TKind::Mark => parse_mark_statement(cursor, nodes)?,
+			TKind::Free => parse_free_statement(cursor, nodes)?,
+			TKind::Use => parse_use_statement(cursor, nodes)?,
 			_ => return Err(cursor.expected_token("definition, assignment, return, if, or for statement")),
 		});
 	}
@@ -57,6 +60,8 @@ fn parse_ident_statement(
 	}
 }
 
+// TODO - srenshaw - Add local record definitions
+
 fn parse_let_statement(
 	cursor: &mut Cursor,
 	nodes: &mut KindList,
@@ -72,7 +77,6 @@ fn parse_let_statement(
 	let ast_id = parse_expression(cursor, nodes, &[TKind::Semicolon])?;
 	cursor.expect(TKind::Semicolon)?;
 	let ident = nodes.push(AstKind::Ident(ident_id));
-	//let define = nodes.push(AstKind::Define(ident, var_type));
 	data.types.insert((proc_id, depth, ident_id), var_type);
 	Ok(nodes.push(AstKind::Assign(ident, ast_id)))
 }
@@ -248,6 +252,53 @@ fn parse_for_statement(
 	let block = parse_block(cursor, nodes, data, proc_id, depth + 1)?;
 
 	Ok(nodes.push(AstKind::For(vars, table_id, range, block)))
+}
+
+/// Matches Mark construct:
+/// - `mark <ident> in <region>;`
+fn parse_mark_statement(
+	cursor: &mut Cursor,
+	nodes: &mut KindList,
+) -> Result<AstId, Error> {
+	cursor.expect(TKind::Mark)?;
+	let mark_id = cursor.expect_identifier("mark name")?;
+	cursor.expect(TKind::In)?;
+	let region_id = cursor.expect_identifier("region name")?;
+	cursor.expect(TKind::Semicolon)?;
+	Ok(nodes.push(AstKind::new_mark(region_id, mark_id)))
+}
+
+/// Matches Free construct:
+/// - `free <ident>;`
+/// - `free <ident> in <region>;`
+fn parse_free_statement(
+	cursor: &mut Cursor,
+	nodes: &mut KindList,
+) -> Result<AstId, Error> {
+	cursor.expect(TKind::Free)?;
+	let ident = cursor.expect_identifier("mark or region name")?;
+	let (region_id, mark_id) = if cursor.expect(TKind::In).is_ok() {
+		let region_id = cursor.expect_identifier("region name")?;
+		(region_id, Some(ident))
+	} else {
+		(ident, None)
+	};
+	cursor.expect(TKind::Semicolon)?;
+	Ok(nodes.push(AstKind::new_free(region_id, mark_id)))
+}
+
+/// Matches Use construct:
+/// - `use <ident> in <region>;`
+fn parse_use_statement(
+	cursor: &mut Cursor,
+	nodes: &mut KindList,
+) -> Result<AstId, Error> {
+	cursor.expect(TKind::Use)?;
+	let ident = cursor.expect_identifier("table or record name")?;
+	cursor.expect(TKind::In)?;
+	let region_id = cursor.expect_identifier("region name")?;
+	cursor.expect(TKind::Semicolon)?;
+	Ok(nodes.push(AstKind::new_use(region_id, ident)))
 }
 
 fn parse_call(
