@@ -77,7 +77,7 @@ fn trailing_comma() {
 fn with_placement() {
 	let tables = setup("
 		region memory[0] @ 0x00;
-		table users[10] @ memory { id: u32 }
+		table users[10] in memory { id: u32 }
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
 	let table = tables.get(&"users".id())
@@ -132,8 +132,15 @@ fn missing_capacity() {
 }
 
 #[test]
-#[should_panic="Expected placement specifier"]
-fn missing_placement() {
+#[should_panic="Expected region name"]
+fn missing_region_placement() {
+	setup("table users[10] in {}")
+			.unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
+#[should_panic="Expected address expression"]
+fn missing_address_placement() {
 	setup("table users[10] @ {}")
 			.unwrap_or_else(|e| panic!("{e}"));
 }

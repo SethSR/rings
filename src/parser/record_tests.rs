@@ -123,6 +123,19 @@ fn record_with_user_defined_field() {
 fn record_with_region() {
 	let records = setup("
 		region b[8] @ 32;
+		record a in b {}
+	").unwrap_or_else(|e| panic!("{e}"));
+	assert_eq!(records.len(), 1);
+	let record = &records[&"a".id()];
+	assert_eq!(record.placement, Some(MemoryPlacement::Region("b".id())));
+	assert!(record.fields.is_empty());
+}
+
+#[test]
+#[should_panic="Expected address expression"]
+fn record_with_at_region() {
+	let records = setup("
+		region b[8] @ 32;
 		record a @ b {}
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(records.len(), 1);

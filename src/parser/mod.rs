@@ -1,7 +1,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::identifier::{IdentId, Identifier};
+use crate::identifier::{IdentId, Map as IdentMap, Identifier};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::token::{Id as TokenId, Kind as TokenKind};
@@ -26,7 +26,7 @@ mod proc_tests;
 #[cfg(test)]
 mod table_tests;
 
-use expression::{evaluate_placement, evaluate_expr};
+use expression::evaluate_expr;
 use ast::KindList;
 use data::{Procedure, Record, Region, Table, Value};
 
@@ -40,8 +40,20 @@ pub enum MemoryPlacement {
 	Region(IdentId),
 }
 
+/// The constructs recognized by the language
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+	Value,
+	Region,
+	Record,
+	Table,
+	Procedure,
+}
+pub type KindMap = IdentMap<Kind>;
+
 #[derive(Debug, Default)]
 pub struct Data {
+	pub kinds: KindMap,
 	pub values: ValueMap,
 	pub regions: RegionMap,
 	pub records: RecordMap,
@@ -167,6 +179,8 @@ fn scan_value_task(cursor: &mut cursor::Cursor,
 	Ok(Task::Value { ident, start })
 }
 
+/// Matches REGION syntax:
+/// - `region <ident>[<expr>] @ <expr>;`
 fn scan_region_task(cursor: &mut cursor::Cursor,
 ) -> Result<Task, error::Error> {
 	let ident = cursor.expect_identifier("region name")?;
@@ -179,19 +193,16 @@ fn scan_region_task(cursor: &mut cursor::Cursor,
 	Ok(Task::Region { ident, start_size, start_address })
 }
 
-/// Matches record syntax:
-/// - `record <ident> @ <placement> {...}`
+/// Matches RECORD syntax:
+/// - `record <ident> @ <expr> {...}`
+/// - `record <ident> in <region> {...}`
 /// - `record <ident> {...}`
 fn scan_record_task(cursor: &mut cursor::Cursor,
 ) -> Result<Task, error::Error> {
 	let location = cursor.index();
 	let ident = cursor.expect_identifier("record name")?;
 
-	let start_placement = if cursor.expect(TokenKind::At).is_ok() {
-		Some(skip_until(cursor, TokenKind::OBrace)?)
-	} else {
-		None
-	};
+	let start_placement = scan_placement(cursor)?;
 
 	cursor.expect(TokenKind::OBrace)?;
 	let start_fields = skip_until(cursor, TokenKind::CBrace)?;
@@ -201,7 +212,8 @@ fn scan_record_task(cursor: &mut cursor::Cursor,
 }
 
 /// Matches Table syntax
-/// - `table <ident>[<rows>] @ <placement> {...}`
+/// - `table <ident>[<rows>] @ <expr> {...}`
+/// - `table <ident>[<rows>] in <region> {...}`
 /// - `table <ident>[<rows>] {...}`
 fn scan_table_task(cursor: &mut cursor::Cursor,
 ) -> Result<Task, error::Error> {
@@ -211,17 +223,24 @@ fn scan_table_task(cursor: &mut cursor::Cursor,
 	let start_rows = skip_until(cursor, TokenKind::CBracket)?;
 	cursor.expect(TokenKind::CBracket)?;
 
-	let start_placement = if cursor.expect(TokenKind::At).is_ok() {
-		Some(skip_until(cursor, TokenKind::OBrace)?)
-	} else {
-		None
-	};
+	let start_placement = scan_placement(cursor)?;
 
 	cursor.expect(TokenKind::OBrace)?;
 	let start_fields = skip_until(cursor, TokenKind::CBrace)?;
 	cursor.expect(TokenKind::CBrace)?;
 
 	Ok(Task::Table { ident, start_rows, start_placement, start_fields })
+}
+
+fn scan_placement(cursor: &mut cursor::Cursor,
+) -> Result<Option<TokenId>, error::Error> {
+	if matches!(cursor.current(), TokenKind::At | TokenKind::In) {
+		let start = cursor.index();
+		skip_until(cursor, TokenKind::OBrace)?;
+		Ok(Some(start))
+	} else {
+		Ok(None)
+	}
 }
 
 fn check_braces(cursor: &mut cursor::Cursor) -> Result<(), error::Error> {
@@ -313,9 +332,10 @@ fn process_tasks(lex_data: &LexData,
 		match task {
 			Task::Value { ident, start } => {
 				let mut cursor = cursor::Cursor::from_start(lex_data, start);
-				match evaluate_expr(&mut cursor, &data.values, TokenKind::Semicolon) {
+				match evaluate_expr(&mut cursor, &data, TokenKind::Semicolon) {
 					Ok(value) => {
 						data.values.insert(ident, value);
+						data.kinds.insert(ident, Kind::Value);
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
@@ -334,6 +354,7 @@ fn process_tasks(lex_data: &LexData,
 				match process_region(lex_data, &data, start_size, start_address) {
 					Ok((start, end)) => {
 						data.regions.insert(ident, Region::new(start, end));
+						data.kinds.insert(ident, Kind::Region);
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
@@ -354,6 +375,7 @@ fn process_tasks(lex_data: &LexData,
 				match process_record(lex_data, &data, start_placement, start_fields) {
 					Ok((placement, fields)) => {
 						data.records.insert(ident, Record { placement, fields });
+						data.kinds.insert(ident, Kind::Record);
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
@@ -370,8 +392,9 @@ fn process_tasks(lex_data: &LexData,
 
 			Task::Table { ident, start_rows, start_placement, start_fields } => {
 				match process_table(lex_data, &data, start_placement, start_rows, start_fields) {
-					Ok((placement, row_count, fields)) => {
-						data.tables.insert(ident, Table { placement, row_count, fields});
+					Ok(table) => {
+						data.tables.insert(ident, table);
+						data.kinds.insert(ident, Kind::Table);
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
@@ -390,6 +413,7 @@ fn process_tasks(lex_data: &LexData,
 				match process_proc(lex_data, &mut data, ident, target, start) {
 					Ok(proc) => {
 						data.procedures.insert(ident, proc);
+						data.kinds.insert(ident, Kind::Procedure);
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
@@ -486,9 +510,9 @@ fn process_region (
 	start_size: TokenId, start_address: TokenId,
 ) -> Result<(u32,u32), error::Error> {
 	let mut cursor_size = cursor::Cursor::from_start(lex_data, start_size);
-	let result_size = evaluate_expr(&mut cursor_size, &data.values, TokenKind::CBracket);
+	let result_size = evaluate_expr(&mut cursor_size, &data, TokenKind::CBracket);
 	let mut cursor_address = cursor::Cursor::from_start(lex_data, start_address);
-	let result_address = evaluate_expr(&mut cursor_address, &data.values, TokenKind::Semicolon);
+	let result_address = evaluate_expr(&mut cursor_address, &data, TokenKind::Semicolon);
 
 	match (result_size, result_address) {
 		(Ok(Value::Integer(region_size)), Ok(Value::Integer(region_address))) => {
@@ -515,11 +539,13 @@ fn process_record(
 	start_placement: Option<TokenId>,
 	start_fields: TokenId,
 ) -> Result<(Option<MemoryPlacement>, Vec<(IdentId, Type)>), error::Error> {
-	let placement = process_placement(lex_data, data, start_placement, TokenKind::OBrace)?;
+	let placement = start_placement
+			.map(|start| process_placement(lex_data, data, start, TokenKind::OBrace))
+			.transpose()?;
 
 	let mut cursor_fields = cursor::Cursor::from_start(lex_data, start_fields);
 	process_fields(&mut cursor_fields, data, TokenKind::CBrace)
-		.map(|fields| (placement, fields))
+			.map(|fields| (placement, fields))
 }
 
 fn process_table(
@@ -528,9 +554,9 @@ fn process_table(
 	start_placement: Option<TokenId>,
 	start_rows: TokenId,
 	start_fields: TokenId,
-) -> Result<(Option<MemoryPlacement>, u16, Vec<(IdentId, Type)>), error::Error> {
+) -> Result<Table, error::Error> {
 	let mut cursor_rows = cursor::Cursor::from_start(lex_data, start_rows);
-	let row_count = evaluate_expr(&mut cursor_rows, &data.values, TokenKind::CBracket)
+	let row_count = evaluate_expr(&mut cursor_rows, &data, TokenKind::CBracket)
 			.map_err(|_| cursor_rows.expected_token("capacity expression"))?;
 	let Value::Integer(row_count) = row_count else {
 		panic!("decimal values not allowed in table row count declarations")
@@ -539,44 +565,14 @@ fn process_table(
 		panic!("table row count ({row_count}) out of range")
 	}
 
-	let placement = process_placement(lex_data, data, start_placement, TokenKind::OBrace)?;
+	let placement = start_placement
+			.map(|start| process_placement(lex_data, data, start, TokenKind::OBrace))
+			.transpose()?;
 
 	let mut cursor_fields = cursor::Cursor::from_start(lex_data, start_fields);
-	process_fields(&mut cursor_fields, data, TokenKind::CBrace)
-			.map(|fields| (placement, row_count as u16, fields))
-}
+	let fields = process_fields(&mut cursor_fields, data, TokenKind::CBrace)?;
 
-fn process_placement(
-	lex_data: &LexData,
-	data: &Data,
-	start_placement: Option<TokenId>,
-	end_token: TokenKind,
-) -> Result<Option<MemoryPlacement>, error::Error> {
-	if let Some(start_placement) = start_placement {
-		let mut cursor = cursor::Cursor::from_start(lex_data, start_placement);
-		Ok(Some(evaluate_placement(&mut cursor, &data.values, &data.regions, end_token)?))
-	} else {
-		Ok(None)
-	}
-}
-
-fn process_fields(cursor: &mut cursor::Cursor,
-	data: &Data,
-	end_token: TokenKind,
-) -> Result<Vec<(IdentId, Type)>, error::Error> {
-	let mut fields = vec![];
-
-	while cursor.current() != end_token {
-		let ident = cursor.expect_identifier("field name")?;
-		cursor.expect(TokenKind::Colon)?;
-		let typ = cursor.expect_type(data)?;
-		fields.push((ident, typ));
-		if cursor.expect(TokenKind::Comma).is_err() {
-			break;
-		}
-	}
-
-	Ok(fields)
+	Ok(Table { placement, row_count: row_count as u16, fields })
 }
 
 fn process_proc(
@@ -630,4 +626,93 @@ fn process_proc(
 	proc.body.push(AstKind::Block(block));
 
 	Ok(proc)
+}
+
+/// Matches AT syntax:
+/// - `at <expr>`
+///
+/// Expects an address expression.
+fn process_at(cursor: &mut cursor::Cursor,
+	data: &Data,
+	end_token: TokenKind,
+) -> Result<MemoryPlacement, error::Error> {
+	cursor.expect(TokenKind::At)?;
+	evaluate_expr(cursor, &data, end_token)
+			.and_then(|value| {
+				match value {
+					Value::Integer(address) => {
+						if !(0..u32::MAX as i64).contains(&address) {
+							panic!("address ({address}) out of range")
+						}
+
+						Ok(MemoryPlacement::Address(address as u32))
+					}
+					Value::Decimal(_) => {
+						panic!("decimal values cannot be used in address specifiers")
+					}
+				}
+			})
+}
+
+/// Matches IN syntax:
+/// - `in <ident>`
+///
+/// Expects a Region name as the `<ident>`.
+fn process_in(cursor: &mut cursor::Cursor,
+	data: &Data,
+	end_token: TokenKind,
+) -> Result<MemoryPlacement, error::Error> {
+	cursor.expect(TokenKind::In)?;
+	let ident = cursor.expect_identifier("region name")?;
+	if !data.regions.contains_key(&ident) {
+		return Err(cursor.expected_token("region name"));
+	}
+
+	if cursor.current() != end_token {
+		return Err(cursor.expected_token(format!("'{end_token:?}' after region name")));
+	}
+
+	Ok(MemoryPlacement::Region(ident))
+}
+
+fn process_placement(
+	lex_data: &LexData,
+	data: &Data,
+	start_placement: TokenId,
+	end_token: TokenKind,
+) -> Result<MemoryPlacement, error::Error> {
+	let mut cursor = cursor::Cursor::from_start(lex_data, start_placement);
+	match cursor.current() {
+		TokenKind::In => process_in(&mut cursor, &data, end_token),
+		TokenKind::At => process_at(&mut cursor, &data, end_token)
+		.map_err(|e| match e {
+			error::Error::ExpectedToken { found, ..} => {
+				error::Error::ExpectedToken {
+					expected: "address expression".to_string(),
+					found,
+				}
+			}
+			e => e,
+		}),
+		_ => Err(cursor.expected_token("placement specifier")),
+	}
+}
+
+fn process_fields(cursor: &mut cursor::Cursor,
+	data: &Data,
+	end_token: TokenKind,
+) -> Result<Vec<(IdentId, Type)>, error::Error> {
+	let mut fields = vec![];
+
+	while cursor.current() != end_token {
+		let ident = cursor.expect_identifier("field name")?;
+		cursor.expect(TokenKind::Colon)?;
+		let typ = cursor.expect_type(data)?;
+		fields.push((ident, typ));
+		if cursor.expect(TokenKind::Comma).is_err() {
+			break;
+		}
+	}
+
+	Ok(fields)
 }

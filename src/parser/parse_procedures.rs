@@ -62,6 +62,12 @@ fn parse_ident_statement(
 
 // TODO - srenshaw - Add local record definitions
 
+// TODO - srenshaw - Add overlay syntax
+
+/// Matches Let statements:
+/// - `let <ident>: <type> = <expr>;`
+/// - `let <ident>: <type>;` (not implemented)
+/// - `let <ident> = <expr>;` (not implemented)
 fn parse_let_statement(
 	cursor: &mut Cursor,
 	nodes: &mut KindList,
