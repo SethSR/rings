@@ -45,7 +45,7 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		.map_err(|e| e.display(&input))?;
 	lex_data.print(&input, false);
 
-	let mut dsc_data = parser::eval(&input, &lex_data, true)
+	let mut dsc_data = parser::eval(&input, &lex_data, false)
 		.map_err(|e| e.display(&input))?;
 	println!("{dsc_data:?}");
 

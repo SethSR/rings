@@ -598,6 +598,9 @@ fn process_proc(
 	proc.params = if cursor.expect(TokenKind::OParen).is_ok() {
 		let params = process_fields(&mut cursor, &data.records, TokenKind::CParen)?;
 		cursor.expect(TokenKind::CParen)?;
+		for (param_id, param_type) in &params {
+			data.types.insert((proc_id, 0, *param_id), *param_type);
+		}
 		params
 	} else {
 		vec![]

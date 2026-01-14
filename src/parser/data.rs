@@ -9,6 +9,7 @@ use super::{MemoryPlacement, Type};
 
 pub type ValueMap = IdentMap<Value>;
 pub type RegionMap = IdentMap<Region>;
+/// Maps (procedure name, scope depth, variable name) to variable type
 pub type TypeMap = std::collections::HashMap<(IdentId, u16, IdentId), Type>;
 pub type RecordMap = IdentMap<Record>;
 pub type TableMap = IdentMap<Table>;

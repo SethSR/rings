@@ -102,6 +102,65 @@ fn with_no_params() {
 }
 
 #[test]
+fn with_if() {
+	let data = setup("
+		proc a(b: bool) -> s8 {
+			if b {
+				return 1;
+			} else {
+				return -1;
+			}
+		}
+	").unwrap_or_else(|e| panic!("{e}"));
+	assert_eq!(data.types.get(&("a".id(), 0, "b".id())), Some(&Type::Bool));
+	let proc = &data.procedures[&"a".id()];
+	assert_eq!(proc.params, [
+		("b".id(), Type::Bool),
+	]);
+	assert_eq!(proc.ret_type, Type::S8);
+	assert_eq!(proc.body, [
+		AstKind::Ident("b".id()),
+		AstKind::Int(1),
+		AstKind::Return(Some(1.into())),
+		AstKind::Int(-1),
+		AstKind::Return(Some(3.into())),
+		AstKind::If(0.into(), vec![2.into()], vec![4.into()]),
+		AstKind::Block(vec![5.into()]),
+	]);
+}
+
+#[test]
+fn with_while() {
+	let data = setup("
+		proc a(b: s8) -> s8 {
+			while b < 10 {
+				b += 3;
+			}
+			return b;
+		}
+	").unwrap_or_else(|e| panic!("{e}"));
+	assert_eq!(data.types.get(&("a".id(), 0, "b".id())), Some(&Type::S8));
+	let proc = &data.procedures[&"a".id()];
+	assert_eq!(proc.params, [
+		("b".id(), Type::S8),
+	]);
+	assert_eq!(proc.ret_type, Type::S8);
+	assert_eq!(proc.body, [
+		AstKind::Ident("b".id()),
+		AstKind::Int(10),
+		AstKind::BinOp(BinaryOp::CmpLT, 0.into(), 1.into()),
+		AstKind::Ident("b".id()),
+		AstKind::Int(3),
+		AstKind::BinOp(BinaryOp::Add, 3.into(), 4.into()),
+		AstKind::Assign(3.into(), 5.into()),
+		AstKind::While(2.into(), vec![6.into()]),
+		AstKind::Ident("b".id()),
+		AstKind::Return(Some(8.into())),
+		AstKind::Block(vec![7.into(), 9.into()]),
+	]);
+}
+
+#[test]
 fn with_multiple_scopes() {
 	let data = setup("
 		main {
