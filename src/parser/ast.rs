@@ -4,7 +4,6 @@ use index_vec::IndexVec;
 
 use crate::identifier::IdentId;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::parser::Type;
 use crate::Bounds;
 
 define_index_type! {
@@ -25,7 +24,6 @@ pub enum AstKind {
 	Ident(IdentId),
 	Int(i64),
 	Dec(f64),
-	Define(AstId, Type),
 	Assign(AstId, AstId),
 	BinOp(BinaryOp, AstId, AstId),
 	UnOp(UnaryOp, AstId),

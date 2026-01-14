@@ -8,10 +8,14 @@ use super::ast::{AstId, AstKind, KindList, PathSegment};
 use super::cursor::Cursor;
 use super::data::RecordMap;
 use super::error::Error;
+use super::TypeMap;
 
 pub fn parse_block(
 	cursor: &mut Cursor,
 	nodes: &mut KindList,
+	types: &mut TypeMap,
+	proc_id: IdentId,
+	depth: u16,
 	records: &RecordMap,
 ) -> Result<Vec<AstId>, Error> {
 	cursor.expect(TKind::OBrace)?;
@@ -19,16 +23,16 @@ pub fn parse_block(
 	let mut block = vec![];
 	while ![TKind::Eof, TKind::CBrace].contains(&cursor.current()) {
 		block.push(match cursor.current() {
-			TKind::Let => parse_let_statement(cursor, nodes, records)?,
+			TKind::Let => parse_let_statement(cursor, nodes, types, proc_id, depth, records)?,
 			TKind::Identifier(ident_id) => parse_ident_statement(cursor, nodes, ident_id)?,
 			TKind::OBrace => {
-				let b = parse_block(cursor, nodes, records)?;
+				let b = parse_block(cursor, nodes, types, proc_id, depth + 1, records)?;
 				nodes.push(AstKind::Block(b))
 			}
 			TKind::Return => parse_return_statement(cursor, nodes)?,
-			TKind::If => parse_if_statement(cursor, nodes, records)?,
-			TKind::For => parse_for_statement(cursor, nodes, records)?,
-			TKind::While => parse_while_statement(cursor, nodes, records)?,
+			TKind::If => parse_if_statement(cursor, nodes, types, proc_id, depth, records)?,
+			TKind::For => parse_for_statement(cursor, nodes, types, proc_id, depth, records)?,
+			TKind::While => parse_while_statement(cursor, nodes, types, proc_id, depth, records)?,
 			_ => return Err(cursor.expected_token("definition, assignment, return, if, or for statement")),
 		});
 	}
@@ -58,6 +62,9 @@ fn parse_ident_statement(
 fn parse_let_statement(
 	cursor: &mut Cursor,
 	nodes: &mut KindList,
+	types: &mut TypeMap,
+	proc_id: IdentId,
+	depth: u16,
 	records: &RecordMap,
 ) -> Result<AstId, Error> {
 	cursor.expect(TKind::Let)?;
@@ -68,8 +75,9 @@ fn parse_let_statement(
 	let ast_id = parse_expression(cursor, nodes, &[TKind::Semicolon])?;
 	cursor.expect(TKind::Semicolon)?;
 	let ident = nodes.push(AstKind::Ident(ident_id));
-	let define = nodes.push(AstKind::Define(ident, var_type));
-	Ok(nodes.push(AstKind::Assign(define, ast_id)))
+	//let define = nodes.push(AstKind::Define(ident, var_type));
+	types.insert((proc_id, depth, ident_id), var_type);
+	Ok(nodes.push(AstKind::Assign(ident, ast_id)))
 }
 
 fn parse_access(
@@ -149,14 +157,17 @@ fn parse_return_statement(
 fn parse_if_statement(
 	cursor: &mut Cursor,
 	nodes: &mut KindList,
+	types: &mut TypeMap,
+	proc_id: IdentId,
+	depth: u16,
 	records: &RecordMap,
 ) -> Result<AstId, Error> {
 	cursor.expect(TKind::If)?;
 	let cond_id = parse_expression(cursor, nodes, &[TKind::OBrace])?;
-	let then_block = parse_block(cursor, nodes, records)?;
+	let then_block = parse_block(cursor, nodes, types, proc_id, depth + 1, records)?;
 	let else_block = if TKind::Else == cursor.current() {
 		cursor.advance();
-		parse_block(cursor, nodes, records)?
+		parse_block(cursor, nodes, types, proc_id, depth + 1, records)?
 	} else {
 		vec![]
 	};
@@ -166,17 +177,23 @@ fn parse_if_statement(
 fn parse_while_statement(
 	cursor: &mut Cursor,
 	nodes: &mut KindList,
+	types: &mut TypeMap,
+	proc_id: IdentId,
+	depth: u16,
 	records: &RecordMap,
 ) -> Result<AstId, Error> {
 	cursor.expect(TKind::While)?;
 	let cond = parse_expression(cursor, nodes, &[TKind::OBrace])?;
-	let block = parse_block(cursor, nodes, records)?;
+	let block = parse_block(cursor, nodes, types, proc_id, depth + 1, records)?;
 	Ok(nodes.push(AstKind::While(cond, block)))
 }
 
 fn parse_for_statement(
 	cursor: &mut Cursor,
 	nodes: &mut KindList,
+	types: &mut TypeMap,
+	proc_id: IdentId,
+	depth: u16,
 	records: &RecordMap,
 ) -> Result<AstId, Error> {
 	cursor.expect(TKind::For)?;
@@ -234,7 +251,7 @@ fn parse_for_statement(
 		return Err(cursor.expected_token("table name or bracketed range"));
 	};
 
-	let block = parse_block(cursor, nodes, records)?;
+	let block = parse_block(cursor, nodes, types, proc_id, depth + 1, records)?;
 
 	Ok(nodes.push(AstKind::For(vars, table_id, range, block)))
 }

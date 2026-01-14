@@ -5,7 +5,6 @@ use index_vec::define_index_type;
 use crate::identifier::IdentId;
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
-use crate::text;
 use crate::SrcPos;
 
 pub type KindList = IndexVec<Id, Kind>;
@@ -95,7 +94,7 @@ pub enum Kind {
 impl Kind {
 	pub fn size(&self, input: &InputData, lex_data: &LexData) -> usize {
 		match self {
-			Self::Identifier(ident_id) => text(input, lex_data, ident_id).len(),
+			Self::Identifier(ident_id) => lex_data.text(input, ident_id).len(),
 			Self::Integer(num) => num.to_string().len(),
 			Self::Decimal(num) => num.to_string().len(),
 

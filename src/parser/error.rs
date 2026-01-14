@@ -1,7 +1,7 @@
 
 use crate::identifier::IdentId;
 use crate::token::Id as TokenId;
-use crate::{text, token_source};
+use crate::token_source;
 
 pub enum Error {
 	ExpectedToken { expected: String, found: TokenId },
@@ -25,7 +25,7 @@ impl Error {
 				let found = lex_data.tok_list[token_id];
 				let span = token_source(input, lex_data, token_id);
 				let message = if let crate::token::Kind::Identifier(ident_id) = found {
-					format!("Expected {expected}, found '{}'", text(input, lex_data, &ident_id))
+					format!("Expected {expected}, found '{}'", lex_data.text(input, &ident_id))
 				} else {
 					format!("Expected {expected}, found {found:?}")
 				};
@@ -37,7 +37,7 @@ impl Error {
 			}
 			Self::UndefinedType { location, ident_id } => {
 				let span = token_source(&input, &lex_data, location);
-				let message = format!("Undefined type '{}'", text(&input, &lex_data, &ident_id));
+				let message = format!("Undefined type '{}'", lex_data.text(input, &ident_id));
 				crate::error::Error::new(span, message)
 			}
 			Self::UnexpectedEof { location } => {
@@ -51,19 +51,19 @@ impl Error {
 			Self::CircularDependency { location , name_id, ident_id } => {
 				let span = token_source(input, lex_data, location);
 				let message = format!("Cannot resolve '{}' - circular dependency or undefined variable '{}'",
-					text(input, lex_data, &name_id), text(input, lex_data, &ident_id));
+					lex_data.text(input, &name_id), lex_data.text(input, &ident_id));
 				crate::error::Error::new(span, message)
 			}
 			Self::RecursiveType { location, name_id } => {
 				let span = token_source(input, lex_data, location);
 				let message = format!("Cannot resolve '{}' - recursive definition",
-					text(input, lex_data, &name_id));
+					lex_data.text(input, &name_id));
 				crate::error::Error::new(span, message)
 			}
 			Self::DuplicateDeclaration { location, name_id } => {
 				let span = token_source(input, lex_data, location);
 				let message = format!("record '{}' already defined",
-					text(input, lex_data, &name_id));
+					lex_data.text(input, &name_id));
 				crate::error::Error::new(span, message)
 			}
 		}.with_kind(err_kind)

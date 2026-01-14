@@ -4,7 +4,7 @@ use std::collections::hash_map::Entry;
 use crate::error::{Error, Kind as ErrorKind};
 use crate::identifier::{Identifier, Map as IdentMap};
 use crate::token::{Kind, KindList, PosList};
-use crate::{Span, SrcPos};
+use crate::{identifier, input, Span, SrcPos};
 
 pub fn eval(source: &str) -> Result<Data, Error> {
 	let mut lexer = Lexer::default();
@@ -23,19 +23,27 @@ pub fn eval(source: &str) -> Result<Data, Error> {
 
 #[derive(Debug, Default)]
 pub struct Data {
-	pub identifiers: IdentMap<Span<SrcPos>>,
+	identifiers: IdentMap<Span<SrcPos>>,
 	pub tok_list: KindList,
 	pub tok_pos: PosList,
 }
 
 impl Data {
-	pub fn print(&self, input: &crate::input::Data, with_tokens: bool) {
+	pub fn text<'a>(&self,
+		input: &'a input::Data,
+		ident_id: &identifier::IdentId,
+	) -> &'a str {
+		let Span { start, end } =  self.identifiers[ident_id];
+		&input.source[start..end]
+	}
+
+	pub fn print(&self, input: &input::Data, with_tokens: bool) {
 		if with_tokens {
 			print!("Tokens:\n ");
 			for (token, start) in self.tok_list.iter().zip(self.tok_pos.iter()) {
 				match token {
 					Kind::Identifier(ident_id) => {
-						print!(" Identifier({})[{start}]", crate::text(input, self, ident_id));
+						print!(" Identifier({})[{start}]", self.text(input, ident_id));
 					}
 					_ => print!(" {token:?}[{start}]"),
 				}
@@ -45,7 +53,7 @@ impl Data {
 		}
 
 		let mut identifiers = self.identifiers.keys()
-			.map(|id| (id, crate::text(input, self, id)))
+			.map(|id| (id, self.text(input, id)))
 			.collect::<Vec<_>>();
 		identifiers.sort_by(|(_,a),(_,b)| a.cmp(b));
 
@@ -395,7 +403,7 @@ mod can_lex {
 	use super::*;
 
 	fn setup(source: &str) -> Data {
-		let input = crate::input::eval(file!().to_string(), source.into());
+		let input = input::eval(file!().to_string(), source.into());
 
 		eval(&source)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)))

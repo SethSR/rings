@@ -102,6 +102,26 @@ fn with_no_params() {
 }
 
 #[test]
+fn with_multiple_scopes() {
+	let data = setup("
+		main {
+			let a: s16 = 34;
+			if a {
+				let b: s32 = a + 5;
+			} else {
+				while false {
+					let c: s16 = a * 2 - 3;
+				}
+			}
+		}
+	").unwrap_or_else(|e| panic!("{e}"));
+	let main_id = "main".id();
+	assert_eq!(data.types.get(&(main_id, 0, "a".id())), Some(&Type::S16));
+	assert_eq!(data.types.get(&(main_id, 1, "b".id())), Some(&Type::S32));
+	assert_eq!(data.types.get(&(main_id, 2, "c".id())), Some(&Type::S16));
+}
+
+#[test]
 fn with_internal_expressions() {
 	let data = setup("main { let a: s8 = 2 + 3; }")
 			.unwrap_or_else(|e| panic!("{e}"));
@@ -114,11 +134,11 @@ fn with_internal_expressions() {
 		AstKind::Int(3),
 		AstKind::BinOp(BinaryOp::Add, 0.into(), 1.into()),
 		AstKind::Ident("a".id()),
-		AstKind::Define(3.into(), Type::S8),
-		AstKind::Assign(4.into(), 2.into()),
+		AstKind::Assign(3.into(), 2.into()),
 		AstKind::Return(None),
-		AstKind::Block(vec![5.into(), 6.into()]),
+		AstKind::Block(vec![4.into(), 5.into()]),
 	]);
+	assert_eq!(data.types.get(&("main".id(), 0, "a".id())), Some(&Type::S8));
 }
 
 #[test]
@@ -138,11 +158,11 @@ fn with_internal_sub_expressions() {
 		AstKind::BinOp(BinaryOp::Sub, 3.into(), 4.into()),
 		AstKind::BinOp(BinaryOp::Mul, 2.into(), 5.into()),
 		AstKind::Ident("a".id()),
-		AstKind::Define(7.into(), Type::S8),
-		AstKind::Assign(8.into(), 6.into()),
+		AstKind::Assign(7.into(), 6.into()),
 		AstKind::Return(None),
-		AstKind::Block(vec![9.into(), 10.into()]),
+		AstKind::Block(vec![8.into(), 9.into()]),
 	]);
+	assert_eq!(data.types.get(&("main".id(), 0, "a".id())), Some(&Type::S8));
 }
 
 #[test]

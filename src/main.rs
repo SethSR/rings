@@ -201,15 +201,6 @@ fn fmt_size(size: usize) -> String {
 	out.trim_start().to_string()
 }
 
-fn text<'a>(
-	input: &'a input::Data,
-	lex_data: &lexer::Data,
-	ident_id: &identifier::IdentId,
-) -> &'a str {
-	let Span { start, end } = lex_data.identifiers[ident_id];
-	&input.source[start..end]
-}
-
 fn token_source(
 	input: &input::Data,
 	lex_data: &lexer::Data,
@@ -227,7 +218,7 @@ fn type_text(
 ) -> String {
 	match ring_type {
 		rings_type::Type::Record(ident_id) => {
-			text(input, lex_data, ident_id).to_string()
+			lex_data.text(input, ident_id).to_string()
 		}
 		#[cfg(feature="table")]
 		Type::Table(ident_id) => {

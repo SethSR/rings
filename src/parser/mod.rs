@@ -31,7 +31,7 @@ use ast::KindList;
 use data::{Procedure, Record, Region, Table, Value};
 
 pub use ast::{AstId, AstKind};
-pub use data::{ProcMap, RecordMap, RegionMap, TableMap, ValueMap};
+pub use data::{ProcMap, RecordMap, RegionMap, TableMap, TypeMap, ValueMap};
 pub use types::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +47,7 @@ pub struct Data {
 	pub records: RecordMap,
 	pub tables: TableMap,
 	pub procedures: ProcMap,
+	pub types: TypeMap,
 }
 
 pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
@@ -386,7 +387,7 @@ fn process_tasks(lex_data: &LexData,
 			}
 
 			Task::Proc { ident, target, start } => {
-				match process_proc(lex_data, &data, target, start) {
+				match process_proc(lex_data, &mut data, ident, target, start) {
 					Ok(proc) => {
 						data.procedures.insert(ident, proc);
 						failed_tasks.remove(&ident);
@@ -580,7 +581,8 @@ fn process_fields(cursor: &mut cursor::Cursor,
 
 fn process_proc(
 	lex_data: &LexData,
-	data: &Data,
+	data: &mut Data,
+	proc_id: IdentId,
 	target: Option<Target>,
 	start: TokenId,
 ) -> Result<Procedure, error::Error> {
@@ -608,7 +610,10 @@ fn process_proc(
 	};
 
 	let start = AstId::new(proc.body.len());
-	let mut block = parse_procedures::parse_block(&mut cursor, &mut proc.body, &data.records)?;
+	let mut block = parse_procedures::parse_block(
+		&mut cursor, &mut proc.body, &mut data.types,
+		proc_id, 0, &data.records,
+	)?;
 	let end = AstId::new(proc.body.len());
 
 	let has_return = proc.body[start..end]
@@ -623,20 +628,4 @@ fn process_proc(
 	proc.body.push(AstKind::Block(block));
 
 	Ok(proc)
-}
-
-#[cfg(feature="table")]
-fn discover_table(cursor: &mut Cursor, data: &mut Data) -> DiscResult<Table> {
-	cursor.expect(data, TokenKind::OBracket)?;
-	let row_count = cursor.expect_u32(data, "table size")?;
-	cursor.expect(data, TokenKind::CBracket)?;
-	let address = discover_address(cursor, data)?;
-	cursor.expect(data, TokenKind::OBrace)?;
-	let column_spec = discover_fields(cursor, data, TokenKind::CBrace)?;
-	cursor.expect(data, TokenKind::CBrace)?;
-	Ok(Table {
-		address,
-		row_count,
-		column_spec,
-	})
 }
