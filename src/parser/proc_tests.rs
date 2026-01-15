@@ -1,11 +1,11 @@
 
-use crate::parser::ast::{Kind, PathSegment};
+use crate::parser::ast::PathSegment;
 use crate::operators::BinaryOp;
 use crate::Bounds;
 
 use super::*;
 
-fn setup(source: &str) -> Result<Data<TokenId>, String> {
+fn setup(source: &str) -> Result<Data<SrcPos>, String> {
 	let input = crate::input::eval(file!().into(), source.into());
 
 	let lex_data = crate::lexer::eval(&input.source)

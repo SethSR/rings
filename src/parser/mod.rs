@@ -5,7 +5,8 @@ use crate::identifier::{IdentId, Map as IdentMap, Identifier};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::token::{Id as TokenId, Kind as TokenKind};
-use crate::Target;
+use crate::{SrcPos, Target};
+use crate::token_source;
 
 mod ast;
 mod cursor;
@@ -63,7 +64,7 @@ pub struct Data<T> {
 }
 
 pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
-) -> Result<Data<TokenId>, crate::error::Error> {
+) -> Result<Data<SrcPos>, crate::error::Error> {
 	let tasks = scan_tasks(lex_data)
 		.map_err(|e| e.into_comp_error(input, lex_data, crate::error::Kind::Parser))?;
 	if should_print {
@@ -76,7 +77,30 @@ pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
 		eprintln!("{data:?}");
 	}
 
-	Ok(data)
+	Ok(Data {
+		kinds: data.kinds,
+		values: data.values,
+		regions: data.regions,
+		records: data.records,
+		tables: data.tables,
+		types: data.types,
+		procedures: data.procedures.into_iter()
+				.map(|(proc_id, proc_data)| (proc_id, Procedure {
+					target: proc_data.target,
+					params: proc_data.params,
+					ret_type: proc_data.ret_type,
+					body: proc_data.body.into_iter()
+							.map(|Ast { kind, location }| {
+								let tok_start = location.start;
+								let tok_end = location.end;
+								let src_start = token_source(input, lex_data, tok_start).start;
+								let src_end = token_source(input, lex_data, tok_end).end;
+								Ast { kind, location: (src_start..src_end).into() }
+							})
+							.collect(),
+				}))
+				.collect(),
+	})
 }
 
 #[derive(Debug)]
