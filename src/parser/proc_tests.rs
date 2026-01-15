@@ -1,11 +1,11 @@
 
-use crate::parser::ast::{AstKind, PathSegment};
+use crate::parser::ast::{Kind, PathSegment};
 use crate::operators::BinaryOp;
 use crate::Bounds;
 
 use super::*;
 
-fn setup(source: &str) -> Result<Data, String> {
+fn setup(source: &str) -> Result<Data<TokenId>, String> {
 	let input = crate::input::eval(file!().into(), source.into());
 
 	let lex_data = crate::lexer::eval(&input.source)
@@ -124,7 +124,11 @@ fn with_if() {
 		AstKind::Return(Some(1.into())),
 		AstKind::Int(-1),
 		AstKind::Return(Some(3.into())),
-		AstKind::if_(0.into(), vec![2.into()], vec![4.into()]),
+		AstKind::If {
+			cond: 0.into(),
+			then_block: vec![2.into()],
+			else_block: vec![4.into()],
+		},
 		AstKind::Block(vec![5.into()]),
 	]);
 }
@@ -148,12 +152,12 @@ fn with_while() {
 	assert_eq!(proc.body, [
 		AstKind::Ident("b".id()),
 		AstKind::Int(10),
-		AstKind::bin_op(BinaryOp::CmpLT, 0.into(), 1.into()),
+		AstKind::BinOp { op: BinaryOp::CmpLT, lhs: 0.into(), rhs: 1.into() },
 		AstKind::Ident("b".id()),
 		AstKind::Int(3),
-		AstKind::bin_op(BinaryOp::Add, 3.into(), 4.into()),
-		AstKind::assign(3.into(), 5.into()),
-		AstKind::while_(2.into(), vec![6.into()]),
+		AstKind::BinOp { op: BinaryOp::Add, lhs: 3.into(), rhs: 4.into() },
+		AstKind::Assign { lhs: 3.into(), rhs: 5.into() },
+		AstKind::While { cond: 2.into(), block: vec![6.into()] },
 		AstKind::Ident("b".id()),
 		AstKind::Return(Some(8.into())),
 		AstKind::Block(vec![7.into(), 9.into()]),
@@ -191,9 +195,9 @@ fn with_internal_expressions() {
 	assert_eq!(proc.body, [
 		AstKind::Int(2),
 		AstKind::Int(3),
-		AstKind::bin_op(BinaryOp::Add, 0.into(), 1.into()),
+		AstKind::BinOp { op: BinaryOp::Add, lhs: 0.into(), rhs: 1.into() },
 		AstKind::Ident("a".id()),
-		AstKind::assign(3.into(), 2.into()),
+		AstKind::Assign { lhs: 3.into(), rhs: 2.into() },
 		AstKind::Return(None),
 		AstKind::Block(vec![4.into(), 5.into()]),
 	]);
@@ -211,13 +215,13 @@ fn with_internal_sub_expressions() {
 	assert_eq!(proc.body, [
 		AstKind::Int(2),
 		AstKind::Int(3),
-		AstKind::bin_op(BinaryOp::Add, 0.into(), 1.into()),
+		AstKind::BinOp { op: BinaryOp::Add, lhs: 0.into(), rhs: 1.into() },
 		AstKind::Int(4),
 		AstKind::Int(5),
-		AstKind::bin_op(BinaryOp::Sub, 3.into(), 4.into()),
-		AstKind::bin_op(BinaryOp::Mul, 2.into(), 5.into()),
+		AstKind::BinOp { op: BinaryOp::Sub, lhs: 3.into(), rhs: 4.into() },
+		AstKind::BinOp { op: BinaryOp::Mul, lhs: 2.into(), rhs: 5.into() },
 		AstKind::Ident("a".id()),
-		AstKind::assign(7.into(), 6.into()),
+		AstKind::Assign { lhs: 7.into(), rhs: 6.into() },
 		AstKind::Return(None),
 		AstKind::Block(vec![8.into(), 9.into()]),
 	]);
@@ -270,12 +274,12 @@ fn with_basic_for_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
-		AstKind::for_(
-			vec!["i".id()],
-			None,
-			Some(Bounds::Full { start: 0, end: 10}),
-			vec![],
-		),
+		AstKind::For {
+			indexes: vec!["i".id()],
+			table: None,
+			bounds: Some(Bounds::Full { start: 0, end: 10}),
+			block: vec![],
+		},
 		AstKind::Return(None),
 		AstKind::Block(vec![0.into(), 1.into()]),
 	]);
@@ -287,12 +291,12 @@ fn with_multi_element_for_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
-		AstKind::for_(
-			vec!["i".id(), "j".id()],
-			None,
-			Some(Bounds::Full { start: 0, end: 10 }),
-			vec![],
-		),
+		AstKind::For {
+			indexes: vec!["i".id(), "j".id()],
+			table: None,
+			bounds: Some(Bounds::Full { start: 0, end: 10 }),
+			block: vec![],
+		},
 		AstKind::Return(None),
 		AstKind::Block(vec![0.into(), 1.into()]),
 	]);
@@ -305,10 +309,7 @@ fn with_internal_while_loop() {
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
 		AstKind::Int(1),
-		AstKind::while_(
-			0.into(),
-			vec![],
-		),
+		AstKind::While { cond: 0.into(), block: vec![], },
 		AstKind::Return(None),
 		AstKind::Block(vec![1.into(), 2.into()]),
 	]);
@@ -353,11 +354,11 @@ fn with_internal_field_assign() {
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, [
-		AstKind::access("a".id(), vec![
+		AstKind::Access { base_id: "a".id(), path: vec![
 			PathSegment::Field("b".id()),
-		]),
+		]},
 		AstKind::Int(2),
-		AstKind::assign(0.into(), 1.into()),
+		AstKind::Assign { lhs: 0.into(), rhs: 1.into() },
 		AstKind::Return(None),
 		AstKind::Block(vec![2.into(), 3.into()]),
 	]);
@@ -441,11 +442,11 @@ fn with_internal_table_assign() {
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
 		AstKind::Int(3),
-		AstKind::access("a".id(), vec![
+		AstKind::Access { base_id: "a".id(), path: vec![
 			PathSegment::Index(0.into(), "b".id()),
-		]),
+		]},
 		AstKind::Int(2),
-		AstKind::assign(1.into(), 2.into()),
+		AstKind::Assign { lhs: 1.into(), rhs: 2.into() },
 		AstKind::Return(None),
 		AstKind::Block(vec![3.into(), 4.into()]),
 	]);
@@ -457,7 +458,7 @@ fn with_mark() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
-		AstKind::new_mark("base".id(), "start".id()),
+		AstKind::Mark { region_id: "base".id(), mark_id: "start".id() },
 		AstKind::Return(None),
 		AstKind::Block(vec![0.into(), 1.into()]),
 	]);
@@ -469,7 +470,7 @@ fn with_free_mark() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
-		AstKind::new_free("base".id(), Some("start".id())),
+		AstKind::Free { region_id: "base".id(), mark_id: Some("start".id()) },
 		AstKind::Return(None),
 		AstKind::Block(vec![0.into(), 1.into()]),
 	]);
@@ -481,7 +482,7 @@ fn with_free_region() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
-		AstKind::new_free("base".id(), None),
+		AstKind::Free { region_id: "base".id(), mark_id: None },
 		AstKind::Return(None),
 		AstKind::Block(vec![0.into(), 1.into()]),
 	]);
@@ -493,7 +494,7 @@ fn with_use() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
-		AstKind::new_use("base".id(), "start".id()),
+		AstKind::Use { region_id: "base".id(), ident: "start".id() },
 		AstKind::Return(None),
 		AstKind::Block(vec![0.into(), 1.into()]),
 	]);

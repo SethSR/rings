@@ -1,7 +1,7 @@
 
 use std::ops::{Add, Sub, Mul, Div, Rem};
 
-use crate::parser::ast::KindList;
+use crate::parser::ast::AstList;
 use crate::identifier::{IdentId, Map as IdentMap};
 use crate::{Span, Target};
 
@@ -13,7 +13,7 @@ pub type RegionMap = IdentMap<Region>;
 pub type TypeMap = std::collections::HashMap<(IdentId, u16, IdentId), Type>;
 pub type RecordMap = IdentMap<Record>;
 pub type TableMap = IdentMap<Table>;
-pub type ProcMap = IdentMap<Procedure>;
+pub type ProcMap<T> = IdentMap<Procedure<T>>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
@@ -40,10 +40,10 @@ pub struct Table {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Procedure {
+pub struct Procedure<T> {
 	pub target: Option<Target>,
 	pub params: Vec<(IdentId, Type)>,
-	pub body: KindList,
+	pub body: AstList<T>,
 	pub ret_type: Type,
 }
 

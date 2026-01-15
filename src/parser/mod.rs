@@ -27,10 +27,10 @@ mod proc_tests;
 mod table_tests;
 
 use expression::evaluate_expr;
-use ast::KindList;
+use ast::AstList;
 use data::{Procedure, Record, Region, Table, Value};
 
-pub use ast::{AstId, AstKind};
+pub use ast::{Ast, AstId, Kind as AstKind};
 pub use data::{ProcMap, RecordMap, RegionMap, TableMap, TypeMap, ValueMap};
 pub use types::Type;
 
@@ -52,18 +52,18 @@ pub enum Kind {
 pub type KindMap = IdentMap<Kind>;
 
 #[derive(Debug, Default)]
-pub struct Data {
+pub struct Data<T> {
 	pub kinds: KindMap,
 	pub values: ValueMap,
 	pub regions: RegionMap,
 	pub records: RecordMap,
 	pub tables: TableMap,
-	pub procedures: ProcMap,
+	pub procedures: ProcMap<T>,
 	pub types: TypeMap,
 }
 
 pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
-) -> Result<Data, crate::error::Error> {
+) -> Result<Data<TokenId>, crate::error::Error> {
 	let tasks = scan_tasks(lex_data)
 		.map_err(|e| e.into_comp_error(input, lex_data, crate::error::Kind::Parser))?;
 	if should_print {
@@ -321,7 +321,7 @@ fn skip_until(cursor: &mut cursor::Cursor,
 
 fn process_tasks(lex_data: &LexData,
 	mut queue: VecDeque<Task>,
-) -> Result<Data, error::Error> {
+) -> Result<Data<TokenId>, error::Error> {
 	let mut data = Data::default();
 	let mut locations = HashMap::default();
 
@@ -506,7 +506,7 @@ fn check_recursion(
 
 fn process_region (
 	lex_data: &LexData,
-	data: &Data,
+	data: &Data<TokenId>,
 	start_size: TokenId, start_address: TokenId,
 ) -> Result<(u32,u32), error::Error> {
 	let mut cursor_size = cursor::Cursor::from_start(lex_data, start_size);
@@ -535,7 +535,7 @@ fn process_region (
 
 fn process_record(
 	lex_data: &LexData,
-	data: &Data,
+	data: &Data<TokenId>,
 	start_placement: Option<TokenId>,
 	start_fields: TokenId,
 ) -> Result<(Option<MemoryPlacement>, Vec<(IdentId, Type)>), error::Error> {
@@ -550,7 +550,7 @@ fn process_record(
 
 fn process_table(
 	lex_data: &LexData,
-	data: &Data,
+	data: &Data<TokenId>,
 	start_placement: Option<TokenId>,
 	start_rows: TokenId,
 	start_fields: TokenId,
@@ -577,15 +577,15 @@ fn process_table(
 
 fn process_proc(
 	lex_data: &LexData,
-	data: &mut Data,
+	data: &mut Data<TokenId>,
 	proc_id: IdentId,
 	target: Option<Target>,
 	start: TokenId,
-) -> Result<Procedure, error::Error> {
+) -> Result<Procedure<TokenId>, error::Error> {
 	let mut proc = Procedure {
 		target,
 		params: vec![],
-		body: KindList::default(),
+		body: AstList::default(),
 		ret_type: Type::Void,
 	};
 
@@ -609,21 +609,24 @@ fn process_proc(
 	};
 
 	let start = AstId::new(proc.body.len());
+	let tok_start = cursor.index();
 	let mut block = parse_procedures::parse_block(
 		cursor, &mut proc.body, data, proc_id, 0,
 	)?;
 	let end = AstId::new(proc.body.len());
+	let tok_end = cursor.index();
 
 	let has_return = proc.body[start..end]
 		.iter()
-		.any(|kind| matches!(kind, AstKind::Return(_)));
+		.any(|ast| matches!(ast.kind, AstKind::Return(_)));
 
 	if !has_return {
-		let ast_id = proc.body.push(AstKind::Return(None));
+		let tok_loc = cursor.index();
+		let ast_id = proc.body.push(Ast::return_(None, (tok_loc..tok_loc).into()));
 		block.push(ast_id);
 	}
 
-	proc.body.push(AstKind::Block(block));
+	proc.body.push(Ast::block(block, (tok_start..tok_end).into()));
 
 	Ok(proc)
 }
@@ -633,7 +636,7 @@ fn process_proc(
 ///
 /// Expects an address expression.
 fn process_at(cursor: &mut cursor::Cursor,
-	data: &Data,
+	data: &Data<TokenId>,
 	end_token: TokenKind,
 ) -> Result<MemoryPlacement, error::Error> {
 	cursor.expect(TokenKind::At)?;
@@ -659,7 +662,7 @@ fn process_at(cursor: &mut cursor::Cursor,
 ///
 /// Expects a Region name as the `<ident>`.
 fn process_in(cursor: &mut cursor::Cursor,
-	data: &Data,
+	data: &Data<TokenId>,
 	end_token: TokenKind,
 ) -> Result<MemoryPlacement, error::Error> {
 	cursor.expect(TokenKind::In)?;
@@ -677,7 +680,7 @@ fn process_in(cursor: &mut cursor::Cursor,
 
 fn process_placement(
 	lex_data: &LexData,
-	data: &Data,
+	data: &Data<TokenId>,
 	start_placement: TokenId,
 	end_token: TokenKind,
 ) -> Result<MemoryPlacement, error::Error> {
@@ -699,7 +702,7 @@ fn process_placement(
 }
 
 fn process_fields(cursor: &mut cursor::Cursor,
-	data: &Data,
+	data: &Data<TokenId>,
 	end_token: TokenKind,
 ) -> Result<Vec<(IdentId, Type)>, error::Error> {
 	let mut fields = vec![];

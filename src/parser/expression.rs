@@ -1,12 +1,12 @@
 
-use crate::token::Kind as TokenKind;
+use crate::token::{Id as TokenId, Kind as TokenKind};
 
 use super::cursor::Cursor;
 use super::error::Error;
 use super::{Data, Value};
 
 pub(super) fn evaluate_expr(cursor: &mut Cursor,
-	data: &Data,
+	data: &Data<TokenId>,
 	end_token: TokenKind,
 ) -> Result<Value, Error> {
 	let val = parse_additive(cursor, data, end_token)?;
@@ -15,7 +15,7 @@ pub(super) fn evaluate_expr(cursor: &mut Cursor,
 }
 
 fn parse_additive(cursor: &mut Cursor,
-	data: &Data,
+	data: &Data<TokenId>,
 	end_token: crate::token::Kind,
 ) -> Result<Value, Error> {
 	let mut left = parse_multiplicative(cursor, data, end_token)?;
@@ -40,7 +40,7 @@ fn parse_additive(cursor: &mut Cursor,
 }
 
 fn parse_multiplicative(cursor: &mut Cursor,
-	data: &Data,
+	data: &Data<TokenId>,
 	end_token: crate::token::Kind,
 ) -> Result<Value, Error> {
 	let mut left = parse_primary(cursor, data, end_token)?;
@@ -82,7 +82,7 @@ fn parse_multiplicative(cursor: &mut Cursor,
 }
 
 fn parse_primary(cursor: &mut Cursor,
-	data: &Data,
+	data: &Data<TokenId>,
 	end_token: crate::token::Kind,
 ) -> Result<Value, Error> {
 	match cursor.current() {

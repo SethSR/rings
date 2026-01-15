@@ -89,7 +89,7 @@ impl<'a> Cursor<'a> {
 	}
 
 	pub fn expect_type(&mut self,
-		data: &Data,
+		data: &Data<TokenId>,
 	) -> Result<Type, Error> {
 		let result = match self.current() {
 			TokenKind::Identifier(ident_id) if data.records.contains_key(&ident_id) => {
