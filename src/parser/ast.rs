@@ -24,22 +24,68 @@ pub enum AstKind {
 	Ident(IdentId),
 	Int(i64),
 	Dec(f64),
-	Assign(AstId, AstId),
-	BinOp(BinaryOp, AstId, AstId),
-	UnOp(UnaryOp, AstId),
+	Assign { lhs: AstId, rhs: AstId },
+	BinOp { op: BinaryOp, lhs: AstId, rhs: AstId },
+	UnOp { op: UnaryOp, rhs: AstId },
 	Return(Option<AstId>),
-	If(AstId, Vec<AstId>, Vec<AstId>),
+	If {
+		cond: AstId,
+		then_block: Vec<AstId>,
+		else_block: Vec<AstId>,
+	},
 	Block(Vec<AstId>),
-	While(AstId, Vec<AstId>),
-	For(Vec<IdentId>, Option<IdentId>, Option<Bounds>, Vec<AstId>),
-	Call(IdentId, Vec<AstId>),
-	Access(IdentId, Vec<PathSegment>),
+	While { cond: AstId, block: Vec<AstId> },
+	For {
+		indexes: Vec<IdentId>,
+		table: Option<IdentId>,
+		bounds: Option<Bounds>,
+		block: Vec<AstId>,
+	},
+	Call  { proc_id: IdentId, block: Vec<AstId> },
+	Access { base_id: IdentId, path: Vec<PathSegment> },
 	Mark { region_id: IdentId, mark_id: IdentId },
 	Free { region_id: IdentId, mark_id: Option<IdentId> },
 	Use { region_id: IdentId, ident: IdentId },
 }
 
 impl AstKind {
+	pub fn assign (lhs: AstId, rhs: AstId) -> Self {
+		Self::Assign { lhs, rhs }
+	}
+
+	pub fn bin_op(op: BinaryOp, lhs: AstId, rhs: AstId) -> Self {
+		Self::BinOp { op, lhs, rhs }
+	}
+
+	pub fn un_op(op: UnaryOp, rhs: AstId) -> Self {
+		Self::UnOp { op, rhs }
+	}
+
+	pub fn if_(cond: AstId, then_block: Vec<AstId>, else_block: Vec<AstId>) -> Self {
+		Self::If { cond, then_block, else_block }
+	}
+
+	pub fn while_(cond: AstId, block: Vec<AstId>) -> Self {
+		Self::While { cond, block }
+	}
+
+	pub fn for_(
+		indexes: Vec<IdentId>,
+		table: Option<IdentId>,
+		bounds: Option<Bounds>,
+		block: Vec<AstId>,
+	) -> Self {
+		Self::For { indexes, table, bounds, block }
+	}
+
+	pub fn call(proc_id: IdentId, block: Vec<AstId>) -> Self {
+		Self::Call { proc_id, block }
+	}
+
+	pub fn access(base_id: IdentId, path: Vec<PathSegment>) -> Self {
+		Self::Access { base_id, path }
+	}
+
 	pub fn new_mark(region_id: IdentId, mark_id: IdentId) -> Self {
 		Self::Mark { region_id, mark_id }
 	}

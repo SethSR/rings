@@ -60,7 +60,7 @@ fn parse_ident_statement(
 	}
 }
 
-// TODO - srenshaw - Add local record definitions
+// TODO - srenshaw - Add local record construction
 
 // TODO - srenshaw - Add overlay syntax
 
@@ -84,7 +84,7 @@ fn parse_let_statement(
 	cursor.expect(TKind::Semicolon)?;
 	let ident = nodes.push(AstKind::Ident(ident_id));
 	data.types.insert((proc_id, depth, ident_id), var_type);
-	Ok(nodes.push(AstKind::Assign(ident, ast_id)))
+	Ok(nodes.push(AstKind::assign(ident, ast_id)))
 }
 
 fn parse_access(
@@ -117,7 +117,7 @@ fn parse_access(
 	let kind = if accesses.is_empty() {
 		AstKind::Ident(ident_id)
 	} else {
-		AstKind::Access(ident_id, accesses)
+		AstKind::access(ident_id, accesses)
 	};
 	Ok(nodes.push(kind))
 }
@@ -130,7 +130,7 @@ fn parse_assignment(
 	cursor.expect(TKind::Eq)?;
 	let ast_id = parse_expression(cursor, nodes, &[TKind::Semicolon])?;
 	cursor.expect(TKind::Semicolon)?;
-	Ok(nodes.push(AstKind::Assign(lvalue_id, ast_id)))
+	Ok(nodes.push(AstKind::assign(lvalue_id, ast_id)))
 }
 
 fn parse_op_assignment(
@@ -141,8 +141,8 @@ fn parse_op_assignment(
 	cursor.advance(); // skip the operator token
 	let ast_id = parse_expression(cursor, nodes, &[TKind::Semicolon])?;
 	cursor.expect(TKind::Semicolon)?;
-	let op_id = nodes.push(AstKind::BinOp(op, lvalue_id, ast_id));
-	Ok(nodes.push(AstKind::Assign(lvalue_id, op_id)))
+	let op_id = nodes.push(AstKind::bin_op(op, lvalue_id, ast_id));
+	Ok(nodes.push(AstKind::assign(lvalue_id, op_id)))
 }
 
 fn parse_return_statement(
@@ -177,7 +177,7 @@ fn parse_if_statement(
 	} else {
 		vec![]
 	};
-	Ok(nodes.push(AstKind::If(cond_id, then_block, else_block)))
+	Ok(nodes.push(AstKind::if_(cond_id, then_block, else_block)))
 }
 
 fn parse_while_statement(
@@ -190,7 +190,7 @@ fn parse_while_statement(
 	cursor.expect(TKind::While)?;
 	let cond = parse_expression(cursor, nodes, &[TKind::OBrace])?;
 	let block = parse_block(cursor, nodes, data, proc_id, depth + 1)?;
-	Ok(nodes.push(AstKind::While(cond, block)))
+	Ok(nodes.push(AstKind::while_(cond, block)))
 }
 
 fn parse_for_statement(
@@ -257,7 +257,7 @@ fn parse_for_statement(
 
 	let block = parse_block(cursor, nodes, data, proc_id, depth + 1)?;
 
-	Ok(nodes.push(AstKind::For(vars, table_id, range, block)))
+	Ok(nodes.push(AstKind::for_(vars, table_id, range, block)))
 }
 
 /// Matches Mark construct:
@@ -332,7 +332,7 @@ fn parse_call(
 	}
 
 	cursor.expect(TKind::CParen)?;
-	Ok(nodes.push(AstKind::Call(ident_id, exprs)))
+	Ok(nodes.push(AstKind::call(ident_id, exprs)))
 }
 
 fn parse_expression(
@@ -373,7 +373,7 @@ fn parse_expr_sub(
 		right
 	};
 
-	Ok(nodes.push(AstKind::BinOp(op, left, right)))
+	Ok(nodes.push(AstKind::bin_op(op, left, right)))
 }
 
 fn parse_primary(
@@ -409,7 +409,7 @@ fn parse_primary(
 	};
 
 	if let Some(op) = unary_op {
-		Ok(nodes.push(AstKind::UnOp(op, node)))
+		Ok(nodes.push(AstKind::un_op(op, node)))
 	} else {
 		Ok(node)
 	}

@@ -124,7 +124,7 @@ fn with_if() {
 		AstKind::Return(Some(1.into())),
 		AstKind::Int(-1),
 		AstKind::Return(Some(3.into())),
-		AstKind::If(0.into(), vec![2.into()], vec![4.into()]),
+		AstKind::if_(0.into(), vec![2.into()], vec![4.into()]),
 		AstKind::Block(vec![5.into()]),
 	]);
 }
@@ -148,12 +148,12 @@ fn with_while() {
 	assert_eq!(proc.body, [
 		AstKind::Ident("b".id()),
 		AstKind::Int(10),
-		AstKind::BinOp(BinaryOp::CmpLT, 0.into(), 1.into()),
+		AstKind::bin_op(BinaryOp::CmpLT, 0.into(), 1.into()),
 		AstKind::Ident("b".id()),
 		AstKind::Int(3),
-		AstKind::BinOp(BinaryOp::Add, 3.into(), 4.into()),
-		AstKind::Assign(3.into(), 5.into()),
-		AstKind::While(2.into(), vec![6.into()]),
+		AstKind::bin_op(BinaryOp::Add, 3.into(), 4.into()),
+		AstKind::assign(3.into(), 5.into()),
+		AstKind::while_(2.into(), vec![6.into()]),
 		AstKind::Ident("b".id()),
 		AstKind::Return(Some(8.into())),
 		AstKind::Block(vec![7.into(), 9.into()]),
@@ -191,9 +191,9 @@ fn with_internal_expressions() {
 	assert_eq!(proc.body, [
 		AstKind::Int(2),
 		AstKind::Int(3),
-		AstKind::BinOp(BinaryOp::Add, 0.into(), 1.into()),
+		AstKind::bin_op(BinaryOp::Add, 0.into(), 1.into()),
 		AstKind::Ident("a".id()),
-		AstKind::Assign(3.into(), 2.into()),
+		AstKind::assign(3.into(), 2.into()),
 		AstKind::Return(None),
 		AstKind::Block(vec![4.into(), 5.into()]),
 	]);
@@ -211,13 +211,13 @@ fn with_internal_sub_expressions() {
 	assert_eq!(proc.body, [
 		AstKind::Int(2),
 		AstKind::Int(3),
-		AstKind::BinOp(BinaryOp::Add, 0.into(), 1.into()),
+		AstKind::bin_op(BinaryOp::Add, 0.into(), 1.into()),
 		AstKind::Int(4),
 		AstKind::Int(5),
-		AstKind::BinOp(BinaryOp::Sub, 3.into(), 4.into()),
-		AstKind::BinOp(BinaryOp::Mul, 2.into(), 5.into()),
+		AstKind::bin_op(BinaryOp::Sub, 3.into(), 4.into()),
+		AstKind::bin_op(BinaryOp::Mul, 2.into(), 5.into()),
 		AstKind::Ident("a".id()),
-		AstKind::Assign(7.into(), 6.into()),
+		AstKind::assign(7.into(), 6.into()),
 		AstKind::Return(None),
 		AstKind::Block(vec![8.into(), 9.into()]),
 	]);
@@ -270,7 +270,7 @@ fn with_basic_for_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
-		AstKind::For(
+		AstKind::for_(
 			vec!["i".id()],
 			None,
 			Some(Bounds::Full { start: 0, end: 10}),
@@ -287,7 +287,7 @@ fn with_multi_element_for_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
-		AstKind::For(
+		AstKind::for_(
 			vec!["i".id(), "j".id()],
 			None,
 			Some(Bounds::Full { start: 0, end: 10 }),
@@ -305,7 +305,7 @@ fn with_internal_while_loop() {
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
 		AstKind::Int(1),
-		AstKind::While(
+		AstKind::while_(
 			0.into(),
 			vec![],
 		),
@@ -353,11 +353,11 @@ fn with_internal_field_assign() {
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, [
-		AstKind::Access("a".id(), vec![
+		AstKind::access("a".id(), vec![
 			PathSegment::Field("b".id()),
 		]),
 		AstKind::Int(2),
-		AstKind::Assign(0.into(), 1.into()),
+		AstKind::assign(0.into(), 1.into()),
 		AstKind::Return(None),
 		AstKind::Block(vec![2.into(), 3.into()]),
 	]);
@@ -441,11 +441,11 @@ fn with_internal_table_assign() {
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
 		AstKind::Int(3),
-		AstKind::Access("a".id(), vec![
+		AstKind::access("a".id(), vec![
 			PathSegment::Index(0.into(), "b".id()),
 		]),
 		AstKind::Int(2),
-		AstKind::Assign(1.into(), 2.into()),
+		AstKind::assign(1.into(), 2.into()),
 		AstKind::Return(None),
 		AstKind::Block(vec![3.into(), 4.into()]),
 	]);
