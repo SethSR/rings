@@ -1,0 +1,86 @@
+
+region VdpCtrlLoc[24] @ 0xC00000;
+
+record VdpRegs in VdpCtrlLoc {
+	data: s32,
+	ctrl: s32,
+	hv_counter: s32,
+}
+
+value VdpRegMode1 = 0x8000;
+value VdpRegMode2 = 0x8100;
+value VdpRegMode3 = 0x8B00;
+value VdpRegMode4 = 0x8C00;
+
+value VdpRegPlaneA  = 0x8200; -- Plane A table address
+value VdpRegPlaneB  = 0x8400; -- Plane B table address
+value VdpRegSprite  = 0x8500; -- Sprite table address
+value VdpRegWindow  = 0x8300; -- Window table address
+value VdpRegHScroll = 0x8D00; -- HScroll table address
+
+value VdpRegSize  = 0x9000; -- Plane A and B size
+value VdpRegWinX  = 0x9100; -- Window X split position
+value VdpRegWinY  = 0x9200; -- Window Y split position
+value VdpRegIncr  = 0x8F00; -- Autoincrement
+value VdpRegBGCol = 0x8700; -- Background color
+value VdpRegHRate = 0x8A00; -- HBlank interrupt rate
+
+value VdpRegDmaLenL = 0x9300; -- DMA length (low)
+value VdpRegDmaLenH = 0x9400; -- DMA length (high)
+value VdpRegDmaSrcL = 0x9500; -- DMA source (low)
+value VdpRegDmaSrcM = 0x9600; -- DMA source (mid)
+value VdpRegDmaSrcH = 0x9700; -- DMA source (high)
+
+value VRamAddrCmd  = 0x4000_0000;
+value CRamAddrCmd  = 0xC000_0000;
+value VSRamAddrCmd = 0x4000_0010;
+
+value VRamSize  = 0x10000;
+value CRamSize  = 128;
+value VSRamSize = 80;
+
+m68k main {
+	-- Read from control port to reset VDP status
+	let unused: s16 = VdpRegs.ctrl;
+
+	-- Initialize VDP state
+	VdpRegs.ctrl = VdpRegMode1 | 0x04;
+	VdpRegs.ctrl = VdpRegMode2 | 0x04;
+	VdpRegs.ctrl = VdpRegMode3 | 0x00;
+	VdpRegs.ctrl = VdpRegMode4 | 0x81;
+
+	VdpRegs.ctrl = VdpRegPlaneA  | 0x30;
+	VdpRegs.ctrl = VdpRegPlaneB  | 0x07;
+	VdpRegs.ctrl = VdpRegSprite  | 0x78;
+	VdpRegs.ctrl = VdpRegWindow  | 0x34;
+	VdpRegs.ctrl = VdpRegHScroll | 0x3D;
+
+	VdpRegs.ctrl = VdpRegSize | 0x01;
+	VdpRegs.ctrl = VdpRegWinX | 0x00;
+	VdpRegs.ctrl = VdpRegWinY | 0x00;
+	VdpRegs.ctrl = VdpRegIncr | 0x02;
+	VdpRegs.ctrl = VdpRegBGCol | 0x00;
+	VdpRegs.ctrl = VdpRegHRate | 0xFF;
+
+	-- Clear VRam
+	VdpRegs.ctrl = VRamAddrCmd;
+	let d0: s32 = VRamSize / 4;
+	for i in [0..d0] {
+		VdpRegs.data = 0;
+	}
+
+	-- Clear CRam
+	VdpRegs.ctrl = CRamAddrCmd;
+	let d1: s32 = CRamSize / 4;
+	for i in [0..d1] {
+		VdpRegs.data = 0;
+	}
+
+	-- Clear VSRam
+	VdpRegs.ctrl = VSRamAddrCmd;
+	let d2: s32 = VSRamSize / 4;
+	for i in [0..d2] {
+		VdpRegs.data = 0;
+	}
+}
+
