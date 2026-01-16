@@ -1,5 +1,5 @@
 
-use std::{env, fmt, fs};
+use std::{env, fs};
 //use std::collections::HashMap;
 //use std::fs::File;
 //use std::path::PathBuf;
@@ -230,40 +230,3 @@ fn type_text(
 		_ => format!("{ring_type:?}"),
 	}
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Bounds {
-	Full { start: u32, end: u32 },
-	From { start: u32 },
-	To { end: u32 },
-}
-
-#[cfg(feature="forloop")]
-impl Bounds {
-	fn get_start(&self) -> u32 {
-		match self {
-			Self::Full { start, ..} => *start,
-			Self::From { start } => *start,
-			Self::To {..} => 0,
-		}
-	}
-
-	fn get_end(&self, table_size: u32) -> u32 {
-		match self {
-			Self::Full { end, ..} => *end,
-			Self::From {..} => table_size,
-			Self::To { end } => *end,
-		}
-	}
-}
-
-impl fmt::Display for Bounds {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Full {start, end} => write!(f, "[{start}..{end}]"),
-			Self::From {start} => write!(f, "[{start}..]"),
-			Self::To {end} => write!(f, "[..{end}]"),
-		}
-	}
-}
-

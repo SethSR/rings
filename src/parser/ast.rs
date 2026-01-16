@@ -4,7 +4,7 @@ use index_vec::IndexVec;
 
 use crate::identifier::IdentId;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::{Bounds, Span};
+use crate::Span;
 
 define_index_type! {
 	pub struct AstId = usize;
@@ -38,7 +38,8 @@ pub enum Kind {
 	For {
 		indexes: Vec<IdentId>,
 		table: Option<IdentId>,
-		bounds: Option<Bounds>,
+		range_start: Option<AstId>,
+		range_end: Option<AstId>,
 		block: Vec<AstId>,
 	},
 	Call { proc_id: IdentId, block: Vec<AstId> },
@@ -165,12 +166,13 @@ impl<T> Ast<T> {
 	pub fn for_(
 		indexes: Vec<IdentId>,
 		table: Option<IdentId>,
-		bounds: Option<Bounds>,
+		range_start: Option<AstId>,
+		range_end: Option<AstId>,
 		block: Vec<AstId>,
 		location: Span<T>,
 	) -> Self {
 		Self {
-			kind: Kind::For { indexes, table, bounds, block },
+			kind: Kind::For { indexes, table, range_start, range_end, block },
 			location,
 		}
 	}

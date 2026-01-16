@@ -52,7 +52,7 @@ pub enum Kind {
 }
 pub type KindMap = IdentMap<Kind>;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Data<T> {
 	pub kinds: KindMap,
 	pub values: ValueMap,
@@ -61,6 +61,41 @@ pub struct Data<T> {
 	pub tables: TableMap,
 	pub procedures: ProcMap<T>,
 	pub types: TypeMap,
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Data<T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		writeln!(f, "Data {{")?;
+		writeln!(f, "kinds:\n{}", self.kinds.iter()
+				.map(|a| format!("  {a:?}"))
+				.collect::<Vec<_>>()
+				.join("\n"))?;
+		writeln!(f, "values: \n{}", self.values.iter()
+				.map(|a| format!("  {a:?}"))
+				.collect::<Vec<_>>()
+				.join("\n"))?;
+		writeln!(f, "regions: \n{}", self.regions.iter()
+				.map(|(id, region)| format!("  {id:?}: 0x{:08X}..0x{:08X}", region.span.start, region.span.end))
+				.collect::<Vec<_>>()
+				.join("\n"))?;
+		writeln!(f, "records: \n{}", self.records.iter()
+				.map(|(id, record)| format!("  {id:?}: {:?} {:?}", record.placement, record.fields))
+				.collect::<Vec<_>>()
+				.join("\n"))?;
+		writeln!(f, "tables: \n{}", self.tables.iter()
+				.map(|a| format!("  {a:?}"))
+				.collect::<Vec<_>>()
+				.join("\n"))?;
+		writeln!(f, "procedures: \n{}", self.procedures.iter()
+				.map(|(id, proc)| format!("  {id:?}: {:?} {:?} -> {:?}", proc.target, proc.params, proc.ret_type))
+				.collect::<Vec<_>>()
+				.join("\n"))?;
+		writeln!(f, "types: \n{}", self.types.iter()
+				.map(|a| format!("  {a:?}"))
+				.collect::<Vec<_>>()
+				.join("\n"))?;
+		writeln!(f, "}}")
+	}
 }
 
 pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,

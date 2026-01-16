@@ -2,7 +2,6 @@
 use crate::identifier::IdentId;
 use crate::operators::BinaryOp;
 use crate::token::{Id as TokenId, Kind as TKind};
-use crate::Bounds;
 
 use super::ast::{Ast, AstId, AstList, PathSegment};
 use super::cursor::Cursor;
@@ -245,42 +244,30 @@ fn parse_for_statement(
 
 	cursor.expect(TKind::In)?;
 
-	// for x in Table {}
-	// for x in Table[..] {}
-	// for x in [0..10] {}
-	let (table_id, range) = if let Ok(table_id) = cursor.expect_identifier("COMPILER ERROR") {
-		// Table loop
-		let range = if TKind::OBracket == cursor.current() {
-			cursor.advance();
-			let range_start = cursor.expect_u32("COMPILER ERROR").ok();
-			cursor.expect(TKind::Dot2)?;
-			let range_end = cursor.expect_u32("COMPILER ERROR").ok();
-			cursor.expect(TKind::CBracket)?;
-			match (range_start, range_end) {
-				(Some(start), Some(end)) => Some(Bounds::Full { start, end }),
-				(Some(start), None) => Some(Bounds::From { start }),
-				(None, Some(end)) => Some(Bounds::To { end }),
-				(None, None) => None,
-			}
-		} else {
-			None
-		};
-		(Some(table_id), range)
-	} else if TKind::OBracket == cursor.current() {
-		cursor.advance();
-		let start = cursor.expect_u32("start (inclusive) value")?;
+	let range_location = cursor.index();
+	let table_id = cursor.expect_identifier("COMPILER ERROR").ok();
+
+	let (range_start, range_end) = if cursor.expect(TKind::OBracket).is_ok() {
+		let range_start = parse_expression(cursor, nodes, &[TKind::Dot2]).ok();
 		cursor.expect(TKind::Dot2)?;
-		let end = cursor.expect_u32("end (exclusive) value")?;
+		let range_end = parse_expression(cursor, nodes, &[TKind::CBracket]).ok();
 		cursor.expect(TKind::CBracket)?;
-		(None, Some(Bounds::Full { start, end }))
+		(range_start, range_end)
 	} else {
-		return Err(cursor.expected_token("table name or bracketed range"));
+		(None, None)
 	};
+
+	if table_id.is_none() && range_start.is_none() && range_end.is_none() {
+		return Err(Error::ExpectedToken {
+			expected: "table range or bound range".to_string(),
+			found: range_location,
+		});
+	}
 
 	let block = parse_block(cursor, nodes, data, proc_id, depth + 1)?;
 
 	let tok_end = cursor.index();
-	Ok(nodes.push(Ast::for_(vars, table_id, range, block, (tok_start..tok_end).into())))
+	Ok(nodes.push(Ast::for_(vars, table_id, range_start, range_end, block, (tok_start..tok_end).into())))
 }
 
 /// Matches Mark construct:

@@ -1,7 +1,6 @@
 
 use crate::parser::ast::PathSegment;
 use crate::operators::BinaryOp;
-use crate::Bounds;
 
 use super::*;
 
@@ -274,14 +273,17 @@ fn with_basic_for_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::Int(0),
+		AstKind::Int(10),
 		AstKind::For {
 			indexes: vec!["i".id()],
 			table: None,
-			bounds: Some(Bounds::Full { start: 0, end: 10}),
+			range_start: Some(0.into()),
+			range_end: Some(1.into()),
 			block: vec![],
 		},
 		AstKind::Return(None),
-		AstKind::Block(vec![0.into(), 1.into()]),
+		AstKind::Block(vec![2.into(), 3.into()]),
 	]);
 }
 
@@ -291,14 +293,17 @@ fn with_multi_element_for_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::Int(0),
+		AstKind::Int(10),
 		AstKind::For {
 			indexes: vec!["i".id(), "j".id()],
 			table: None,
-			bounds: Some(Bounds::Full { start: 0, end: 10 }),
+			range_start: Some(0.into()),
+			range_end: Some(1.into()),
 			block: vec![],
 		},
 		AstKind::Return(None),
-		AstKind::Block(vec![0.into(), 1.into()]),
+		AstKind::Block(vec![2.into(), 3.into()]),
 	]);
 }
 
