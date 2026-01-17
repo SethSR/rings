@@ -5,9 +5,11 @@ use std::{env, fs};
 //use std::path::PathBuf;
 //use std::process::{Command, Stdio};
 
+//mod asm;
 mod error;
 mod identifier;
 mod input;
+mod packing;
 mod lexer;
 mod operators;
 mod parser;
@@ -45,17 +47,21 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		.map_err(|e| e.display(&input))?;
 	lex_data.print(&input, false);
 
-	let mut dsc_data = parser::eval(&input, &lex_data, false)
+	let prs_data = parser::eval(&input, &lex_data, false)
 		.map_err(|e| e.display(&input))?;
-	println!("{dsc_data:?}");
+	println!("{prs_data:?}\n");
 
 	/*
 	let proc_db = type_checker::eval(&input, &lex_data, &dsc_data)
 		.map_err(|e| e.display(&input))?;
 	//println!("{proc_db:?}");
+	*/
 
-	let (section_db,_) = vsmc::eval(&input, &lex_data, &proc_db, &mut dsc_data)
-		.map_err(|e| e.into_comp_error(&input, &lex_data, &proc_db))
+	let lay_data = packing::eval(&prs_data);
+	println!("{lay_data:?}");
+
+	/*
+	let section_db = vsmc::eval(&input, &lex_data, &prs_data, &lay_data)
 		.map_err(|e| e.display(&input))?;
 	vsmc::print(&section_db, &input, &lex_data);
 

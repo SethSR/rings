@@ -29,9 +29,9 @@ mod table_tests;
 
 use expression::evaluate_expr;
 use ast::AstList;
-use data::{Procedure, Record, Region, Table, Value};
 
 pub use ast::{Ast, AstId, Kind as AstKind};
+pub use data::{Procedure, Record, Region, Table, Value};
 pub use data::{ProcMap, RecordMap, RegionMap, TableMap, TypeMap, ValueMap};
 pub use types::Type;
 
