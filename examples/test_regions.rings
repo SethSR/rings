@@ -1,0 +1,27 @@
+
+region RomCartridge[0x000000..0x400000];
+region ReservedA   [0x400000..0x800000];
+region ReservedB   [0x800000..0xA00000];
+region Z80Memory   [0xA00000..0xA10000];
+region Z80IO       [0xA10000..0xA11000];
+region Z80Control  [0xA11000..0xA12000];
+region ReservedC   [0xA12000..0xB00000];
+region ReservedD   [0xB00000..0xC00000];
+region VDP         [0xC00000..0xE00000];
+region Prohibited  [0xE00000..0xFF0000];
+region WorkRam     [0xFF0000..0x1000000];
+
+value Z80Base = 0xA00000;
+
+region SoundRam [0x2000] @ Z80Base + 0x0000;
+region Reserved [0x2000] @ Z80Base + 0x2000;
+region SoundChip[0x2000] @ Z80Base + 0x4000;
+region Misc     [0x2000] @ Z80Base + 0x6000;
+region Bank68K  [0x8000] @ Z80Base + 0x8000;
+
+record YM2612_A0 @ 0x4000 {}
+record YM2612_D0 @ 0x4001 {}
+record YM2612_A1 @ 0x4002 {}
+record YM2612_D1 @ 0x4003 {}
+record BankReg   @ 0x6000 {}
+record PSG76489  @ 0x7F11 {}

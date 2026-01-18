@@ -7,7 +7,7 @@ fn setup(source: &str) -> Result<RecordMap, String> {
 	let input = crate::input::eval(file!().into(), source.into());
 	let lex_data = crate::lexer::eval(source)
 		.map_err(|e| e.display(&input))?;
-	eval(&input, &lex_data, true)
+	eval(&input, &lex_data, false)
 		.map_err(|e| e.display(&input))
 		.map(|data| data.records)
 }
@@ -122,7 +122,7 @@ fn record_with_user_defined_field() {
 #[test]
 fn record_with_region() {
 	let records = setup("
-		region b[8] @ 32;
+		region b[32..40];
 		record a in b {}
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(records.len(), 1);
@@ -135,7 +135,7 @@ fn record_with_region() {
 #[should_panic="Expected address expression"]
 fn record_with_at_region() {
 	let records = setup("
-		region b[8] @ 32;
+		region b[32..40];
 		record a @ b {}
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(records.len(), 1);

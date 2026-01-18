@@ -8,7 +8,7 @@ fn setup(source: &str) -> Result<TableMap, String> {
 	let input = crate::input::eval(file!().into(), source.into());
 	let lex_data = crate::lexer::eval(source)
 			.map_err(|e| e.display(&input))?;
-	super::eval(&input, &lex_data, true)
+	super::eval(&input, &lex_data, false)
 			.map_err(|e| e.display(&input))
 			.map(|data| data.tables)
 }

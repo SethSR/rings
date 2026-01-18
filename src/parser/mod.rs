@@ -138,6 +138,12 @@ pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
 	})
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RegionParseType {
+	Range { start: TokenId, end: TokenId },
+	Location { size: TokenId, address: TokenId },
+}
+
 #[derive(Debug)]
 enum Task {
 	Value {
@@ -146,8 +152,7 @@ enum Task {
 	},
 	Region {
 		ident: IdentId,
-		start_size: TokenId,
-		start_address: TokenId,
+		parse_type: RegionParseType,
 	},
 	Record {
 		ident: IdentId,
@@ -233,23 +238,31 @@ fn scan_value_task(cursor: &mut cursor::Cursor,
 ) -> Result<Task, error::Error> {
 	let ident = cursor.expect_identifier("value name")?;
 	cursor.expect(TokenKind::Eq)?;
-	let start = skip_until(cursor, TokenKind::Semicolon)?;
+	let start = skip_until(cursor, &[TokenKind::Semicolon])?;
 	cursor.expect(TokenKind::Semicolon)?;
 	Ok(Task::Value { ident, start })
 }
 
 /// Matches REGION syntax:
+/// - `region <ident>[<expr>..<expr>];`
 /// - `region <ident>[<expr>] @ <expr>;`
 fn scan_region_task(cursor: &mut cursor::Cursor,
 ) -> Result<Task, error::Error> {
 	let ident = cursor.expect_identifier("region name")?;
 	cursor.expect(TokenKind::OBracket)?;
-	let start_size = skip_until(cursor, TokenKind::CBracket)?;
-	cursor.expect(TokenKind::CBracket)?;
-	cursor.expect(TokenKind::At)?;
-	let start_address = skip_until(cursor, TokenKind::Semicolon)?;
+	let first = skip_until(cursor, &[TokenKind::Dot2, TokenKind::CBracket])?;
+	let parse_type = if cursor.expect(TokenKind::Dot2).is_ok() {
+		let end = skip_until(cursor, &[TokenKind::CBracket])?;
+		cursor.expect(TokenKind::CBracket)?;
+		RegionParseType::Range { start: first, end }
+	} else {
+		cursor.expect(TokenKind::CBracket)?;
+		cursor.expect(TokenKind::At)?;
+		let address = skip_until(cursor, &[TokenKind::Semicolon])?;
+		RegionParseType::Location { size: first, address }
+	};
 	cursor.expect(TokenKind::Semicolon)?;
-	Ok(Task::Region { ident, start_size, start_address })
+	Ok(Task::Region { ident, parse_type })
 }
 
 /// Matches RECORD syntax:
@@ -264,7 +277,7 @@ fn scan_record_task(cursor: &mut cursor::Cursor,
 	let start_placement = scan_placement(cursor)?;
 
 	cursor.expect(TokenKind::OBrace)?;
-	let start_fields = skip_until(cursor, TokenKind::CBrace)?;
+	let start_fields = skip_until(cursor, &[TokenKind::CBrace])?;
 	cursor.expect(TokenKind::CBrace)?;
 
 	Ok(Task::Record { ident, location, start_placement, start_fields })
@@ -279,13 +292,13 @@ fn scan_table_task(cursor: &mut cursor::Cursor,
 	let ident = cursor.expect_identifier("table name")?;
 
 	cursor.expect(TokenKind::OBracket)?;
-	let start_rows = skip_until(cursor, TokenKind::CBracket)?;
+	let start_rows = skip_until(cursor, &[TokenKind::CBracket])?;
 	cursor.expect(TokenKind::CBracket)?;
 
 	let start_placement = scan_placement(cursor)?;
 
 	cursor.expect(TokenKind::OBrace)?;
-	let start_fields = skip_until(cursor, TokenKind::CBrace)?;
+	let start_fields = skip_until(cursor, &[TokenKind::CBrace])?;
 	cursor.expect(TokenKind::CBrace)?;
 
 	Ok(Task::Table { ident, start_rows, start_placement, start_fields })
@@ -295,7 +308,7 @@ fn scan_placement(cursor: &mut cursor::Cursor,
 ) -> Result<Option<TokenId>, error::Error> {
 	if matches!(cursor.current(), TokenKind::At | TokenKind::In) {
 		let start = cursor.index();
-		skip_until(cursor, TokenKind::OBrace)?;
+		skip_until(cursor, &[TokenKind::OBrace])?;
 		Ok(Some(start))
 	} else {
 		Ok(None)
@@ -303,7 +316,7 @@ fn scan_placement(cursor: &mut cursor::Cursor,
 }
 
 fn check_braces(cursor: &mut cursor::Cursor) -> Result<(), error::Error> {
-	skip_until(cursor, TokenKind::OBrace)?;
+	skip_until(cursor, &[TokenKind::OBrace])?;
 	cursor.expect(TokenKind::OBrace)?;
 	let mut brace_count = 1;
 	while brace_count > 0 && cursor.current() != TokenKind::Eof {
@@ -366,13 +379,13 @@ fn scan_target_proc(cursor: &mut cursor::Cursor,
 }
 
 fn skip_until(cursor: &mut cursor::Cursor,
-	end_token: TokenKind,
+	end_tokens: &[TokenKind],
 ) -> Result<TokenId, error::Error> {
 	let start = cursor.index();
 	loop {
 		match cursor.current() {
 			TokenKind::Eof => return Err(error::Error::UnexpectedEof { location: cursor.index() }),
-			token if token == end_token => break Ok(start),
+			token if end_tokens.contains(&token) => break Ok(start),
 			_ => cursor.advance(),
 		}
 	}
@@ -409,8 +422,8 @@ fn process_tasks(lex_data: &LexData,
 				}
 			}
 
-			Task::Region { ident, start_size, start_address } => {
-				match process_region(lex_data, &data, start_size, start_address) {
+			Task::Region { ident, parse_type } => {
+				match process_region(lex_data, &data, parse_type) {
 					Ok((start, end)) => {
 						data.regions.insert(ident, Region::new(start, end));
 						data.kinds.insert(ident, Kind::Region);
@@ -566,29 +579,56 @@ fn check_recursion(
 fn process_region (
 	lex_data: &LexData,
 	data: &Data<TokenId>,
-	start_size: TokenId, start_address: TokenId,
+	parse_type: RegionParseType,
 ) -> Result<(u32,u32), error::Error> {
-	let mut cursor_size = cursor::Cursor::from_start(lex_data, start_size);
-	let result_size = evaluate_expr(&mut cursor_size, &data, TokenKind::CBracket);
-	let mut cursor_address = cursor::Cursor::from_start(lex_data, start_address);
-	let result_address = evaluate_expr(&mut cursor_address, &data, TokenKind::Semicolon);
+	match parse_type {
+		RegionParseType::Range { start, end } => {
+			let mut cursor = cursor::Cursor::from_start(lex_data, start);
+			let result_start = evaluate_expr(&mut cursor, &data, TokenKind::Dot2);
 
-	match (result_size, result_address) {
-		(Ok(Value::Integer(region_size)), Ok(Value::Integer(region_address))) => {
-			if !(0..u32::MAX as i64).contains(&region_address) {
-				panic!("region address ({region_address}) out of range")
+			let mut cursor = cursor::Cursor::from_start(lex_data, end);
+			let result_end = evaluate_expr(&mut cursor, &data, TokenKind::CBracket);
+
+			match (result_start, result_end) {
+				(Ok(Value::Integer(region_start)), Ok(Value::Integer(region_end))) => {
+					if !(0..u32::MAX as i64).contains(&region_start) {
+						panic!("region start ({region_start}) out of range")
+					}
+					if !(0..u32::MAX as i64).contains(&region_end) {
+						panic!("region end ({region_end}) out of range")
+					}
+					Ok((region_start as u32, region_end as u32))
+				}
+				(Ok(Value::Decimal(_)),_) | (_,Ok(Value::Decimal(_))) => {
+					panic!("decimal values not allowed in region declarations")
+				}
+				(Err(e),_) | (_,Err(e)) => Err(e),
 			}
-			if !(0..u32::MAX as i64).contains(&(region_address + region_size)) {
-				panic!("region address + size ({}) out of range", region_address + region_size)
+		}
+
+		RegionParseType::Location { size, address } => {
+			let mut cursor = cursor::Cursor::from_start(lex_data, size);
+			let result_size = evaluate_expr(&mut cursor, &data, TokenKind::CBracket);
+
+			let mut cursor = cursor::Cursor::from_start(lex_data, address);
+			let result_addr = evaluate_expr(&mut cursor, &data, TokenKind::Semicolon);
+
+			match (result_size, result_addr) {
+				(Ok(Value::Integer(region_size)), Ok(Value::Integer(region_addr))) => {
+					if !(0..u32::MAX as i64).contains(&region_addr) {
+						panic!("region address ({region_addr}) out of range")
+					}
+					if !(0..u32::MAX as i64).contains(&(region_addr + region_size)) {
+						panic!("region end ({}) out of range", region_addr + region_size)
+					}
+					Ok((region_addr as u32, (region_addr + region_size) as u32))
+				}
+				(Ok(Value::Decimal(_)),_) | (_,Ok(Value::Decimal(_))) => {
+					panic!("decimal values not allowed in region declarations")
+				}
+				(Err(e),_) | (_,Err(e)) => Err(e),
 			}
-			let start = region_address as u32;
-			let end = (region_address + region_size) as u32;
-			Ok((start, end))
 		}
-		(Ok(Value::Decimal(_)),_) | (_,Ok(Value::Decimal(_))) => {
-			panic!("decimal values not allowed in region declarations")
-		}
-		(Err(e),_) | (_,Err(e)) => Err(e),
 	}
 }
 
