@@ -13,7 +13,7 @@ mod packing;
 mod lexer;
 mod operators;
 mod parser;
-mod rings_type;
+mod types;
 mod span;
 mod token;
 //mod type_checker;
@@ -220,10 +220,10 @@ fn token_source(
 fn type_text(
 	input: &input::Data,
 	lex_data: &lexer::Data,
-	ring_type: &rings_type::Type,
+	ring_type: &types::Type,
 ) -> String {
 	match ring_type {
-		rings_type::Type::Record(ident_id) => {
+		types::Type::Record(ident_id) => {
 			lex_data.text(input, ident_id).to_string()
 		}
 		#[cfg(feature="table")]
