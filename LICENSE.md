@@ -1,13 +1,13 @@
 
 # Rings
 
-Copyright (c) 2025, Seth Renshaw
-All right reserved.
+Copyright © 2025-2026, Seth Renshaw
+
+All rights reserved.
 
 # Flat Assembler G
 
-flat assembler g
-Copyright (c) 2015-2025, Tomasz Grysztar
+flat assembler g is Copyright © 2015-2025, Tomasz Grysztar
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
