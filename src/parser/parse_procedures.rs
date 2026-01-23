@@ -3,19 +3,23 @@ use crate::identifier::IdentId;
 use crate::operators::BinaryOp;
 use crate::token::{Id as TokenId, Kind as TKind};
 
-use super::ast::{Ast, AstId, AstList, PathSegment};
+use super::ast::{Ast, AstId, AstList, Kind as AstKind, PathSegment};
 use super::cursor::Cursor;
 use super::error::Error;
 use super::Data;
 
+type KindList = AstList<AstKind, TokenId>;
+
 pub fn parse_block(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	data: &mut Data<TokenId>,
 	proc_id: IdentId,
 	depth: u16,
 ) -> Result<Vec<AstId>, Error> {
+	let scope_start = cursor.index();
 	cursor.expect(TKind::OBrace)?;
+	nodes.push(Ast::scope_begin((scope_start..scope_start).into()));
 
 	let mut block = vec![];
 	while ![TKind::Eof, TKind::CBrace].contains(&cursor.current()) {
@@ -39,14 +43,16 @@ pub fn parse_block(
 		});
 	}
 
+	let scope_end = cursor.index();
 	cursor.expect(TKind::CBrace)?;
+	nodes.push(Ast::scope_end((scope_end..scope_end).into()));
 
 	Ok(block)
 }
 
 fn parse_ident_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	ident_id: IdentId,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
@@ -72,7 +78,7 @@ fn parse_ident_statement(
 /// - `let <ident> = <expr>;` (not implemented)
 fn parse_let_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	data: &mut Data<TokenId>,
 	proc_id: IdentId,
 	depth: u16,
@@ -95,7 +101,7 @@ fn parse_let_statement(
 
 fn parse_access(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	ident_id: IdentId,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
@@ -132,7 +138,7 @@ fn parse_access(
 
 fn parse_assignment(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	tok_start: TokenId,
 	lvalue_id: AstId,
 ) -> Result<AstId, Error> {
@@ -145,7 +151,7 @@ fn parse_assignment(
 
 fn parse_op_assignment(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	tok_start: TokenId,
 	lvalue_id: AstId, op: BinaryOp,
 ) -> Result<AstId, Error> {
@@ -161,7 +167,7 @@ fn parse_op_assignment(
 
 fn parse_return_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(TKind::Return)?;
@@ -179,7 +185,7 @@ fn parse_return_statement(
 
 fn parse_if_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	data: &mut Data<TokenId>,
 	proc_id: IdentId,
 	depth: u16,
@@ -200,7 +206,7 @@ fn parse_if_statement(
 
 fn parse_while_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	data: &mut Data<TokenId>,
 	proc_id: IdentId,
 	depth: u16,
@@ -215,11 +221,13 @@ fn parse_while_statement(
 
 fn parse_for_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	data: &mut Data<TokenId>,
 	proc_id: IdentId,
 	depth: u16,
 ) -> Result<AstId, Error> {
+	// TODO - srenshaw - Add identifier AST nodes for loop indexes.
+
 	let tok_start = cursor.index();
 	cursor.expect(TKind::For)?;
 
@@ -274,7 +282,7 @@ fn parse_for_statement(
 /// - `mark <ident> in <region>;`
 fn parse_mark_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(TKind::Mark)?;
@@ -291,7 +299,7 @@ fn parse_mark_statement(
 /// - `free <ident> in <region>;`
 fn parse_free_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(TKind::Free)?;
@@ -311,7 +319,7 @@ fn parse_free_statement(
 /// - `use <ident> in <region>;`
 fn parse_use_statement(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	cursor.expect(TKind::Use)?;
@@ -325,7 +333,7 @@ fn parse_use_statement(
 
 fn parse_call(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	ident_id: IdentId,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
@@ -355,7 +363,7 @@ fn parse_call(
 
 fn parse_expression(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	end_tokens: &[TKind],
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
@@ -364,7 +372,7 @@ fn parse_expression(
 
 fn parse_expr_main(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	tok_start: TokenId,
 	min_binding_power: usize, end_tokens: &[TKind],
 ) -> Result<AstId, Error> {
@@ -374,7 +382,7 @@ fn parse_expr_main(
 
 fn parse_expr_sub(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 	tok_start: TokenId,
 	min_binding_power: usize, left: AstId,
 	end_tokens: &[TKind],
@@ -400,15 +408,15 @@ fn parse_expr_sub(
 
 fn parse_primary(
 	cursor: &mut Cursor,
-	nodes: &mut AstList<TokenId>,
+	nodes: &mut KindList,
 ) -> Result<AstId, Error> {
 	let tok_start = cursor.index();
 	let unary_op = cursor.expect_unary_op();
 
-	fn primary_node(cursor: &mut Cursor, nodes: &mut AstList<TokenId>, ast: Ast<TokenId>) -> AstId {
+	let primary_node = |cursor: &mut Cursor, nodes: &mut KindList, ast| {
 		cursor.advance();
 		nodes.push(ast)
-	}
+	};
 
 	let tok_loc = cursor.index();
 	let node = match cursor.current() {

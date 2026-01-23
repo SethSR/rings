@@ -28,9 +28,8 @@ mod proc_tests;
 mod table_tests;
 
 use expression::evaluate_expr;
-use ast::AstList;
 
-pub use ast::{Ast, AstId, Kind as AstKind};
+pub use ast::{Ast, AstId, Kind as AstKind, AstList, PathSegment};
 pub use data::{Procedure, Record, Region, Table, Value};
 pub use data::{ProcMap, RecordMap, RegionMap, TableMap, TypeMap, ValueMap};
 pub use types::Type;
@@ -687,6 +686,7 @@ fn process_proc(
 		body: AstList::default(),
 		ret_type: Type::Void,
 	};
+	let start_depth = 0;
 
 	let cursor = &mut cursor::Cursor::from_start(lex_data, start);
 
@@ -694,7 +694,7 @@ fn process_proc(
 		let params = process_fields(cursor, data, TokenKind::CParen)?;
 		cursor.expect(TokenKind::CParen)?;
 		for (param_id, param_type) in &params {
-			data.types.insert((proc_id, 0, *param_id), *param_type);
+			data.types.insert((proc_id, start_depth, *param_id), *param_type);
 		}
 		params
 	} else {
@@ -710,7 +710,7 @@ fn process_proc(
 	let start = AstId::new(proc.body.len());
 	let tok_start = cursor.index();
 	let mut block = parse_procedures::parse_block(
-		cursor, &mut proc.body, data, proc_id, 0,
+		cursor, &mut proc.body, data, proc_id, start_depth + 1,
 	)?;
 	let end = AstId::new(proc.body.len());
 	let tok_end = cursor.index();

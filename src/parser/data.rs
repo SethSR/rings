@@ -1,7 +1,7 @@
 
 use std::ops::{Add, Sub, Mul, Div, Rem};
 
-use crate::parser::ast::AstList;
+use crate::parser::ast::{AstList, Kind};
 use crate::identifier::{IdentId, Map as IdentMap};
 use crate::{Span, Target};
 
@@ -43,7 +43,7 @@ pub struct Table {
 pub struct Procedure<T> {
 	pub target: Option<Target>,
 	pub params: Vec<(IdentId, Type)>,
-	pub body: AstList<T>,
+	pub body: AstList<Kind, T>,
 	pub ret_type: Type,
 }
 

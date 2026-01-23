@@ -6,6 +6,8 @@ use crate::identifier::IdentId;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::Span;
 
+pub type AstList<K,T> = IndexVec<AstId, Ast<K,T>>;
+
 define_index_type! {
 	pub struct AstId = usize;
 	DEFAULT = AstId::from_raw_unchecked(0);
@@ -13,27 +15,23 @@ define_index_type! {
 	DISPLAY_FORMAT = "{}";
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PathSegment {
-	Field(IdentId),
-	Index(AstId, IdentId),
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kind {
-	Ident(IdentId),
 	Int(i64),
 	Dec(f64),
+	Ident(IdentId),
 	Assign { lhs: AstId, rhs: AstId },
 	BinOp { op: BinaryOp, lhs: AstId, rhs: AstId },
 	UnOp { op: UnaryOp, rhs: AstId },
 	Return(Option<AstId>),
+	ScopeBegin,
+	ScopeEnd,
+	Block(Vec<AstId>),
 	If {
 		cond: AstId,
 		then_block: Vec<AstId>,
 		else_block: Vec<AstId>,
 	},
-	Block(Vec<AstId>),
 	While { cond: AstId, block: Vec<AstId> },
 	For {
 		indexes: Vec<IdentId>,
@@ -50,12 +48,12 @@ pub enum Kind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Ast<T> {
-	pub kind: Kind,
+pub struct Ast<K,T> {
+	pub kind: K,
 	pub location: Span<T>,
 }
 
-impl<T> Ast<T> {
+impl<T> Ast<Kind,T> {
 	pub fn ident(
 		id: IdentId,
 		location: Span<T>,
@@ -130,14 +128,16 @@ impl<T> Ast<T> {
 		}
 	}
 
-	pub fn if_(
-		cond: AstId,
-		then_block: Vec<AstId>,
-		else_block: Vec<AstId>,
-		location: Span<T>,
-	) -> Self {
+	pub fn scope_begin(location: Span<T>) -> Self {
 		Self {
-			kind: Kind::If { cond, then_block, else_block },
+			kind: Kind::ScopeBegin,
+			location,
+		}
+	}
+
+	pub fn scope_end(location: Span<T>) -> Self {
+		Self {
+			kind: Kind::ScopeEnd,
 			location,
 		}
 	}
@@ -148,6 +148,18 @@ impl<T> Ast<T> {
 	) -> Self {
 		Self {
 			kind: Kind::Block(block),
+			location,
+		}
+	}
+
+	pub fn if_(
+		cond: AstId,
+		then_block: Vec<AstId>,
+		else_block: Vec<AstId>,
+		location: Span<T>,
+	) -> Self {
+		Self {
+			kind: Kind::If { cond, then_block, else_block },
 			location,
 		}
 	}
@@ -233,13 +245,17 @@ impl<T> Ast<T> {
 	}
 }
 
-impl<T> PartialEq<Kind> for Ast<T> {
+impl<T> PartialEq<Kind> for Ast<Kind, T> {
 	fn eq(&self, kind: &Kind) -> bool {
 		&self.kind == kind
 	}
 }
 
-pub type AstList<T> = IndexVec<AstId, Ast<T>>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathSegment {
+	Field(IdentId),
+	Index(AstId, IdentId),
+}
 
 #[cfg(feature="optimize")]
 #[derive(Debug, Default)]

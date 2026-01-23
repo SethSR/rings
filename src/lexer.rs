@@ -36,6 +36,12 @@ impl Data {
 		let Span { start, end } =  self.identifiers[ident_id];
 		&input.source[start..end]
 	}
+	
+	pub fn location(&self,
+		ident_id: &identifier::IdentId,
+	) -> Span<SrcPos> {
+		self.identifiers[ident_id]
+	}
 
 	pub fn print(&self, input: &input::Data, with_tokens: bool) {
 		if with_tokens {

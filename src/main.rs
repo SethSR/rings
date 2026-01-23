@@ -16,7 +16,7 @@ mod parser;
 mod types;
 mod span;
 mod token;
-//mod type_checker;
+mod type_checker;
 //mod vsmc;
 
 use span::Span;
@@ -51,14 +51,18 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		.map_err(|e| e.display(&input))?;
 	println!("{prs_data:?}\n");
 
-	/*
-	let proc_db = type_checker::eval(&input, &lex_data, &dsc_data)
+	let proc_db = type_checker::eval(&input, &lex_data, &prs_data)
 		.map_err(|e| e.display(&input))?;
-	//println!("{proc_db:?}");
-	*/
+	println!("Procedures: {proc_db:?}\n");
+	for (proc_id, list) in &proc_db {
+		println!("  {}:", lex_data.text(&input, proc_id));
+		for ast in list {
+			println!("    {ast:?}");
+		}
+	}
 
 	let lay_data = packing::eval(&prs_data);
-	println!("{lay_data:?}");
+	println!("Layout: {lay_data:?}");
 
 	/*
 	let section_db = vsmc::eval(&input, &lex_data, &prs_data, &lay_data)

@@ -1,23 +1,64 @@
 
-use std::collections::hash_map::Entry;
-
-use crate::ast::{Block as AstBlock, Id as AstId, Kind};
 use crate::error;
 use crate::identifier::{IdentId, Identifier, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::parser::{DscData, ProcData, Type};
-use crate::rings_type::Meet;
+use crate::parser::{Ast, AstId, AstKind, AstList, Data as PrsData, PathSegment, Type, Value};
 use crate::token::Id as TokenId;
-use crate::{text, token_source};
+use crate::{token_source, SrcPos};
+
+pub type TypedList = AstList<TypedKind, SrcPos>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExType {
+	Type(Type),
+	ExInt,
+	ExDec,
+}
+
+impl ExType {
+	fn void() -> Self {
+		Self::Type(Type::Void)
+	}
+
+	fn is_integer(&self) -> bool {
+		matches!(self,
+			Self::ExInt |
+			Self::Type(Type::S8) |
+			Self::Type(Type::S16) |
+			Self::Type(Type::S32) |
+			Self::Type(Type::U8) |
+			Self::Type(Type::U16) |
+			Self::Type(Type::U32)
+		)
+	}
+
+	fn is_decimal(&self) -> bool {
+		matches!(self, Self::ExDec)
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct TypedKind(AstKind, ExType);
+
+type TypedAst = Ast<TypedKind, SrcPos>;
+
+impl TypedAst {
+	fn new(value: Ast<AstKind, SrcPos>, ex_type: ExType) -> Self {
+		Self {
+			kind: TypedKind(value.kind, ex_type),
+			location: value.location,
+		}
+	}
+}
 
 enum Error {
 	InternalValue,
 	AlreadyDefined(IdentId),
-	MismatchedTypes(Type, Type),
-	InvalidBinOp(BinaryOp, Type, Type),
-	InvalidUnOp(UnaryOp, Type),
+	MismatchedTypes(ExType, ExType),
+	InvalidBinOp(BinaryOp, ExType, ExType),
+	InvalidUnOp(UnaryOp, ExType),
 	TooManyLoopVariables,
 	NegativeLoopRange,
 	MissingLoopBounds,
@@ -33,7 +74,7 @@ impl Error {
 				"Cannot define internal values, assign instead".to_string()
 			}
 			Self::AlreadyDefined(ident_id) => {
-				format!("'{}' already defined", text(input, lex_data, ident_id))
+				format!("'{}' already defined", lex_data.text(input, ident_id))
 			}
 			Self::MismatchedTypes(expected, found) => {
 				format!("Variable has type {expected:?}, but expression has type {found:?}")
@@ -57,7 +98,7 @@ impl Error {
 				format!("{msg} has no type: {ast_id:?}")
 			}
 			Self::MissingAstNode(proc_id, ast_id) => {
-				format!("{} not found in procedure '{}'", ast_id, text(input, lex_data, &proc_id))
+				format!("{} not found in procedure '{}'", ast_id, lex_data.text(input, &proc_id))
 			}
 		}
 	}
@@ -66,11 +107,10 @@ impl Error {
 pub fn eval(
 	input: &InputData,
 	lex_data: &LexData,
-	dsc_data: &DscData,
-	mut proc_db: IdentMap<ProcData>,
-) -> Result<IdentMap<ProcData>, error::Error> {
+	prs_data: &PrsData<SrcPos>,
+) -> Result<IdentMap<TypedList>, error::Error> {
 	// Check for 'main' procedure
-	if !proc_db.contains_key(&"main".id()) {
+	if !prs_data.procedures.contains_key(&"main".id()) {
 		let tok_src = token_source(input, lex_data, TokenId::default());
 		let message = "missing 'main' procedure";
 		let err = error::Error::new(tok_src, message);
@@ -78,9 +118,9 @@ pub fn eval(
 	}
 
 	// Check for stack regions
-	let has_call_stack = dsc_data.regions.contains_key(&"CallStack".id());
-	let has_data_stack = dsc_data.regions.contains_key(&"DataStack".id());
-	if let Some(stack_src_loc) = dsc_data.regions.get(&"Stack".id()) {
+	let has_call_stack = prs_data.regions.contains_key(&"CallStack".id());
+	let has_data_stack = prs_data.regions.contains_key(&"DataStack".id());
+	if let Some(stack_src_loc) = prs_data.regions.get(&"Stack".id()) {
 		// call and data stack are combined, reject explicitly named regions
 		if has_call_stack || has_data_stack {
 			let tok_src = token_source(input, lex_data, (stack_src_loc.span.start as usize).into());
@@ -104,17 +144,17 @@ pub fn eval(
 	}
 
 	// Check for region overlap
-	let regions_vec: Vec<_> = dsc_data.regions.iter().collect();
+	let regions_vec: Vec<_> = prs_data.regions.iter().collect();
 
 	for i in 0..regions_vec.len() {
 		for j in i+1..regions_vec.len() {
 			let (i_name, i_span) = regions_vec[i];
 			let (j_name, j_span) = regions_vec[j];
 			if !(i_span.span.start >= j_span.span.end || i_span.span.end <= j_span.span.start) {
-				let i_src_loc = lex_data.identifiers[i_name];
-				let j_src_loc = lex_data.identifiers[j_name];
-				let i_text = text(input, lex_data, i_name);
-				let j_text = text(input, lex_data, j_name);
+				let i_src_loc = lex_data.location(i_name);
+				let j_src_loc = lex_data.location(j_name);
+				let i_text = lex_data.text(input, i_name);
+				let j_text = lex_data.text(input, j_name);
 				let msg = format!("regions {i_text} and {j_text} overlap");
 				let i_msg = format!("{i_text} has a memory range of {i_span:?}");
 				let j_msg = format!("{j_text} has a memory range of {j_span:?}");
@@ -131,330 +171,309 @@ pub fn eval(
 	// TODO - srenshaw - Ensure records fit within their respective regions.
 
 	// Check procedures
-	let completed_procs = proc_db.clone();
-	for (proc_id, mut proc_data) in completed_procs {
-		let proc_type = &dsc_data.procedures[&proc_id];
+	let mut typed_procedures = IdentMap::with_capacity(prs_data.procedures.len());
+	for (proc_id, proc_data) in &prs_data.procedures {
+		let proc_start: AstId = 0.into();
 
-		for (param_name, param_type) in &proc_type.params {
-			proc_data.ident_to_type.insert(*param_name, *param_type);
-		}
-
-		let proc_start = proc_data.ast_start;
-		let range = proc_data.ast_pos_tok[proc_start].clone();
-
-		let ret_type = proc_type.ret_type;
-		if let Err(err) = check_stmt(&mut proc_data, proc_id, proc_start, ret_type) {
-			let tok_src = token_source(input, lex_data, range.start);
-			let message = err.to_string(input, lex_data);
-			let err = error::Error::new(tok_src, message)
-				.with_kind(error::Kind::Checker);
-			return Err(err);
-		}
-		proc_db.entry(proc_id)
-			.and_modify(|data| *data = proc_data);
-	}
-
-	Ok(proc_db)
-}
-
-fn check_stmt(proc_data: &mut ProcData,
-	proc_id: IdentId, ast_id: AstId, ret_type: Type,
-) -> Result<(), Error> {
-	match proc_data.ast_nodes[ast_id].clone() {
-		Kind::Int(_) => {
-			proc_data.ast_to_type.insert(ast_id, Type::int());
-			Ok(())
-		}
-
-		Kind::Dec(_) => {
-			proc_data.ast_to_type.insert(ast_id, Type::Top);
-			Ok(())
-		}
-
-		Kind::Ident(ident_id) => {
-			check_ident(proc_data, &ident_id, ast_id);
-			Ok(())
-		}
-
-		Kind::Define(lvalue_id, var_type) => {
-			check_define(proc_data, lvalue_id, var_type)
-		}
-
-		Kind::Assign(lvalue_id, expr_id) => {
-			if proc_data.ast_nodes.get(expr_id).is_none() {
-				return Err(Error::MissingAstNode(proc_id, expr_id));
-			}
-			check_stmt(proc_data, proc_id, lvalue_id, ret_type)?;
-			check_stmt(proc_data, proc_id, expr_id, ret_type)?;
-			check_assign(proc_data, lvalue_id, expr_id)
-		}
-
-		Kind::BinOp(op, left, right) => {
-			check_binop(proc_data, proc_id, ast_id, op, &left, &right, ret_type)
-		}
-
-		Kind::UnOp(op, right) => {
-			check_unop(proc_data, ast_id, op, &right)
-		}
-
-		Kind::Return(expr_id) => {
-			check_return(proc_data, proc_id, expr_id, ret_type)
-		}
-
-		Kind::Block(block) => {
-			check_block(proc_data, proc_id, &block, ret_type)
-		}
-
-		Kind::If(cond_id, then_block, else_block) => {
-			check_if(proc_data, proc_id, cond_id, &then_block, &else_block, ret_type)
-		}
-
-		Kind::While(cond_id, block) => {
-			check_condition(proc_data, proc_id, cond_id, ret_type)?;
-			check_block(proc_data, proc_id, &block, ret_type)
-		}
-
-		Kind::For(_vars, Some(_), _, _) => { todo!() }
-		#[cfg(feature="forloop")]
-		Kind::For(vars, Some(table_id), range, block) => {
-			let table = &proc_data.tables[table_id];
-			debug_assert!(vars.len() <= table.column_spec.len());
-
-			let (start, end) = match range {
-				Some(range) => (range.get_start(), range.get_end(table.row_count)),
-				None => (0, table.row_count),
-			};
-
-			if start >= table.row_count {
-				return Err("'start' value in bounds must be less than table row-count".to_string());
-			}
-			if end > table.row_count {
-				return Err("'end' value in bounds must be less than or equal to table row-count".to_string());
-			}
-			if start > end {
-				return Err("start value must be less than or equal to end value".to_string());
+		match check_stmt(&prs_data, *proc_id) {
+			Ok(new_ast) => {
+				typed_procedures.insert(*proc_id, new_ast);
 			}
 
-			for i in 0..vars.len() {
-				let var = &vars[i];
-				if vars[i+1..].contains(var) {
-					return Some(format!("duplicate field name '{}' in table", proc_data.text(var)));
-				}
-
-				if !table.column_spec.iter().any(|(a,_)| var == a) {
-					return Err(format!("field '{}' not found in table '{}'", proc_data.text(var), data.text(table_id)));
-				}
-			}
-			self.check_block(proc_data, block, ret_type)
-		}
-
-		Kind::For(vars, None, Some(range), block) => {
-			if vars.len() != 1 {
-				return Err(Error::TooManyLoopVariables);
-			}
-			match range {
-				crate::Bounds::Full { start, end } => {
-					debug_assert!(start <= end);
-					if start > end {
-						return Err(Error::NegativeLoopRange);
-					}
-				}
-				crate::Bounds::From {..} | crate::Bounds::To {..} => {
-					return Err(Error::MissingLoopBounds);
-				}
-			}
-			check_block(proc_data, proc_id, &block, ret_type)
-		}
-
-		Kind::For(vars, None, None, block) => {
-			todo!("infinite for-loop: {vars:?} {block:?}")
-		}
-
-		Kind::Call(proc_id, exprs) => {
-			todo!("procedure-call: {proc_id} {exprs:?}")
-		}
-
-		Kind::Access(base_id, segments) => {
-			let mut curr_id = base_id;
-			for segment in segments {
-				match segment {
-					PathSegment::Field(field_id) => {
-						let Some(record) = proc_data.records.get(curr_id) else {
-							return Err(format!("no record named '{}' found", proc_data.text(curr_id)));
-						};
-						if !record.fields.iter().any(|(f_id,_)| field_id == f_id) {
-							return Err(format!("no field '{}' in record '{}'",
-								proc_data.text(&field_id), data.text(&curr_id),
-							));
-						}
-						curr_id = field_id;
-					}
-					PathSegment::Index(expr_id, field_id) => {
-						todo!("table-index-2: [{expr_id}].{field_id}")
-					}
-				}
-			}
-			Ok(())
-		}
-	}
-}
-
-fn check_ident(proc_data: &mut ProcData,
-	ident_id: &IdentId, ast_id: AstId,
-) {
-	let new_type = proc_data.ident_to_type.get(ident_id)
-		.unwrap_or(&Type::Top);
-	proc_data.ast_to_type.insert(ast_id, *new_type);
-}
-
-fn check_define(proc_data: &mut ProcData,
-	lvalue_id: AstId, var_type: Type,
-) -> Result<(), Error> {
-	let Kind::Ident(ident_id) = proc_data.ast_nodes[lvalue_id] else {
-		return Err(Error::InternalValue);
-	};
-
-	let Entry::Vacant(e) = proc_data.ident_to_type.entry(ident_id) else {
-		return Err(Error::AlreadyDefined(ident_id));
-	};
-
-	e.insert(var_type);
-	proc_data.ast_to_type.insert(lvalue_id, var_type);
-	Ok(())
-}
-
-fn check_assign(proc_data: &ProcData,
-	lvalue_id: AstId, ast_id: AstId,
-) -> Result<(), Error> {
-	let ident_id = match proc_data.ast_nodes[lvalue_id] {
-		Kind::Ident(id) => id,
-		Kind::Define(def_id, _) => match proc_data.ast_nodes[def_id] {
-			Kind::Ident(id) => id,
-			_ => todo!("missing ident for lvalue: {lvalue_id:?}"),
-		}
-		_ => todo!("missing ident for lvalue: {lvalue_id:?}"),
-	};
-	let Some(lvalue_type) = proc_data.ident_to_type.get(&ident_id) else {
-		return Err(Error::NoType { msg: "lvalue", ast_id: lvalue_id });
-	};
-	let Some(expr_type) = proc_data.ast_to_type.get(&ast_id) else {
-		return Err(Error::NoType { msg: "assign expression", ast_id });
-	};
-	if expr_type.meet(lvalue_type) != *lvalue_type {
-		Err(Error::MismatchedTypes(*lvalue_type, *expr_type))
-	} else {
-		// The types match, so we're okay.
-		Ok(())
-	}
-}
-
-fn check_binop(proc_data: &mut ProcData,
-	proc_id: IdentId, ast_id: AstId,
-	op: BinaryOp, left_id: &AstId, right_id: &AstId, proc_type: Type,
-) -> Result<(), Error> {
-	check_stmt(proc_data, proc_id, *left_id, proc_type)?;
-	check_stmt(proc_data, proc_id, *right_id, proc_type)?;
-	match op {
-		BinaryOp::Add |
-		BinaryOp::Sub |
-		BinaryOp::Mul |
-		BinaryOp::Div |
-		BinaryOp::Mod |
-		BinaryOp::ShL |
-		BinaryOp::ShR |
-		BinaryOp::BinAnd |
-		BinaryOp::BinOr |
-		BinaryOp::BinXor |
-		BinaryOp::LogAnd |
-		BinaryOp::LogOr |
-		BinaryOp::LogXor |
-		BinaryOp::CmpEQ |
-		BinaryOp::CmpNE |
-		BinaryOp::CmpGE |
-		BinaryOp::CmpGT |
-		BinaryOp::CmpLE |
-		BinaryOp::CmpLT => {
-			let left_type = proc_data.ast_to_type[left_id];
-			let right_type = proc_data.ast_to_type[right_id];
-			match left_type.meet(&right_type) {
-				Type::Bot => Err(Error::InvalidBinOp(op, left_type, right_type)),
-				new_type => {
-					// Types are able to meet
-					proc_data.ast_to_type.insert(ast_id, new_type);
-					Ok(())
-				}
+			Err(err) => {
+				let tok_src = proc_data.body[proc_start].location;
+				let message = err.to_string(input, lex_data);
+				let err = error::Error::new(tok_src, message)
+						.with_kind(error::Kind::Checker);
+				return Err(err);
 			}
 		}
 	}
+
+	Ok(typed_procedures)
 }
 
-fn check_unop(proc_data: &mut ProcData,
-	ast_id: AstId,
-	op: UnaryOp, right: &AstId,
-) -> Result<(), Error> {
-	let right_type = proc_data.ast_to_type[right];
-	if !matches!(right_type, Type::S8) {
-		return Err(Error::InvalidUnOp(op, right_type));
-	};
-
-	#[cfg(feature="types")]
-	if !matches!(rtype, T::Bool | T::U8 | T::S8 | T::U16 | T::S16 | T::U32 | T::S32) {
-		return Some(format!("TC - unable to apply '{op}' to type '{}'", right_type.display(proc_data)));
+fn meet(lhs: ExType, rhs: ExType) -> Result<ExType, Error> {
+	match (lhs, rhs) {
+		(ExType::ExInt, ExType::ExDec) |
+		(ExType::ExDec, ExType::ExInt) => Ok(ExType::ExDec),
+		(ExType::Type(Type::S8), ExType::ExInt) |
+		(ExType::ExInt, ExType::Type(Type::S8)) => Ok(ExType::Type(Type::S8)),
+		(ExType::Type(Type::S16), ExType::ExInt) |
+		(ExType::ExInt, ExType::Type(Type::S16)) => Ok(ExType::Type(Type::S16)),
+		(ExType::Type(Type::S32), ExType::ExInt) |
+		(ExType::ExInt, ExType::Type(Type::S32)) => Ok(ExType::Type(Type::S32)),
+		(ExType::Type(Type::U8), ExType::ExInt) |
+		(ExType::ExInt, ExType::Type(Type::U8)) => Ok(ExType::Type(Type::U8)),
+		(ExType::Type(Type::U16), ExType::ExInt) |
+		(ExType::ExInt, ExType::Type(Type::U16)) => Ok(ExType::Type(Type::U16)),
+		(ExType::Type(Type::U32), ExType::ExInt) |
+		(ExType::ExInt, ExType::Type(Type::U32)) => Ok(ExType::Type(Type::U32)),
+		(ExType::Type(Type::U8), ExType::Type(Type::S16)) |
+		(ExType::Type(Type::S16), ExType::Type(Type::U8)) => Ok(ExType::Type(Type::S16)),
+		(ExType::Type(Type::U8), ExType::Type(Type::S32)) |
+		(ExType::Type(Type::S32), ExType::Type(Type::U8)) => Ok(ExType::Type(Type::S32)),
+		(ExType::Type(Type::U16), ExType::Type(Type::S32)) |
+		(ExType::Type(Type::S32), ExType::Type(Type::U16)) => Ok(ExType::Type(Type::S32)),
+		(ExType::Type(Type::S8), ExType::Type(Type::S16)) |
+		(ExType::Type(Type::S16), ExType::Type(Type::S8)) => Ok(ExType::Type(Type::S16)),
+		(ExType::Type(Type::S8), ExType::Type(Type::S32)) |
+		(ExType::Type(Type::S32), ExType::Type(Type::S8)) => Ok(ExType::Type(Type::S32)),
+		(ExType::Type(Type::S16), ExType::Type(Type::S32)) |
+		(ExType::Type(Type::S32), ExType::Type(Type::S16)) => Ok(ExType::Type(Type::S32)),
+		(ExType::Type(Type::Bool), ExType::ExInt) |
+		(ExType::ExInt, ExType::Type(Type::Bool)) => Ok(ExType::Type(Type::Bool)),
+		(a, b) if a == b => Ok(a),
+		_ => Err(Error::MismatchedTypes(lhs, rhs)),
 	}
-	proc_data.ast_to_type.insert(ast_id, right_type);
-	Ok(())
 }
 
-fn check_return(proc_data: &mut ProcData,
-	proc_id: IdentId, ast_id: Option<AstId>, proc_type: Type,
-) -> Result<(), Error> {
-	let ret_type = match ast_id {
-		Some(ast_id) => {
-			check_stmt(proc_data, proc_id, ast_id, proc_type)?;
-			match proc_data.ast_to_type.get(&ast_id) {
-				Some(ret_type) => *ret_type,
-				None => return Err(Error::NoType { msg: "return expression", ast_id }),
-			}
-		}
-		None => Type::Void,
-	};
-
-	let meet_type = ret_type.meet(&proc_type);
-	if meet_type == Type::Bot {
-		return Err(Error::MismatchedTypes(proc_type, ret_type));
-	}
-	Ok(())
-}
-
-fn check_block(proc_data: &mut ProcData,
-	proc_id: IdentId, block: &AstBlock, proc_type: Type,
-) -> Result<(), Error> {
-	for stmt_id in &block.0 {
-		check_stmt(proc_data, proc_id, *stmt_id, proc_type)?;
-	}
-	Ok(())
-}
-
-fn check_condition(proc_data: &mut ProcData,
-	proc_id: IdentId, cond_id: AstId, proc_type: Type,
-) -> Result<(), Error> {
-	check_stmt(proc_data, proc_id, cond_id, proc_type)?;
-	let cond_type = proc_data.ast_to_type[&cond_id];
-	if cond_type.meet(&Type::S8) == Type::Bot
-	//&& cond_type.meet(Type::Rings(crate::Type::U32)) == Type::Bot
-	{
-		return Err(Error::MismatchedTypes(Type::Int, cond_type));
-	}
-	Ok(())
-}
-
-fn check_if(proc_data: &mut ProcData,
+fn check_stmt(
+	prs_data: &PrsData<SrcPos>,
 	proc_id: IdentId,
-	cond_id: AstId, then_block: &AstBlock, else_block: &AstBlock,
-	proc_type: Type,
-) -> Result<(), Error> {
-	check_condition(proc_data, proc_id, cond_id, proc_type)?;
-	check_block(proc_data, proc_id, then_block, proc_type)?;
-	check_block(proc_data, proc_id, else_block, proc_type)
-}
+) -> Result<AstList<TypedKind, SrcPos>, Error> {
+	let proc_data = &prs_data.procedures[&proc_id];
+	let mut out = AstList::default();
+	let mut scope_depth = 0;
 
+	for ast_id in 0..proc_data.body.len() {
+		let ast = proc_data.body[ast_id].clone();
+		match ast.kind {
+			AstKind::Int(_) => {
+				out.push(TypedAst::new(ast, ExType::ExInt));
+			}
+
+			AstKind::Dec(_) => {
+				out.push(TypedAst::new(ast, ExType::ExDec));
+			}
+
+			AstKind::Ident(ident_id) => {
+				let ex_type = match prs_data.values.get(&ident_id) {
+					Some(Value::Integer(_)) => ExType::ExInt,
+					Some(Value::Decimal(_)) => ExType::ExDec,
+					None => prs_data.types.get(&(proc_id, scope_depth, ident_id))
+							.map(|typ| ExType::Type(*typ))
+							.unwrap_or_else(|| panic!("missing type for {ident_id}: ({proc_id}, {scope_depth}, {ident_id})")),
+				};
+				out.push(TypedAst::new(ast, ex_type));
+			}
+
+			AstKind::Assign { lhs, rhs } => {
+				let lhs = &out[lhs];
+				let rhs = &out[rhs];
+				let ex_type = meet(lhs.kind.1, rhs.kind.1)?;
+				out.push(TypedAst::new(ast, ex_type));
+			}
+
+			AstKind::BinOp { op, lhs, rhs } => {
+				let lhs = &out[lhs];
+				let rhs = &out[rhs];
+				let ex_type = meet(lhs.kind.1, rhs.kind.1)?;
+
+				let valid_op = match op {
+					BinaryOp::Add |
+					BinaryOp::Div |
+					BinaryOp::Mul |
+					BinaryOp::Mod |
+					BinaryOp::ShL |
+					BinaryOp::ShR |
+					BinaryOp::Sub => {
+						// u8, u16, u32, s8, s16, s32, int, dec
+						ex_type.is_integer() || ex_type.is_decimal()
+					}
+
+					BinaryOp::BinAnd |
+					BinaryOp::BinOr |
+					BinaryOp::BinXor => {
+						// u8, u16, u32, s8, s16, s32
+						ex_type.is_integer()
+					}
+
+					BinaryOp::CmpEQ |
+					BinaryOp::CmpGE |
+					BinaryOp::CmpGT |
+					BinaryOp::CmpLE |
+					BinaryOp::CmpLT |
+					BinaryOp::CmpNE |
+					BinaryOp::LogAnd |
+					BinaryOp::LogOr |
+					BinaryOp::LogXor => {
+						ex_type == ExType::Type(Type::Bool)
+					}
+				};
+
+				if !valid_op {
+					panic!("invalid binary-op: {op:?}");
+				}
+
+				out.push(TypedAst::new(ast, ex_type));
+			}
+
+			AstKind::UnOp { op, rhs } => {
+				let rhs = out[rhs].clone();
+				out.push(TypedAst::new(ast, rhs.kind.1));
+				todo!("Checking UnOp: {op} <=> {rhs:?}")
+			}
+
+			AstKind::Return(Some(ret)) => {
+				let ret = &out[ret];
+				let ex_type = meet(ret.kind.1, ExType::Type(proc_data.ret_type))?;
+				out.push(TypedAst::new(ast, ex_type));
+			}
+
+			AstKind::Return(None) => {
+				let ex_type = meet(ExType::void(), ExType::Type(proc_data.ret_type))?;
+				out.push(TypedAst::new(ast, ex_type));
+			}
+
+			AstKind::ScopeBegin => {
+				scope_depth += 1;
+				out.push(TypedAst::new(ast, ExType::void()));
+			}
+
+			AstKind::ScopeEnd => {
+				scope_depth -= 1;
+				out.push(TypedAst::new(ast, ExType::void()));
+			}
+
+			AstKind::Block(ref block) => {
+				let ex_type = block.last()
+						.map(|&id| out[id].kind.1)
+						.unwrap_or(ExType::void());
+				out.push(TypedAst::new(ast, ex_type));
+			}
+
+			AstKind::If { cond, ref then_block, ref else_block } => {
+				let cond = out[cond].clone();
+				let then_type = then_block.last()
+						.map(|&id| out[id].kind.1)
+						.unwrap_or(ExType::void());
+				let else_type = else_block.last()
+						.map(|&id| out[id].kind.1)
+						.unwrap_or(ExType::void());
+				let ex_type = meet(then_type, else_type)?;
+				out.push(TypedAst::new(ast, ex_type));
+				todo!("Checking If condition: {cond:?} <=> {ex_type:?}")
+			}
+
+			AstKind::While { cond, ..} => {
+				let cond = out[cond].clone();
+				out.push(TypedAst::new(ast, ExType::void()));
+				todo!("Checking While: {cond:?}")
+			}
+
+			AstKind::For { ref indexes, table, range_start, range_end, ..} => {
+				let indexes_len = indexes.len();
+
+				// TODO - srenshaw - Add index identifiers as AST nodes so we can verify them here.
+
+				if let Some(table) = table
+						.map(|id| &prs_data.tables[&id])
+				{
+					// TODO - assert indexes.len() == table.params.len() when a table is specified.
+
+					todo!("Table looping not supported yet")
+				}
+
+				if indexes_len > 1 {
+					return Err(Error::TooManyLoopVariables);
+				}
+
+				let Some(start) = range_start else {
+					return Err(Error::MissingLoopBounds)
+				};
+
+				let Some(end) = range_end else {
+					return Err(Error::MissingLoopBounds)
+				};
+
+				debug_assert!(start <= end);
+				if start > end {
+					return Err(Error::NegativeLoopRange);
+				}
+
+				out.push(TypedAst::new(ast, ExType::void()));
+			}
+
+			#[cfg(feature = "forloop")]
+			AstKind::For(vars, Some(table_id), range, block) => {
+				let table = &proc_data.tables[table_id];
+				debug_assert!(vars.len() <= table.column_spec.len());
+
+				let (start, end) = match range {
+					Some(range) => (range.get_start(), range.get_end(table.row_count)),
+					None => (0, table.row_count),
+				};
+
+				if start >= table.row_count {
+					return Err("'start' value in bounds must be less than table row-count".to_string());
+				}
+				if end > table.row_count {
+					return Err("'end' value in bounds must be less than or equal to table row-count".to_string());
+				}
+				if start > end {
+					return Err("start value must be less than or equal to end value".to_string());
+				}
+
+				for i in 0..vars.len() {
+					let var = &vars[i];
+					if vars[i + 1..].contains(var) {
+						return Some(format!("duplicate field name '{}' in table", proc_data.text(var)));
+					}
+
+					if !table.column_spec.iter().any(|(a, _)| var == a) {
+						return Err(format!("field '{}' not found in table '{}'", proc_data.text(var), data.text(table_id)));
+					}
+				}
+				self.check_block(proc_data, block, ret_type)
+			}
+
+			AstKind::Call { proc_id, block } => {
+				todo!("procedure-call: {proc_id} {}", block.len())
+			}
+
+			AstKind::Access { base_id, ref path } => {
+				let mut curr_id = base_id;
+				let mut ex_type = None;
+
+				for segment in path {
+					match segment {
+						PathSegment::Field(field_id) => {
+							let Some(record) = prs_data.records.get(&curr_id) else {
+								panic!("no record named '{curr_id}' found")
+							};
+							let Some((_, field_type)) = record.fields.iter().find(|(f_id, _)| field_id == f_id) else {
+								panic!("no field '{field_id}' in record '{curr_id}'")
+							};
+							curr_id = *field_id;
+							ex_type = Some(ExType::Type(*field_type));
+						}
+						PathSegment::Index(expr_id, field_id) => {
+							todo!("table-index-2: [{expr_id}].{field_id}")
+						}
+					}
+				}
+
+				if ex_type.is_none() {
+					panic!("no type for access {ast:?}")
+				}
+
+				out.push(TypedAst::new(ast, ex_type.unwrap()));
+			}
+
+			AstKind::Mark { region_id, mark_id } => {
+				todo!("Checking Mark: {region_id} {mark_id}")
+			}
+
+			AstKind::Free { region_id, mark_id } => {
+				todo!("Checking Free: {region_id} {mark_id:?}")
+			}
+
+			AstKind::Use { region_id, ident } => {
+				todo!("Checking Use: {region_id} {ident}")
+			}
+		}
+	}
+
+	Ok(out)
+}

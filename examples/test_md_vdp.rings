@@ -1,4 +1,6 @@
 
+region Stack[0..100];
+
 region VdpCtrlLoc[24] @ 0xC00000;
 
 record VdpRegs in VdpCtrlLoc {
