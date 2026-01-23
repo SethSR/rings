@@ -23,12 +23,12 @@ fn init_procedure_with_target() {
 	assert_eq!(proc.target, Some(Target::SH2));
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 	let proc = &data.procedures[&"sub".id()];
 	assert_eq!(proc.target, Some(Target::Z80));
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn procedure_with_return() {
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::S8);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn procedure_with_target() {
 	assert_eq!(proc.target, Some(Target::SH2));
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn procedure_with_params() {
 		("c".id(), Type::S8),
 	]);
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -79,8 +79,10 @@ fn main() {
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![0.into()]),
+		AstKind::Block(vec![2.into()]),
 	]);
 }
 
@@ -92,12 +94,12 @@ fn with_no_params() {
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 	let proc = &data.procedures[&"a".id()];
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -118,17 +120,23 @@ fn with_if() {
 	]);
 	assert_eq!(proc.ret_type, Type::S8);
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Ident("b".id()),
+		AstKind::ScopeBegin,
 		AstKind::Int(1),
-		AstKind::Return(Some(1.into())),
-		AstKind::Int(-1),
 		AstKind::Return(Some(3.into())),
+		AstKind::ScopeEnd,
+		AstKind::ScopeBegin,
+		AstKind::Int(-1),
+		AstKind::Return(Some(7.into())),
+		AstKind::ScopeEnd,
 		AstKind::If {
-			cond: 0.into(),
-			then_block: vec![2.into()],
-			else_block: vec![4.into()],
+			cond: 1.into(),
+			then_block: vec![4.into()],
+			else_block: vec![8.into()],
 		},
-		AstKind::Block(vec![5.into()]),
+		AstKind::ScopeEnd,
+		AstKind::Block(vec![10.into()]),
 	]);
 }
 
@@ -149,17 +157,21 @@ fn with_while() {
 	]);
 	assert_eq!(proc.ret_type, Type::S8);
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Ident("b".id()),
 		AstKind::Int(10),
-		AstKind::BinOp { op: BinaryOp::CmpLT, lhs: 0.into(), rhs: 1.into() },
+		AstKind::BinOp { op: BinaryOp::CmpLT, lhs: 1.into(), rhs: 2.into() },
+		AstKind::ScopeBegin,
 		AstKind::Ident("b".id()),
 		AstKind::Int(3),
-		AstKind::BinOp { op: BinaryOp::Add, lhs: 3.into(), rhs: 4.into() },
-		AstKind::Assign { lhs: 3.into(), rhs: 5.into() },
-		AstKind::While { cond: 2.into(), block: vec![6.into()] },
+		AstKind::BinOp { op: BinaryOp::Add, lhs: 5.into(), rhs: 6.into() },
+		AstKind::Assign { lhs: 5.into(), rhs: 7.into() },
+		AstKind::ScopeEnd,
+		AstKind::While { cond: 3.into(), block: vec![8.into()] },
 		AstKind::Ident("b".id()),
-		AstKind::Return(Some(8.into())),
-		AstKind::Block(vec![7.into(), 9.into()]),
+		AstKind::Return(Some(11.into())),
+		AstKind::ScopeEnd,
+		AstKind::Block(vec![10.into(), 12.into()]),
 	]);
 }
 
@@ -178,9 +190,9 @@ fn with_multiple_scopes() {
 		}
 	").unwrap_or_else(|e| panic!("{e}"));
 	let main_id = "main".id();
-	assert_eq!(data.types.get(&(main_id, 0, "a".id())), Some(&Type::S16));
-	assert_eq!(data.types.get(&(main_id, 1, "b".id())), Some(&Type::S32));
-	assert_eq!(data.types.get(&(main_id, 2, "c".id())), Some(&Type::S16));
+	assert_eq!(data.types.get(&(main_id, 1, "a".id())), Some(&Type::S16));
+	assert_eq!(data.types.get(&(main_id, 2, "b".id())), Some(&Type::S32));
+	assert_eq!(data.types.get(&(main_id, 3, "c".id())), Some(&Type::S16));
 }
 
 #[test]
@@ -192,15 +204,17 @@ fn with_internal_expressions() {
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Int(2),
 		AstKind::Int(3),
-		AstKind::BinOp { op: BinaryOp::Add, lhs: 0.into(), rhs: 1.into() },
+		AstKind::BinOp { op: BinaryOp::Add, lhs: 1.into(), rhs: 2.into() },
 		AstKind::Ident("a".id()),
-		AstKind::Assign { lhs: 3.into(), rhs: 2.into() },
+		AstKind::Assign { lhs: 4.into(), rhs: 3.into() },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![4.into(), 5.into()]),
+		AstKind::Block(vec![5.into(), 7.into()]),
 	]);
-	assert_eq!(data.types.get(&("main".id(), 0, "a".id())), Some(&Type::S8));
+	assert_eq!(data.types.get(&("main".id(), 1, "a".id())), Some(&Type::S8));
 }
 
 #[test]
@@ -212,19 +226,21 @@ fn with_internal_sub_expressions() {
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Int(2),
 		AstKind::Int(3),
-		AstKind::BinOp { op: BinaryOp::Add, lhs: 0.into(), rhs: 1.into() },
+		AstKind::BinOp { op: BinaryOp::Add, lhs: 1.into(), rhs: 2.into() },
 		AstKind::Int(4),
 		AstKind::Int(5),
-		AstKind::BinOp { op: BinaryOp::Sub, lhs: 3.into(), rhs: 4.into() },
-		AstKind::BinOp { op: BinaryOp::Mul, lhs: 2.into(), rhs: 5.into() },
+		AstKind::BinOp { op: BinaryOp::Sub, lhs: 4.into(), rhs: 5.into() },
+		AstKind::BinOp { op: BinaryOp::Mul, lhs: 3.into(), rhs: 6.into() },
 		AstKind::Ident("a".id()),
-		AstKind::Assign { lhs: 7.into(), rhs: 6.into() },
+		AstKind::Assign { lhs: 8.into(), rhs: 7.into() },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![8.into(), 9.into()]),
+		AstKind::Block(vec![9.into(), 11.into()]),
 	]);
-	assert_eq!(data.types.get(&("main".id(), 0, "a".id())), Some(&Type::S8));
+	assert_eq!(data.types.get(&("main".id(), 1, "a".id())), Some(&Type::S8));
 }
 
 #[test]
@@ -236,7 +252,7 @@ fn with_return() {
 	assert_eq!(proc.target, None);
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::S8);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -250,7 +266,7 @@ fn with_single_param() {
 		("b".id(), Type::S8),
 	]);
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -264,7 +280,7 @@ fn with_multi_params() {
 		("c".id(), Type::S8),
 	]);
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -273,17 +289,21 @@ fn with_basic_for_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Int(0),
 		AstKind::Int(10),
+		AstKind::ScopeBegin,
+		AstKind::ScopeEnd,
 		AstKind::For {
 			indexes: vec!["i".id()],
 			table: None,
-			range_start: Some(0.into()),
-			range_end: Some(1.into()),
+			range_start: Some(1.into()),
+			range_end: Some(2.into()),
 			block: vec![],
 		},
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![2.into(), 3.into()]),
+		AstKind::Block(vec![5.into(), 7.into()]),
 	]);
 }
 
@@ -293,17 +313,21 @@ fn with_multi_element_for_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Int(0),
 		AstKind::Int(10),
+		AstKind::ScopeBegin,
+		AstKind::ScopeEnd,
 		AstKind::For {
 			indexes: vec!["i".id(), "j".id()],
 			table: None,
-			range_start: Some(0.into()),
-			range_end: Some(1.into()),
+			range_start: Some(1.into()),
+			range_end: Some(2.into()),
 			block: vec![],
 		},
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![2.into(), 3.into()]),
+		AstKind::Block(vec![5.into(), 7.into()]),
 	]);
 }
 
@@ -313,10 +337,14 @@ fn with_internal_while_loop() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Int(1),
-		AstKind::While { cond: 0.into(), block: vec![], },
+		AstKind::ScopeBegin,
+		AstKind::ScopeEnd,
+		AstKind::While { cond: 1.into(), block: vec![], },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![1.into(), 2.into()]),
+		AstKind::Block(vec![4.into(), 6.into()]),
 	]);
 }
 
@@ -332,7 +360,7 @@ fn with_record_param() {
 		("c".id(), Type::Record("a".id())),
 	]);
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -347,7 +375,7 @@ fn with_out_of_order_record_param() {
 		("c".id(), Type::Record("a".id())),
 	]);
 	assert_eq!(proc.ret_type, Type::Void);
-	assert_eq!(proc.body.len(), 2);
+	assert_eq!(proc.body.len(), 4);
 }
 
 #[test]
@@ -359,13 +387,15 @@ fn with_internal_field_assign() {
 	assert!(proc.params.is_empty());
 	assert_eq!(proc.ret_type, Type::Void);
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Access { base_id: "a".id(), path: vec![
 			PathSegment::Field("b".id()),
 		]},
 		AstKind::Int(2),
-		AstKind::Assign { lhs: 0.into(), rhs: 1.into() },
+		AstKind::Assign { lhs: 1.into(), rhs: 2.into() },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![2.into(), 3.into()]),
+		AstKind::Block(vec![3.into(), 5.into()]),
 	]);
 }
 
@@ -446,14 +476,16 @@ fn with_internal_table_assign() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Int(3),
 		AstKind::Access { base_id: "a".id(), path: vec![
-			PathSegment::Index(0.into(), "b".id()),
+			PathSegment::Index(1.into(), "b".id()),
 		]},
 		AstKind::Int(2),
-		AstKind::Assign { lhs: 1.into(), rhs: 2.into() },
+		AstKind::Assign { lhs: 2.into(), rhs: 3.into() },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![3.into(), 4.into()]),
+		AstKind::Block(vec![4.into(), 6.into()]),
 	]);
 }
 
@@ -463,9 +495,11 @@ fn with_mark() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Mark { region_id: "base".id(), mark_id: "start".id() },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![0.into(), 1.into()]),
+		AstKind::Block(vec![1.into(), 3.into()]),
 	]);
 }
 
@@ -475,9 +509,11 @@ fn with_free_mark() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Free { region_id: "base".id(), mark_id: Some("start".id()) },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![0.into(), 1.into()]),
+		AstKind::Block(vec![1.into(), 3.into()]),
 	]);
 }
 
@@ -487,9 +523,11 @@ fn with_free_region() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Free { region_id: "base".id(), mark_id: None },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![0.into(), 1.into()]),
+		AstKind::Block(vec![1.into(), 3.into()]),
 	]);
 }
 
@@ -499,9 +537,11 @@ fn with_use() {
 			.unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
 		AstKind::Use { region_id: "base".id(), ident: "start".id() },
+		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![0.into(), 1.into()]),
+		AstKind::Block(vec![1.into(), 3.into()]),
 	]);
 }
 

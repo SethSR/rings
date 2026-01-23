@@ -235,19 +235,10 @@ fn parse_for_statement(
 	let ident_id = cursor.expect_identifier("identifier")?;
 	vars.push(ident_id);
 
-	while TKind::Comma == cursor.current() {
-		cursor.advance();
-		let ident_id = cursor.expect_identifier("identifier")?;
-		vars.push(ident_id);
-	}
-
 	while TKind::In != cursor.current() {
+		cursor.expect(TKind::Comma)?;
 		let ident_id = cursor.expect_identifier("identifier")?;
 		vars.push(ident_id);
-		if TKind::In == cursor.current() {
-			break;
-		}
-		cursor.expect(TKind::Comma)?;
 	}
 
 	cursor.expect(TKind::In)?;
