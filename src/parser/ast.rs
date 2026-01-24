@@ -34,7 +34,7 @@ pub enum Kind {
 	},
 	While { cond: AstId, block: Vec<AstId> },
 	For {
-		indexes: Vec<IdentId>,
+		indexes: Vec<AstId>,
 		table: Option<IdentId>,
 		range_start: Option<AstId>,
 		range_end: Option<AstId>,
@@ -176,7 +176,7 @@ impl<T> Ast<Kind,T> {
 	}
 
 	pub fn for_(
-		indexes: Vec<IdentId>,
+		indexes: Vec<AstId>,
 		table: Option<IdentId>,
 		range_start: Option<AstId>,
 		range_end: Option<AstId>,

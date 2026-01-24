@@ -10,55 +10,25 @@ use crate::{token_source, SrcPos};
 
 pub type TypedList = AstList<TypedKind, SrcPos>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExType {
-	Type(Type),
-	ExInt,
-	ExDec,
-}
-
-impl ExType {
-	fn void() -> Self {
-		Self::Type(Type::Void)
-	}
-
-	fn is_integer(&self) -> bool {
-		matches!(self,
-			Self::ExInt |
-			Self::Type(Type::S8) |
-			Self::Type(Type::S16) |
-			Self::Type(Type::S32) |
-			Self::Type(Type::U8) |
-			Self::Type(Type::U16) |
-			Self::Type(Type::U32)
-		)
-	}
-
-	fn is_decimal(&self) -> bool {
-		matches!(self, Self::ExDec)
-	}
-}
-
 #[derive(Debug, Clone)]
-pub struct TypedKind(AstKind, ExType);
+pub struct TypedKind(AstKind, Type);
 
 type TypedAst = Ast<TypedKind, SrcPos>;
 
 impl TypedAst {
-	fn new(value: Ast<AstKind, SrcPos>, ex_type: ExType) -> Self {
+	fn new(value: Ast<AstKind, SrcPos>, typ: Type) -> Self {
 		Self {
-			kind: TypedKind(value.kind, ex_type),
+			kind: TypedKind(value.kind, typ),
 			location: value.location,
 		}
 	}
 }
 
 enum Error {
-	InternalValue,
 	AlreadyDefined(IdentId),
-	MismatchedTypes(ExType, ExType),
-	InvalidBinOp(BinaryOp, ExType, ExType),
-	InvalidUnOp(UnaryOp, ExType),
+	MismatchedTypes(Type, Type),
+	InvalidBinOp(BinaryOp, Type, Type),
+	InvalidUnOp(UnaryOp, Type),
 	TooManyLoopVariables,
 	NegativeLoopRange,
 	MissingLoopBounds,
@@ -70,9 +40,6 @@ enum Error {
 impl Error {
 	fn to_string(&self, input: &InputData, lex_data: &LexData) -> String {
 		match self {
-			Self::InternalValue => {
-				"Cannot define internal values, assign instead".to_string()
-			}
 			Self::AlreadyDefined(ident_id) => {
 				format!("'{}' already defined", lex_data.text(input, ident_id))
 			}
@@ -193,36 +160,45 @@ pub fn eval(
 	Ok(typed_procedures)
 }
 
-fn meet(lhs: ExType, rhs: ExType) -> Result<ExType, Error> {
+fn meet_ast(
+	lhs: &TypedAst,
+	rhs: &TypedAst,
+) -> Result<Type, Error> {
+	meet(lhs.kind.1, rhs.kind.1)
+}
+
+fn meet(lhs: Type, rhs: Type) -> Result<Type, Error> {
 	match (lhs, rhs) {
-		(ExType::ExInt, ExType::ExDec) |
-		(ExType::ExDec, ExType::ExInt) => Ok(ExType::ExDec),
-		(ExType::Type(Type::S8), ExType::ExInt) |
-		(ExType::ExInt, ExType::Type(Type::S8)) => Ok(ExType::Type(Type::S8)),
-		(ExType::Type(Type::S16), ExType::ExInt) |
-		(ExType::ExInt, ExType::Type(Type::S16)) => Ok(ExType::Type(Type::S16)),
-		(ExType::Type(Type::S32), ExType::ExInt) |
-		(ExType::ExInt, ExType::Type(Type::S32)) => Ok(ExType::Type(Type::S32)),
-		(ExType::Type(Type::U8), ExType::ExInt) |
-		(ExType::ExInt, ExType::Type(Type::U8)) => Ok(ExType::Type(Type::U8)),
-		(ExType::Type(Type::U16), ExType::ExInt) |
-		(ExType::ExInt, ExType::Type(Type::U16)) => Ok(ExType::Type(Type::U16)),
-		(ExType::Type(Type::U32), ExType::ExInt) |
-		(ExType::ExInt, ExType::Type(Type::U32)) => Ok(ExType::Type(Type::U32)),
-		(ExType::Type(Type::U8), ExType::Type(Type::S16)) |
-		(ExType::Type(Type::S16), ExType::Type(Type::U8)) => Ok(ExType::Type(Type::S16)),
-		(ExType::Type(Type::U8), ExType::Type(Type::S32)) |
-		(ExType::Type(Type::S32), ExType::Type(Type::U8)) => Ok(ExType::Type(Type::S32)),
-		(ExType::Type(Type::U16), ExType::Type(Type::S32)) |
-		(ExType::Type(Type::S32), ExType::Type(Type::U16)) => Ok(ExType::Type(Type::S32)),
-		(ExType::Type(Type::S8), ExType::Type(Type::S16)) |
-		(ExType::Type(Type::S16), ExType::Type(Type::S8)) => Ok(ExType::Type(Type::S16)),
-		(ExType::Type(Type::S8), ExType::Type(Type::S32)) |
-		(ExType::Type(Type::S32), ExType::Type(Type::S8)) => Ok(ExType::Type(Type::S32)),
-		(ExType::Type(Type::S16), ExType::Type(Type::S32)) |
-		(ExType::Type(Type::S32), ExType::Type(Type::S16)) => Ok(ExType::Type(Type::S32)),
-		(ExType::Type(Type::Bool), ExType::ExInt) |
-		(ExType::ExInt, ExType::Type(Type::Bool)) => Ok(ExType::Type(Type::Bool)),
+		(Type::Unknown, typ) |
+		(typ, Type::Unknown) => Ok(typ),
+		(Type::Int, Type::Dec) |
+		(Type::Dec, Type::Int) => Ok(Type::Dec),
+		(Type::S8, Type::Int) |
+		(Type::Int, Type::S8) => Ok(Type::S8),
+		(Type::S16, Type::Int) |
+		(Type::Int, Type::S16) => Ok(Type::S16),
+		(Type::S32, Type::Int) |
+		(Type::Int, Type::S32) => Ok(Type::S32),
+		(Type::U8, Type::Int) |
+		(Type::Int, Type::U8) => Ok(Type::U8),
+		(Type::U16, Type::Int) |
+		(Type::Int, Type::U16) => Ok(Type::U16),
+		(Type::U32, Type::Int) |
+		(Type::Int, Type::U32) => Ok(Type::U32),
+		(Type::U8, Type::S16) |
+		(Type::S16, Type::U8) => Ok(Type::S16),
+		(Type::U8, Type::S32) |
+		(Type::S32, Type::U8) => Ok(Type::S32),
+		(Type::U16, Type::S32) |
+		(Type::S32, Type::U16) => Ok(Type::S32),
+		(Type::S8, Type::S16) |
+		(Type::S16, Type::S8) => Ok(Type::S16),
+		(Type::S8, Type::S32) |
+		(Type::S32, Type::S8) => Ok(Type::S32),
+		(Type::S16, Type::S32) |
+		(Type::S32, Type::S16) => Ok(Type::S32),
+		(Type::Bool, Type::Int) |
+		(Type::Int, Type::Bool) => Ok(Type::Bool),
 		(a, b) if a == b => Ok(a),
 		_ => Err(Error::MismatchedTypes(lhs, rhs)),
 	}
@@ -240,19 +216,18 @@ fn check_stmt(
 		let ast = proc_data.body[ast_id].clone();
 		match ast.kind {
 			AstKind::Int(_) => {
-				out.push(TypedAst::new(ast, ExType::ExInt));
+				out.push(TypedAst::new(ast, Type::Int));
 			}
 
 			AstKind::Dec(_) => {
-				out.push(TypedAst::new(ast, ExType::ExDec));
+				out.push(TypedAst::new(ast, Type::Dec));
 			}
 
 			AstKind::Ident(ident_id) => {
 				let ex_type = match prs_data.values.get(&ident_id) {
-					Some(Value::Integer(_)) => ExType::ExInt,
-					Some(Value::Decimal(_)) => ExType::ExDec,
-					None => prs_data.types.get(&(proc_id, scope_depth, ident_id))
-							.map(|typ| ExType::Type(*typ))
+					Some(Value::Integer(_)) => Type::Int,
+					Some(Value::Decimal(_)) => Type::Dec,
+					None => *prs_data.types.get(&(proc_id, scope_depth, ident_id))
 							.unwrap_or_else(|| panic!("missing type for {ident_id}: ({proc_id}, {scope_depth}, {ident_id})")),
 				};
 				out.push(TypedAst::new(ast, ex_type));
@@ -261,14 +236,14 @@ fn check_stmt(
 			AstKind::Assign { lhs, rhs } => {
 				let lhs = &out[lhs];
 				let rhs = &out[rhs];
-				let ex_type = meet(lhs.kind.1, rhs.kind.1)?;
+				let ex_type = meet_ast(lhs, rhs)?;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
 			AstKind::BinOp { op, lhs, rhs } => {
 				let lhs = &out[lhs];
 				let rhs = &out[rhs];
-				let ex_type = meet(lhs.kind.1, rhs.kind.1)?;
+				let typ = meet_ast(lhs, rhs)?;
 
 				let valid_op = match op {
 					BinaryOp::Add |
@@ -279,26 +254,26 @@ fn check_stmt(
 					BinaryOp::ShR |
 					BinaryOp::Sub => {
 						// u8, u16, u32, s8, s16, s32, int, dec
-						ex_type.is_integer() || ex_type.is_decimal()
+						typ.is_integer() || typ.is_decimal()
 					}
 
 					BinaryOp::BinAnd |
 					BinaryOp::BinOr |
-					BinaryOp::BinXor => {
-						// u8, u16, u32, s8, s16, s32
-						ex_type.is_integer()
-					}
-
+					BinaryOp::BinXor |
 					BinaryOp::CmpEQ |
 					BinaryOp::CmpGE |
 					BinaryOp::CmpGT |
 					BinaryOp::CmpLE |
 					BinaryOp::CmpLT |
-					BinaryOp::CmpNE |
+					BinaryOp::CmpNE => {
+						// u8, u16, u32, s8, s16, s32
+						typ.is_integer()
+					}
+
 					BinaryOp::LogAnd |
 					BinaryOp::LogOr |
 					BinaryOp::LogXor => {
-						ex_type == ExType::Type(Type::Bool)
+						typ == Type::Bool
 					}
 				};
 
@@ -306,7 +281,7 @@ fn check_stmt(
 					panic!("invalid binary-op: {op:?}");
 				}
 
-				out.push(TypedAst::new(ast, ex_type));
+				out.push(TypedAst::new(ast, typ));
 			}
 
 			AstKind::UnOp { op, rhs } => {
@@ -317,29 +292,29 @@ fn check_stmt(
 
 			AstKind::Return(Some(ret)) => {
 				let ret = &out[ret];
-				let ex_type = meet(ret.kind.1, ExType::Type(proc_data.ret_type))?;
+				let ex_type = meet(ret.kind.1, proc_data.ret_type)?;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
 			AstKind::Return(None) => {
-				let ex_type = meet(ExType::void(), ExType::Type(proc_data.ret_type))?;
+				let ex_type = meet(Type::Void, proc_data.ret_type)?;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
 			AstKind::ScopeBegin => {
 				scope_depth += 1;
-				out.push(TypedAst::new(ast, ExType::void()));
+				out.push(TypedAst::new(ast, Type::Void));
 			}
 
 			AstKind::ScopeEnd => {
 				scope_depth -= 1;
-				out.push(TypedAst::new(ast, ExType::void()));
+				out.push(TypedAst::new(ast, Type::Void));
 			}
 
 			AstKind::Block(ref block) => {
 				let ex_type = block.last()
 						.map(|&id| out[id].kind.1)
-						.unwrap_or(ExType::void());
+						.unwrap_or(Type::Void);
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
@@ -347,10 +322,10 @@ fn check_stmt(
 				let cond = out[cond].clone();
 				let then_type = then_block.last()
 						.map(|&id| out[id].kind.1)
-						.unwrap_or(ExType::void());
+						.unwrap_or(Type::Void);
 				let else_type = else_block.last()
 						.map(|&id| out[id].kind.1)
-						.unwrap_or(ExType::void());
+						.unwrap_or(Type::Void);
 				let ex_type = meet(then_type, else_type)?;
 				out.push(TypedAst::new(ast, ex_type));
 				todo!("Checking If condition: {cond:?} <=> {ex_type:?}")
@@ -358,41 +333,56 @@ fn check_stmt(
 
 			AstKind::While { cond, ..} => {
 				let cond = out[cond].clone();
-				out.push(TypedAst::new(ast, ExType::void()));
+				out.push(TypedAst::new(ast, Type::Void));
 				todo!("Checking While: {cond:?}")
 			}
 
 			AstKind::For { ref indexes, table, range_start, range_end, ..} => {
 				let indexes_len = indexes.len();
 
-				// TODO - srenshaw - Add index identifiers as AST nodes so we can verify them here.
-
 				if let Some(table) = table
 						.map(|id| &prs_data.tables[&id])
 				{
-					// TODO - assert indexes.len() == table.params.len() when a table is specified.
+					// TODO - assert indexes.len() == table.fields.len() when a table is specified.
+
+					// TODO - srenshaw - Verify index types against table fields
 
 					todo!("Table looping not supported yet")
+				} else {
+					if indexes_len > 1 {
+						return Err(Error::TooManyLoopVariables);
+					}
+
+					let Some(start) = range_start else {
+						return Err(Error::MissingLoopBounds)
+					};
+					let start_type = out[start].kind.1;
+
+					// TODO - srenshaw - Check for constant start values
+
+					let Some(end) = range_end else {
+						return Err(Error::MissingLoopBounds)
+					};
+					let end_type = out[end].kind.1;
+
+					// TODO - srenshaw - Check for constant end values
+
+					debug_assert!(start <= end);
+					if start > end {
+						return Err(Error::NegativeLoopRange);
+					}
+
+					let bound_type = meet(start_type, end_type)?;
+
+					let index_type = out[indexes[0]].kind.1;
+
+					let loop_type = meet(index_type, bound_type)?;
+					if !loop_type.is_integer() {
+						return Err(Error::MismatchedTypes(Type::Int, loop_type));
+					}
 				}
 
-				if indexes_len > 1 {
-					return Err(Error::TooManyLoopVariables);
-				}
-
-				let Some(start) = range_start else {
-					return Err(Error::MissingLoopBounds)
-				};
-
-				let Some(end) = range_end else {
-					return Err(Error::MissingLoopBounds)
-				};
-
-				debug_assert!(start <= end);
-				if start > end {
-					return Err(Error::NegativeLoopRange);
-				}
-
-				out.push(TypedAst::new(ast, ExType::void()));
+				out.push(TypedAst::new(ast, Type::Void));
 			}
 
 			#[cfg(feature = "forloop")]
@@ -434,7 +424,7 @@ fn check_stmt(
 
 			AstKind::Access { base_id, ref path } => {
 				let mut curr_id = base_id;
-				let mut ex_type = None;
+				let mut typ = None;
 
 				for segment in path {
 					match segment {
@@ -446,7 +436,7 @@ fn check_stmt(
 								panic!("no field '{field_id}' in record '{curr_id}'")
 							};
 							curr_id = *field_id;
-							ex_type = Some(ExType::Type(*field_type));
+							typ = Some(*field_type);
 						}
 						PathSegment::Index(expr_id, field_id) => {
 							todo!("table-index-2: [{expr_id}].{field_id}")
@@ -454,11 +444,11 @@ fn check_stmt(
 					}
 				}
 
-				if ex_type.is_none() {
+				if typ.is_none() {
 					panic!("no type for access {ast:?}")
 				}
 
-				out.push(TypedAst::new(ast, ex_type.unwrap()));
+				out.push(TypedAst::new(ast, typ.unwrap()));
 			}
 
 			AstKind::Mark { region_id, mark_id } => {

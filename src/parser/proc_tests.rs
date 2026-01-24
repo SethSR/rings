@@ -1,4 +1,6 @@
 
+use std::convert::identity;
+
 use crate::parser::ast::PathSegment;
 use crate::operators::BinaryOp;
 
@@ -290,20 +292,21 @@ fn with_basic_for_loop() {
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
 		AstKind::ScopeBegin,
+		AstKind::Ident("i".id()),
 		AstKind::Int(0),
 		AstKind::Int(10),
 		AstKind::ScopeBegin,
 		AstKind::ScopeEnd,
 		AstKind::For {
-			indexes: vec!["i".id()],
+			indexes: vec![1.into()],
 			table: None,
-			range_start: Some(1.into()),
-			range_end: Some(2.into()),
+			range_start: Some(2.into()),
+			range_end: Some(3.into()),
 			block: vec![],
 		},
 		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![5.into(), 7.into()]),
+		AstKind::Block(vec![6.into(), 8.into()]),
 	]);
 }
 
@@ -314,20 +317,22 @@ fn with_multi_element_for_loop() {
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body, [
 		AstKind::ScopeBegin,
+		AstKind::Ident("i".id()),
+		AstKind::Ident("j".id()),
 		AstKind::Int(0),
 		AstKind::Int(10),
 		AstKind::ScopeBegin,
 		AstKind::ScopeEnd,
 		AstKind::For {
-			indexes: vec!["i".id(), "j".id()],
+			indexes: vec![1.into(), 2.into()],
 			table: None,
-			range_start: Some(1.into()),
-			range_end: Some(2.into()),
+			range_start: Some(3.into()),
+			range_end: Some(4.into()),
 			block: vec![],
 		},
 		AstKind::ScopeEnd,
 		AstKind::Return(None),
-		AstKind::Block(vec![5.into(), 7.into()]),
+		AstKind::Block(vec![7.into(), 9.into()]),
 	]);
 }
 

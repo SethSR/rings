@@ -226,20 +226,29 @@ fn parse_for_statement(
 	proc_id: IdentId,
 	depth: u16,
 ) -> Result<AstId, Error> {
-	// TODO - srenshaw - Add identifier AST nodes for loop indexes.
-
 	let tok_start = cursor.index();
 	cursor.expect(TKind::For)?;
 
 	let mut vars = vec![];
+	let id_start = cursor.index();
 	let ident_id = cursor.expect_identifier("identifier")?;
-	vars.push(ident_id);
+	let id_end = cursor.index();
+	vars.push((ident_id, (id_start..id_end).into()));
 
 	while TKind::In != cursor.current() {
 		cursor.expect(TKind::Comma)?;
+		let id_start = cursor.index();
 		let ident_id = cursor.expect_identifier("identifier")?;
-		vars.push(ident_id);
+		let id_end = cursor.index();
+		vars.push((ident_id, (id_start..id_end).into()));
 	}
+
+	let vars = vars.into_iter()
+			.map(|(ident_id, span)| {
+				data.types.insert((proc_id, depth, ident_id), super::Type::Unknown);
+				nodes.push(Ast::ident(ident_id, span))
+			})
+			.collect();
 
 	cursor.expect(TKind::In)?;
 
