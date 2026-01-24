@@ -1,4 +1,6 @@
 
+use std::fmt::{Display, Formatter, Result};
+
 use index_vec::define_index_type;
 use index_vec::IndexVec;
 
@@ -45,6 +47,31 @@ pub enum Kind {
 	Mark { region_id: IdentId, mark_id: IdentId },
 	Free { region_id: IdentId, mark_id: Option<IdentId> },
 	Use { region_id: IdentId, ident: IdentId },
+}
+
+impl Display for Kind {
+	fn fmt(&self, f: &mut Formatter) -> Result {
+		match self {
+			Self::Int {..} => write!(f, "Int"),
+			Self::Dec {..} => write!(f, "Dec"),
+			Self::Ident {..} => write!(f, "Ident"),
+			Self::Assign {..} => write!(f, "Assign"),
+			Self::BinOp {..} => write!(f, "Binary-Op"),
+			Self::UnOp {..} => write!(f, "Unary-Op"),
+			Self::Return {..} => write!(f, "Return"),
+			Self::ScopeBegin {..} => write!(f, "Scope-Begin"),
+			Self::ScopeEnd {..} => write!(f, "Scope-End"),
+			Self::Block {..} => write!(f, "Block"),
+			Self::If {..} => write!(f, "If"),
+			Self::While {..} => write!(f, "While"),
+			Self::For {..} => write!(f, "For"),
+			Self::Call {..} => write!(f, "Call"),
+			Self::Access {..} => write!(f, "Access"),
+			Self::Mark {..} => write!(f, "Mark"),
+			Self::Free {..} => write!(f, "Free"),
+			Self::Use {..} => write!(f, "Use"),
+		}
+	}
 }
 
 #[derive(Debug, Clone, PartialEq)]
