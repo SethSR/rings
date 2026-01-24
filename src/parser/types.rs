@@ -28,6 +28,10 @@ impl Type {
 		)
 	}
 
+	pub fn is_signed_integer(self) -> bool {
+		matches!(self, Self::S8 | Self::S16 | Self::S32 | Self::Int)
+	}
+
 	pub fn is_decimal(self) -> bool {
 		self == Self::Dec
 	}

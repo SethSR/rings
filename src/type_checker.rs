@@ -1,4 +1,6 @@
 
+use std::collections::HashSet;
+
 use crate::error;
 use crate::identifier::{IdentId, Identifier, Map as IdentMap};
 use crate::input::Data as InputData;
@@ -26,15 +28,26 @@ impl TypedAst {
 
 enum Error {
 	AlreadyDefined(IdentId),
-	MismatchedTypes(Type, Type),
+	TypeMismatch(Type, Type),
+	ParamCountMismatch {
+		proc_id: IdentId,
+		param_count: usize,
+		arg_count: usize,
+	},
+	FieldCountMismatch {
+		table_id: IdentId,
+		field_count: usize,
+		index_count: usize,
+	},
 	InvalidBinOp(BinaryOp, Type, Type),
 	InvalidUnOp(UnaryOp, Type),
 	TooManyLoopVariables,
 	NegativeLoopRange,
 	MissingLoopBounds,
-	// Compiler Errors
-	NoType { msg: &'static str, ast_id: AstId },
-	MissingAstNode(IdentId, AstId),
+	NonIdentifierField(AstKind),
+	UnknownField { table_id: IdentId, field_id: IdentId },
+	UnknownRegion(IdentId),
+	UnknownMark { region_id: IdentId, mark_id: IdentId },
 }
 
 impl Error {
@@ -43,8 +56,18 @@ impl Error {
 			Self::AlreadyDefined(ident_id) => {
 				format!("'{}' already defined", lex_data.text(input, ident_id))
 			}
-			Self::MismatchedTypes(expected, found) => {
+			Self::TypeMismatch(expected, found) => {
 				format!("Variable has type {expected:?}, but expression has type {found:?}")
+			}
+			Self::ParamCountMismatch { proc_id, param_count, arg_count } => {
+				format!("'{}' has {param_count} parameters, found {arg_count} arguments",
+					lex_data.text(input, proc_id),
+				)
+			}
+			Self::FieldCountMismatch { table_id, field_count, index_count } => {
+				format!("'{}' has {field_count} fields, found {index_count} indexes",
+					lex_data.text(input, table_id),
+				)
 			}
 			Self::InvalidBinOp(op, lhs, rhs) => {
 				format!("Unable to apply '{op}' to '{lhs:?}' and '{rhs:?}'")
@@ -61,11 +84,23 @@ impl Error {
 			Self::MissingLoopBounds => {
 				"simple for-loops require a fully specified range '[start..end]'".to_string()
 			}
-			Self::NoType { msg, ast_id } => {
-				format!("{msg} has no type: {ast_id:?}")
+			Self::NonIdentifierField(field_kind) => {
+				format!("Expected an identifier, found '{field_kind}'")
 			}
-			Self::MissingAstNode(proc_id, ast_id) => {
-				format!("{} not found in procedure '{}'", ast_id, lex_data.text(input, &proc_id))
+			Self::UnknownField { table_id, field_id } => {
+				format!("Unknown field '{}' in table '{}'",
+					lex_data.text(input, field_id),
+					lex_data.text(input, table_id),
+				)
+			}
+			Self::UnknownRegion(region_id) => {
+				format!("Unknown region '{}'", lex_data.text(input, region_id))
+			}
+			Self::UnknownMark { region_id, mark_id } => {
+				format!("Unknown mark '{}' for region '{}'",
+					lex_data.text(input, mark_id),
+					lex_data.text(input, region_id),
+				)
 			}
 		}
 	}
@@ -142,7 +177,7 @@ pub fn eval(
 	for (proc_id, proc_data) in &prs_data.procedures {
 		let proc_start: AstId = 0.into();
 
-		match check_stmt(&prs_data, *proc_id) {
+		match check_proc(&prs_data, *proc_id) {
 			Ok(new_ast) => {
 				typed_procedures.insert(*proc_id, new_ast);
 			}
@@ -173,18 +208,8 @@ fn meet(lhs: Type, rhs: Type) -> Result<Type, Error> {
 		(typ, Type::Unknown) => Ok(typ),
 		(Type::Int, Type::Dec) |
 		(Type::Dec, Type::Int) => Ok(Type::Dec),
-		(Type::S8, Type::Int) |
-		(Type::Int, Type::S8) => Ok(Type::S8),
-		(Type::S16, Type::Int) |
-		(Type::Int, Type::S16) => Ok(Type::S16),
-		(Type::S32, Type::Int) |
-		(Type::Int, Type::S32) => Ok(Type::S32),
-		(Type::U8, Type::Int) |
-		(Type::Int, Type::U8) => Ok(Type::U8),
-		(Type::U16, Type::Int) |
-		(Type::Int, Type::U16) => Ok(Type::U16),
-		(Type::U32, Type::Int) |
-		(Type::Int, Type::U32) => Ok(Type::U32),
+		(Type::Int, typ) |
+		(typ, Type::Int) if typ.is_integer() => Ok(typ),
 		(Type::U8, Type::S16) |
 		(Type::S16, Type::U8) => Ok(Type::S16),
 		(Type::U8, Type::S32) |
@@ -197,20 +222,20 @@ fn meet(lhs: Type, rhs: Type) -> Result<Type, Error> {
 		(Type::S32, Type::S8) => Ok(Type::S32),
 		(Type::S16, Type::S32) |
 		(Type::S32, Type::S16) => Ok(Type::S32),
-		(Type::Bool, Type::Int) |
-		(Type::Int, Type::Bool) => Ok(Type::Bool),
 		(a, b) if a == b => Ok(a),
-		_ => Err(Error::MismatchedTypes(lhs, rhs)),
+		_ => Err(Error::TypeMismatch(lhs, rhs)),
 	}
 }
 
-fn check_stmt(
+fn check_proc(
 	prs_data: &PrsData<SrcPos>,
 	proc_id: IdentId,
 ) -> Result<AstList<TypedKind, SrcPos>, Error> {
-	let proc_data = &prs_data.procedures[&proc_id];
 	let mut out = AstList::default();
 	let mut scope_depth = 0;
+	let mut mark_set = HashSet::<IdentId>::default();
+
+	let proc_data = &prs_data.procedures[&proc_id];
 
 	for ast_id in 0..proc_data.body.len() {
 		let ast = proc_data.body[ast_id].clone();
@@ -278,16 +303,29 @@ fn check_stmt(
 				};
 
 				if !valid_op {
-					panic!("invalid binary-op: {op:?}");
+					return Err(Error::InvalidBinOp(op, lhs.kind.1, rhs.kind.1));
 				}
 
 				out.push(TypedAst::new(ast, typ));
 			}
 
 			AstKind::UnOp { op, rhs } => {
-				let rhs = out[rhs].clone();
-				out.push(TypedAst::new(ast, rhs.kind.1));
-				todo!("Checking UnOp: {op} <=> {rhs:?}")
+				let rhs_type = out[rhs].kind.1;
+
+				let valid_op = match op {
+					UnaryOp::Neg => {
+						rhs_type.is_signed_integer()
+					}
+					UnaryOp::Not => {
+						rhs_type.is_integer() || rhs_type == Type::Bool
+					}
+				};
+
+				if !valid_op {
+					return Err(Error::InvalidUnOp(op, rhs_type));
+				}
+
+				out.push(TypedAst::new(ast, rhs_type));
 			}
 
 			AstKind::Return(Some(ret)) => {
@@ -303,11 +341,13 @@ fn check_stmt(
 
 			AstKind::ScopeBegin => {
 				scope_depth += 1;
+				// NOTE - srenshaw - We convert scope nodes to keep index references correct.
 				out.push(TypedAst::new(ast, Type::Void));
 			}
 
 			AstKind::ScopeEnd => {
 				scope_depth -= 1;
+				// NOTE - srenshaw - We convert scope nodes to keep index references correct.
 				out.push(TypedAst::new(ast, Type::Void));
 			}
 
@@ -319,7 +359,11 @@ fn check_stmt(
 			}
 
 			AstKind::If { cond, ref then_block, ref else_block } => {
-				let cond = out[cond].clone();
+				let cond_type = out[cond].kind.1;
+				if !cond_type.is_integer() {
+					return Err(Error::TypeMismatch(Type::Int, cond_type));
+				}
+
 				let then_type = then_block.last()
 						.map(|&id| out[id].kind.1)
 						.unwrap_or(Type::Void);
@@ -327,58 +371,86 @@ fn check_stmt(
 						.map(|&id| out[id].kind.1)
 						.unwrap_or(Type::Void);
 				let ex_type = meet(then_type, else_type)?;
+
 				out.push(TypedAst::new(ast, ex_type));
-				todo!("Checking If condition: {cond:?} <=> {ex_type:?}")
 			}
 
 			AstKind::While { cond, ..} => {
-				let cond = out[cond].clone();
+				let cond_type = out[cond].kind.1;
+				if !cond_type.is_integer() {
+					return Err(Error::TypeMismatch(Type::Int, cond_type));
+				}
 				out.push(TypedAst::new(ast, Type::Void));
-				todo!("Checking While: {cond:?}")
 			}
 
 			AstKind::For { ref indexes, table, range_start, range_end, ..} => {
-				let indexes_len = indexes.len();
+				fn get_bounds_type(list: &TypedList, ast_id_opt: Option<AstId>) -> Result<Type, Error> {
+					let Some(ast_id) = ast_id_opt else {
+						return Err(Error::MissingLoopBounds);
+					};
+					let ast_type = list[ast_id].kind.1;
 
-				if let Some(table) = table
-						.map(|id| &prs_data.tables[&id])
+					// TODO - srenshaw - Check for constant values
+
+					Ok(ast_type)
+				}
+
+				if let Some((table_id, table)) = table
+						.map(|id| (id, &prs_data.tables[&id]))
 				{
-					// TODO - assert indexes.len() == table.fields.len() when a table is specified.
+					if table.fields.len() < indexes.len() {
+						return Err(Error::FieldCountMismatch {
+							table_id,
+							field_count: table.fields.len(),
+							index_count: indexes.len(),
+						});
+					}
 
-					// TODO - srenshaw - Verify index types against table fields
+					for idx_id in indexes.iter() {
+						let idx_ast = &out[*idx_id].kind;
+						let AstKind::Ident(idx_ident) = idx_ast.0 else {
+							return Err(Error::NonIdentifierField(idx_ast.0.clone()));
+						};
 
-					todo!("Table looping not supported yet")
+						// TODO - srenshaw - We may want to add destructuring for Records eventually.
+
+						let Type::Unknown = idx_ast.1 else {
+							return Err(Error::TypeMismatch(Type::Unknown, idx_ast.1));
+						};
+
+						let Some((_, f_type)) = table.fields.iter()
+								.find(|field| field.0 == idx_ident) else {
+							return Err(Error::UnknownField { table_id, field_id: idx_ident });
+						};
+
+						out[*idx_id].kind.1 = *f_type;
+					}
+
+					// TODO - srenshaw - Handle Table special cases
+
+					let start_type = get_bounds_type(&out, range_start)?;
+					let end_type = get_bounds_type(&out, range_end)?;
+
+					let bound_type = meet(start_type, end_type)?;
+					if !bound_type.is_integer() {
+						return Err(Error::TypeMismatch(Type::Int, bound_type));
+					}
 				} else {
-					if indexes_len > 1 {
+					if indexes.len() > 1 {
 						return Err(Error::TooManyLoopVariables);
 					}
 
-					let Some(start) = range_start else {
-						return Err(Error::MissingLoopBounds)
-					};
-					let start_type = out[start].kind.1;
+					// TODO - srenshaw - Handle non-table special cases
 
-					// TODO - srenshaw - Check for constant start values
-
-					let Some(end) = range_end else {
-						return Err(Error::MissingLoopBounds)
-					};
-					let end_type = out[end].kind.1;
-
-					// TODO - srenshaw - Check for constant end values
-
-					debug_assert!(start <= end);
-					if start > end {
-						return Err(Error::NegativeLoopRange);
-					}
+					let start_type = get_bounds_type(&out, range_start)?;
+					let end_type = get_bounds_type(&out, range_end)?;
 
 					let bound_type = meet(start_type, end_type)?;
-
 					let index_type = out[indexes[0]].kind.1;
 
 					let loop_type = meet(index_type, bound_type)?;
 					if !loop_type.is_integer() {
-						return Err(Error::MismatchedTypes(Type::Int, loop_type));
+						return Err(Error::TypeMismatch(Type::Int, loop_type));
 					}
 				}
 
@@ -418,8 +490,23 @@ fn check_stmt(
 				self.check_block(proc_data, block, ret_type)
 			}
 
-			AstKind::Call { proc_id, block } => {
-				todo!("procedure-call: {proc_id} {}", block.len())
+			AstKind::Call { proc_id, ref block } => {
+				let proc_data = &prs_data.procedures[&proc_id];
+
+				if proc_data.params.len() != block.len() {
+					return Err(Error::ParamCountMismatch {
+						proc_id,
+						param_count: proc_data.params.len(),
+						arg_count: block.len(),
+					});
+				}
+
+				for ((_, p_type), arg_id) in proc_data.params.iter().zip(block.iter()) {
+					let arg_type = out[*arg_id].kind.1;
+					meet(*p_type, arg_type)?;
+				}
+
+				out.push(TypedAst::new(ast, proc_data.ret_type));
 			}
 
 			AstKind::Access { base_id, ref path } => {
@@ -452,18 +539,40 @@ fn check_stmt(
 			}
 
 			AstKind::Mark { region_id, mark_id } => {
-				todo!("Checking Mark: {region_id} {mark_id}")
+				if !prs_data.regions.contains_key(&region_id) {
+					return Err(Error::UnknownRegion(region_id));
+				};
+
+				if mark_set.contains(&mark_id) {
+					return Err(Error::AlreadyDefined(mark_id));
+				}
+				mark_set.insert(mark_id);
+
+				out.push(TypedAst::new(ast, Type::Void));
 			}
 
 			AstKind::Free { region_id, mark_id } => {
-				todo!("Checking Free: {region_id} {mark_id:?}")
+				if !prs_data.regions.contains_key(&region_id) {
+					return Err(Error::UnknownRegion(region_id));
+				}
+
+				if let Some(mark_id) = mark_id {
+					if !mark_set.contains(&mark_id) {
+						return Err(Error::UnknownMark { region_id, mark_id });
+					}
+					mark_set.remove(&mark_id);
+				}
+
+				out.push(TypedAst::new(ast, Type::Void));
 			}
 
 			AstKind::Use { region_id, ident } => {
-				todo!("Checking Use: {region_id} {ident}")
+				todo!("Checking overlay activation: {region_id} {ident}")
 			}
 		}
 	}
 
 	Ok(out)
 }
+
+// TODO - srenshaw - Add type-checker tests
