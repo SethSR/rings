@@ -89,6 +89,38 @@ fn main() {
 }
 
 #[test]
+fn with_typed_params() {
+	let data = setup("
+		main {
+			let a: u16 = 35;
+		}
+	").unwrap_or_else(|e| panic!("{e}"));
+	let proc = &data.procedures[&"main".id()];
+	assert_eq!(proc.body, [
+		AstKind::ScopeBegin,
+		AstKind::Int(35),
+		AstKind::Ident("a".id()),
+		AstKind::Assign { lhs: 2.into(), rhs: 1.into() },
+		AstKind::ScopeEnd,
+		AstKind::Return(None),
+		AstKind::Block(vec![3.into(), 5.into()]),
+	]);
+	assert_eq!(data.types.get(&("main".id(), 1, "a".id())), Some(&Type::U16));
+}
+
+#[test]
+fn with_inferred_params() {
+	let data = setup("
+		main {
+			let a = 35;
+		}
+	").unwrap_or_else(|e| panic!("{e}"));
+	let proc = &data.procedures[&"main".id()];
+	assert_eq!(proc.body.len(), 7);
+	assert_eq!(data.types.get(&("main".id(), 1, "a".id())), Some(&Type::Unknown));
+}
+
+#[test]
 fn with_no_params() {
 	let data = setup("main{} proc a() {}")
 			.unwrap_or_else(|e| panic!("{e}"));

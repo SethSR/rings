@@ -88,8 +88,11 @@ fn parse_let_statement(
 	let id_start = cursor.index();
 	let ident_id = cursor.expect_identifier("variable identifier")?;
 	let id_end = cursor.index();
-	cursor.expect(TKind::Colon)?;
-	let var_type = cursor.expect_type(data)?;
+	let var_type = if cursor.expect(TKind::Colon).is_ok() {
+		cursor.expect_type(data)?
+	} else {
+		super::Type::Unknown
+	};
 	cursor.expect(TKind::Eq)?;
 	let ast_id = parse_expression(cursor, nodes, &[TKind::Semicolon])?;
 	cursor.expect(TKind::Semicolon)?;
