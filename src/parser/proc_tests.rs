@@ -1,6 +1,4 @@
 
-use std::convert::identity;
-
 use crate::parser::ast::PathSegment;
 use crate::operators::BinaryOp;
 
