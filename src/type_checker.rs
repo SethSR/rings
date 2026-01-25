@@ -8,7 +8,7 @@ use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::parser::{Ast, AstId, AstKind, AstList, Data as PrsData, PathSegment, Type, Value};
 use crate::token::Id as TokenId;
-use crate::{token_source, SrcPos};
+use crate::{token_source, Span, SrcPos};
 
 pub type TypedList = AstList<TypedKind, SrcPos>;
 
@@ -27,80 +27,126 @@ impl TypedAst {
 }
 
 enum Error {
-	AlreadyDefined(IdentId),
-	TypeMismatch(Type, Type),
+	AlreadyDefined { ident_id: IdentId, location: Span<SrcPos> },
+	TypeMismatch { expected: Type, found: Type, location: Span<SrcPos> },
 	ParamCountMismatch {
 		proc_id: IdentId,
 		param_count: usize,
 		arg_count: usize,
+		location: Span<SrcPos>,
 	},
 	FieldCountMismatch {
 		table_id: IdentId,
 		field_count: usize,
 		index_count: usize,
+		location: Span<SrcPos>,
 	},
-	InvalidBinOp(BinaryOp, Type, Type),
-	InvalidUnOp(UnaryOp, Type),
-	TooManyLoopVariables,
-	NegativeLoopRange,
-	MissingLoopBounds,
-	NonIdentifierField(AstKind),
-	UnknownField { table_id: IdentId, field_id: IdentId },
-	UnknownRegion(IdentId),
-	UnknownMark { region_id: IdentId, mark_id: IdentId },
+	InvalidBinOp {
+		op: BinaryOp,
+		lhs: Type,
+		rhs: Type,
+		location: Span<SrcPos>,
+	},
+	InvalidUnOp {
+		op: UnaryOp,
+		rhs: Type,
+		location: Span<SrcPos>,
+	},
+	TooManyLoopVariables(Span<SrcPos>),
+	NegativeLoopRange(Span<SrcPos>),
+	MissingLoopBounds(Span<SrcPos>),
+	NonIdentifierField {
+		field_kind: AstKind,
+		location: Span<SrcPos>,
+	},
+	UnknownField {
+		table_id: IdentId,
+		field_id: IdentId,
+		location: Span<SrcPos>,
+	},
+	UnknownRegion {
+		region_id: IdentId,
+		location: Span<SrcPos>,
+	},
+	UnknownMark {
+		region_id: IdentId,
+		mark_id: IdentId,
+		location: Span<SrcPos>,
+	},
+	NoType(Ast<AstKind, SrcPos>),
 }
 
 impl Error {
-	fn to_string(&self, input: &InputData, lex_data: &LexData) -> String {
+	fn into_comp_error(self,
+		input: &InputData,
+		lex_data: &LexData,
+	) -> error::Error {
 		match self {
-			Self::AlreadyDefined(ident_id) => {
-				format!("'{}' already defined", lex_data.text(input, ident_id))
+			Self::AlreadyDefined { ident_id, location } => {
+				let message = format!("'{}' already defined", lex_data.text(input, &ident_id));
+				error::Error::new(location, message)
 			}
-			Self::TypeMismatch(expected, found) => {
-				format!("Variable has type {expected:?}, but expression has type {found:?}")
+			Self::TypeMismatch { expected, found, location } => {
+				let message = format!("Variable has type {expected:?}, but expression has type {found:?}");
+				error::Error::new(location, message)
 			}
-			Self::ParamCountMismatch { proc_id, param_count, arg_count } => {
-				format!("'{}' has {param_count} parameters, found {arg_count} arguments",
-					lex_data.text(input, proc_id),
-				)
+			Self::ParamCountMismatch { proc_id, param_count, arg_count, location } => {
+				let message = format!("'{}' has {param_count} parameters, found {arg_count} arguments",
+					lex_data.text(input, &proc_id),
+				);
+				error::Error::new(location, message)
 			}
-			Self::FieldCountMismatch { table_id, field_count, index_count } => {
-				format!("'{}' has {field_count} fields, found {index_count} indexes",
-					lex_data.text(input, table_id),
-				)
+			Self::FieldCountMismatch { table_id, field_count, index_count, location } => {
+				let message = format!("'{}' has {field_count} fields, found {index_count} indexes",
+					lex_data.text(input, &table_id),
+				);
+				error::Error::new(location, message)
 			}
-			Self::InvalidBinOp(op, lhs, rhs) => {
-				format!("Unable to apply '{op}' to '{lhs:?}' and '{rhs:?}'")
+			Self::InvalidBinOp { op, lhs, rhs, location } => {
+				let message = format!("Unable to apply '{op}' to '{lhs:?}' and '{rhs:?}'");
+				error::Error::new(location, message)
 			}
-			Self::InvalidUnOp(op, rhs) => {
-				format!("Unable to apply '{op}' to '{rhs:?}'")
+			Self::InvalidUnOp{ op, rhs, location } => {
+				let message = format!("Unable to apply '{op}' to '{rhs:?}'");
+				error::Error::new(location, message)
 			}
-			Self::TooManyLoopVariables => {
-				"simple for-loops require a single loop variable".to_string()
+			Self::TooManyLoopVariables(location) => {
+				let message = "simple for-loops require a single loop variable".to_string();
+				error::Error::new(location, message)
 			}
-			Self::NegativeLoopRange => {
-				"start value must be less than or equal to end value".to_string()
+			Self::NegativeLoopRange(location) => {
+				let message = "start value must be less than or equal to end value".to_string();
+				error::Error::new(location, message)
 			}
-			Self::MissingLoopBounds => {
-				"simple for-loops require a fully specified range '[start..end]'".to_string()
+			Self::MissingLoopBounds(location) => {
+				let message = "simple for-loops require a fully specified range '[start..end]'".to_string();
+				error::Error::new(location, message)
 			}
-			Self::NonIdentifierField(field_kind) => {
-				format!("Expected an identifier, found '{field_kind}'")
+			Self::NonIdentifierField { field_kind, location } => {
+				let message = format!("Expected an identifier, found '{field_kind}'");
+				error::Error::new(location, message)
 			}
-			Self::UnknownField { table_id, field_id } => {
-				format!("Unknown field '{}' in table '{}'",
-					lex_data.text(input, field_id),
-					lex_data.text(input, table_id),
-				)
+			Self::UnknownField { table_id, field_id, location } => {
+				let message = format!("Unknown field '{}' in table '{}'",
+					lex_data.text(input, &field_id),
+					lex_data.text(input, &table_id),
+				);
+				error::Error::new(location, message)
 			}
-			Self::UnknownRegion(region_id) => {
-				format!("Unknown region '{}'", lex_data.text(input, region_id))
+			Self::UnknownRegion { region_id , location } => {
+				let message = format!("Unknown region '{}'", lex_data.text(input, &region_id));
+				error::Error::new(location.clone(), message)
 			}
-			Self::UnknownMark { region_id, mark_id } => {
-				format!("Unknown mark '{}' for region '{}'",
-					lex_data.text(input, mark_id),
-					lex_data.text(input, region_id),
-				)
+			Self::UnknownMark { region_id, mark_id, location } => {
+				let message = format!("Unknown mark '{}' for region '{}'",
+					lex_data.text(input, &mark_id),
+					lex_data.text(input, &region_id),
+				);
+				error::Error::new(location, message)
+			}
+			Self::NoType(ast) => {
+				let message = format!("no type for access {ast:?}");
+				error::Error::new(ast.location, message)
 			}
 		}
 	}
@@ -152,20 +198,18 @@ pub fn eval(
 		for j in i+1..regions_vec.len() {
 			let (i_name, i_span) = regions_vec[i];
 			let (j_name, j_span) = regions_vec[j];
-			if !(i_span.span.start >= j_span.span.end || i_span.span.end <= j_span.span.start) {
-				let i_src_loc = lex_data.location(i_name);
-				let j_src_loc = lex_data.location(j_name);
-				let i_text = lex_data.text(input, i_name);
-				let j_text = lex_data.text(input, j_name);
-				let msg = format!("regions {i_text} and {j_text} overlap");
-				let i_msg = format!("{i_text} has a memory range of {i_span:?}");
-				let j_msg = format!("{j_text} has a memory range of {j_span:?}");
-				let err = error::Error::new(i_src_loc, msg)
-					.with_note_at(i_src_loc, &i_msg)
-					.with_note_at(j_src_loc, &j_msg)
-					.with_kind(error::Kind::Checker);
-				return Err(err);
+			if i_span.span.start >= j_span.span.end || i_span.span.end <= j_span.span.start {
+				continue;
 			}
+
+			let i_src_loc = lex_data.location(i_name);
+			let j_src_loc = lex_data.location(j_name);
+			let i_text = lex_data.text(input, i_name);
+			let j_text = lex_data.text(input, j_name);
+			return Err(error::Error::new(i_src_loc, format!("regions {i_text} and {j_text} overlap"))
+				.with_note_at(i_src_loc, format!("{i_text} has a memory range of {i_span:?}"))
+				.with_note_at(j_src_loc, format!("{j_text} has a memory range of {j_span:?}"))
+				.with_kind(error::Kind::Checker));
 		}
 	}
 
@@ -174,20 +218,15 @@ pub fn eval(
 
 	// Check procedures
 	let mut typed_procedures = IdentMap::with_capacity(prs_data.procedures.len());
-	for (proc_id, proc_data) in &prs_data.procedures {
-		let proc_start: AstId = 0.into();
-
+	for proc_id in prs_data.procedures.keys() {
 		match check_proc(&prs_data, *proc_id) {
 			Ok(new_ast) => {
 				typed_procedures.insert(*proc_id, new_ast);
 			}
 
 			Err(err) => {
-				let tok_src = proc_data.body[proc_start].location;
-				let message = err.to_string(input, lex_data);
-				let err = error::Error::new(tok_src, message)
-						.with_kind(error::Kind::Checker);
-				return Err(err);
+				return Err(err.into_comp_error(input, lex_data)
+						.with_kind(error::Kind::Checker));
 			}
 		}
 	}
@@ -199,10 +238,11 @@ fn meet_ast(
 	lhs: &TypedAst,
 	rhs: &TypedAst,
 ) -> Result<Type, Error> {
-	meet(lhs.kind.1, rhs.kind.1)
+	meet(lhs.kind.1, rhs.kind.1, lhs.location + rhs.location)
 }
 
-fn meet(lhs: Type, rhs: Type) -> Result<Type, Error> {
+fn meet(lhs: Type, rhs: Type, location: Span<SrcPos>,
+) -> Result<Type, Error> {
 	match (lhs, rhs) {
 		(Type::Unknown, typ) |
 		(typ, Type::Unknown) => Ok(typ),
@@ -223,7 +263,11 @@ fn meet(lhs: Type, rhs: Type) -> Result<Type, Error> {
 		(Type::S16, Type::S32) |
 		(Type::S32, Type::S16) => Ok(Type::S32),
 		(a, b) if a == b => Ok(a),
-		_ => Err(Error::TypeMismatch(lhs, rhs)),
+		_ => Err(Error::TypeMismatch {
+			expected: lhs,
+			found: rhs,
+			location,
+		}),
 	}
 }
 
@@ -303,7 +347,12 @@ fn check_proc(
 				};
 
 				if !valid_op {
-					return Err(Error::InvalidBinOp(op, lhs.kind.1, rhs.kind.1));
+					return Err(Error::InvalidBinOp {
+						op,
+						lhs: lhs.kind.1,
+						rhs: rhs.kind.1,
+						location: ast.location,
+					});
 				}
 
 				out.push(TypedAst::new(ast, typ));
@@ -322,7 +371,11 @@ fn check_proc(
 				};
 
 				if !valid_op {
-					return Err(Error::InvalidUnOp(op, rhs_type));
+					return Err(Error::InvalidUnOp {
+						op,
+						rhs: rhs_type,
+						location: ast.location,
+					});
 				}
 
 				out.push(TypedAst::new(ast, rhs_type));
@@ -330,12 +383,12 @@ fn check_proc(
 
 			AstKind::Return(Some(ret)) => {
 				let ret = &out[ret];
-				let ex_type = meet(ret.kind.1, proc_data.ret_type)?;
+				let ex_type = meet(ret.kind.1, proc_data.ret_type, ret.location)?;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
 			AstKind::Return(None) => {
-				let ex_type = meet(Type::Void, proc_data.ret_type)?;
+				let ex_type = meet(Type::Void, proc_data.ret_type, ast.location)?;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
@@ -361,7 +414,11 @@ fn check_proc(
 			AstKind::If { cond, ref then_block, ref else_block } => {
 				let cond_type = out[cond].kind.1;
 				if !cond_type.is_integer() {
-					return Err(Error::TypeMismatch(Type::Int, cond_type));
+					return Err(Error::TypeMismatch {
+						expected: Type::Int,
+						found: cond_type,
+						location: ast.location,
+					});
 				}
 
 				let then_type = then_block.last()
@@ -370,7 +427,7 @@ fn check_proc(
 				let else_type = else_block.last()
 						.map(|&id| out[id].kind.1)
 						.unwrap_or(Type::Void);
-				let ex_type = meet(then_type, else_type)?;
+				let ex_type = meet(then_type, else_type, ast.location)?;
 
 				out.push(TypedAst::new(ast, ex_type));
 			}
@@ -378,15 +435,19 @@ fn check_proc(
 			AstKind::While { cond, ..} => {
 				let cond_type = out[cond].kind.1;
 				if !cond_type.is_integer() {
-					return Err(Error::TypeMismatch(Type::Int, cond_type));
+					return Err(Error::TypeMismatch {
+						expected: Type::Int,
+						found: cond_type,
+						location: ast.location,
+					});
 				}
 				out.push(TypedAst::new(ast, Type::Void));
 			}
 
 			AstKind::For { ref indexes, table, range_start, range_end, ..} => {
-				fn get_bounds_type(list: &TypedList, ast_id_opt: Option<AstId>) -> Result<Type, Error> {
+				fn get_bounds_type(list: &TypedList, location: Span<SrcPos>, ast_id_opt: Option<AstId>) -> Result<Type, Error> {
 					let Some(ast_id) = ast_id_opt else {
-						return Err(Error::MissingLoopBounds);
+						return Err(Error::MissingLoopBounds(location));
 					};
 					let ast_type = list[ast_id].kind.1;
 
@@ -403,24 +464,36 @@ fn check_proc(
 							table_id,
 							field_count: table.fields.len(),
 							index_count: indexes.len(),
+							location: ast.location,
 						});
 					}
 
 					for idx_id in indexes.iter() {
 						let idx_ast = &out[*idx_id].kind;
 						let AstKind::Ident(idx_ident) = idx_ast.0 else {
-							return Err(Error::NonIdentifierField(idx_ast.0.clone()));
+							return Err(Error::NonIdentifierField {
+								field_kind: idx_ast.0.clone(),
+								location: out[*idx_id].location,
+							});
 						};
 
 						// TODO - srenshaw - We may want to add destructuring for Records eventually.
 
 						let Type::Unknown = idx_ast.1 else {
-							return Err(Error::TypeMismatch(Type::Unknown, idx_ast.1));
+							return Err(Error::TypeMismatch {
+								expected: Type::Unknown,
+								found: idx_ast.1,
+								location: out[*idx_id].location,
+							});
 						};
 
 						let Some((_, f_type)) = table.fields.iter()
 								.find(|field| field.0 == idx_ident) else {
-							return Err(Error::UnknownField { table_id, field_id: idx_ident });
+							return Err(Error::UnknownField {
+								table_id,
+								field_id: idx_ident,
+								location: ast.location,
+							});
 						};
 
 						out[*idx_id].kind.1 = *f_type;
@@ -428,29 +501,37 @@ fn check_proc(
 
 					// TODO - srenshaw - Handle Table special cases
 
-					let start_type = get_bounds_type(&out, range_start)?;
-					let end_type = get_bounds_type(&out, range_end)?;
+					let start_type = get_bounds_type(&out, ast.location, range_start)?;
+					let end_type = get_bounds_type(&out, ast.location, range_end)?;
 
-					let bound_type = meet(start_type, end_type)?;
+					let bound_type = meet(start_type, end_type, ast.location)?;
 					if !bound_type.is_integer() {
-						return Err(Error::TypeMismatch(Type::Int, bound_type));
+						return Err(Error::TypeMismatch {
+							expected: Type::Int,
+							found: bound_type,
+							location: ast.location,
+						});
 					}
 				} else {
 					if indexes.len() > 1 {
-						return Err(Error::TooManyLoopVariables);
+						return Err(Error::TooManyLoopVariables(ast.location));
 					}
 
 					// TODO - srenshaw - Handle non-table special cases
 
-					let start_type = get_bounds_type(&out, range_start)?;
-					let end_type = get_bounds_type(&out, range_end)?;
+					let start_type = get_bounds_type(&out, ast.location, range_start)?;
+					let end_type = get_bounds_type(&out, ast.location, range_end)?;
 
-					let bound_type = meet(start_type, end_type)?;
+					let bound_type = meet(start_type, end_type, ast.location)?;
 					let index_type = out[indexes[0]].kind.1;
 
-					let loop_type = meet(index_type, bound_type)?;
+					let loop_type = meet(index_type, bound_type, ast.location)?;
 					if !loop_type.is_integer() {
-						return Err(Error::TypeMismatch(Type::Int, loop_type));
+						return Err(Error::TypeMismatch {
+							expected: Type::Int,
+							found: loop_type,
+							location: ast.location,
+						});
 					}
 				}
 
@@ -498,12 +579,13 @@ fn check_proc(
 						proc_id,
 						param_count: proc_data.params.len(),
 						arg_count: block.len(),
+						location: ast.location,
 					});
 				}
 
 				for ((_, p_type), arg_id) in proc_data.params.iter().zip(block.iter()) {
 					let arg_type = out[*arg_id].kind.1;
-					meet(*p_type, arg_type)?;
+					meet(*p_type, arg_type, out[*arg_id].location)?;
 				}
 
 				out.push(TypedAst::new(ast, proc_data.ret_type));
@@ -532,7 +614,7 @@ fn check_proc(
 				}
 
 				if typ.is_none() {
-					panic!("no type for access {ast:?}")
+					return Err(Error::NoType(ast));
 				}
 
 				out.push(TypedAst::new(ast, typ.unwrap()));
@@ -540,11 +622,17 @@ fn check_proc(
 
 			AstKind::Mark { region_id, mark_id } => {
 				if !prs_data.regions.contains_key(&region_id) {
-					return Err(Error::UnknownRegion(region_id));
+					return Err(Error::UnknownRegion {
+						region_id,
+						location: ast.location,
+					});
 				};
 
 				if mark_set.contains(&mark_id) {
-					return Err(Error::AlreadyDefined(mark_id));
+					return Err(Error::AlreadyDefined {
+						ident_id: mark_id,
+						location: ast.location,
+					});
 				}
 				mark_set.insert(mark_id);
 
@@ -553,12 +641,19 @@ fn check_proc(
 
 			AstKind::Free { region_id, mark_id } => {
 				if !prs_data.regions.contains_key(&region_id) {
-					return Err(Error::UnknownRegion(region_id));
+					return Err(Error::UnknownRegion {
+						region_id,
+						location: ast.location,
+					});
 				}
 
 				if let Some(mark_id) = mark_id {
 					if !mark_set.contains(&mark_id) {
-						return Err(Error::UnknownMark { region_id, mark_id });
+						return Err(Error::UnknownMark {
+							region_id,
+							mark_id,
+							location: ast.location,
+						});
 					}
 					mark_set.remove(&mark_id);
 				}

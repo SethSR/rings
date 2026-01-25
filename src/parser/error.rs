@@ -5,7 +5,6 @@ use crate::token_source;
 
 pub enum Error {
 	ExpectedToken { expected: String, found: TokenId },
-	Expected { location: TokenId, expected: String, found: String },
 	UndefinedType { location: TokenId, ident_id: IdentId },
 	UnexpectedEof { location: TokenId },
 	DivisionByZero { location: TokenId },
@@ -18,7 +17,6 @@ impl Error {
 	pub fn into_comp_error(self,
 		input: &crate::input::Data,
 		lex_data: &crate::lexer::Data,
-		err_kind: crate::error::Kind,
 	) -> crate::error::Error {
 		match self {
 			Self::ExpectedToken { expected, found: token_id } => {
@@ -30,10 +28,6 @@ impl Error {
 					format!("Expected {expected}, found {found:?}")
 				};
 				crate::error::Error::new(span, message)
-			}
-			Self::Expected { location, expected, found } => {
-				let span = token_source(input, lex_data, location);
-				crate::error::Error::new(span, format!("Expected {expected}, found {found}"))
 			}
 			Self::UndefinedType { location, ident_id } => {
 				let span = token_source(&input, &lex_data, location);
@@ -66,6 +60,6 @@ impl Error {
 					lex_data.text(input, &name_id));
 				crate::error::Error::new(span, message)
 			}
-		}.with_kind(err_kind)
+		}
 	}
 }

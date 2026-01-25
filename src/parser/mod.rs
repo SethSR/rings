@@ -1,6 +1,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 
+use crate::error::{Error, Kind as ErrKind};
 use crate::identifier::{IdentId, Map as IdentMap, Identifier};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
@@ -62,8 +64,8 @@ pub struct Data<T> {
 	pub types: TypeMap,
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for Data<T> {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl<T: Debug> Debug for Data<T> {
+	fn fmt(&self, f: &mut Formatter) -> FmtResult {
 		writeln!(f, "Data {{")?;
 		writeln!(f, "kinds:\n{}", self.kinds.iter()
 				.map(|a| format!("  {a:?}"))
@@ -98,15 +100,17 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Data<T> {
 }
 
 pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
-) -> Result<Data<SrcPos>, crate::error::Error> {
+) -> Result<Data<SrcPos>, Error> {
 	let tasks = scan_tasks(lex_data)
-		.map_err(|e| e.into_comp_error(input, lex_data, crate::error::Kind::Parser))?;
+		.map_err(|e| e.into_comp_error(input, lex_data))
+		.map_err(|e| e.with_kind(ErrKind::Parser))?;
 	if should_print {
 		eprintln!("{tasks:?}");
 	}
 
 	let data = process_tasks(lex_data, tasks)
-		.map_err(|e| e.into_comp_error(input, lex_data, crate::error::Kind::Parser))?;
+		.map_err(|e| e.into_comp_error(input, lex_data))
+		.map_err(|e| e.with_kind(ErrKind::Parser))?;
 	if should_print {
 		eprintln!("{data:?}");
 	}

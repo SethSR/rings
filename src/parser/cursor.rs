@@ -67,27 +67,6 @@ impl<'a> Cursor<'a> {
 		}
 	}
 
-	pub fn expect_integer(&mut self, expected: &str) -> Result<i64, Error> {
-		if let TokenKind::Integer(num) = self.current() {
-			self.advance();
-			Ok(num)
-		} else {
-			Err(self.expected_token(expected))
-		}
-	}
-
-	pub fn expect_u32(&mut self, expected: &str) -> Result<u32, Error> {
-		self.expect_integer(expected)
-			.and_then(|num| {
-				let location = self.index() - 1;
-				check_integer_as_u32(
-					&format!("valid {expected}"),
-					num,
-					location,
-				)
-			})
-	}
-
 	pub fn expect_type(&mut self,
 		data: &Data<TokenId>,
 	) -> Result<Type, Error> {
@@ -151,12 +130,3 @@ impl<'a> Cursor<'a> {
 		Error::ExpectedToken { expected: expected.into(), found: self.index() }
 	}
 }
-
-fn check_integer_as_u32(expected: &str, found: i64, location: TokenId) -> Result<u32, Error> {
-	if !(0..u32::MAX as i64).contains(&found) {
-		Err(Error::Expected { location, expected: expected.into(), found: found.to_string() })
-	} else {
-		Ok(found as u32)
-	}
-}
-
