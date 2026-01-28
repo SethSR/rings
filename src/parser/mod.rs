@@ -36,7 +36,7 @@ pub use data::{Procedure, Record, Region, Table, Value};
 pub use data::{ProcMap, RecordMap, RegionMap, TableMap, TypeMap, ValueMap};
 pub use types::Type;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryPlacement {
 	Address(u32),
 	Region(IdentId),

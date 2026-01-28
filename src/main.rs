@@ -10,6 +10,7 @@ mod error;
 mod identifier;
 mod input;
 mod packing;
+mod layout;
 mod lexer;
 mod operators;
 mod parser;
@@ -53,16 +54,30 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 
 	let proc_db = type_checker::eval(&input, &lex_data, &prs_data)
 		.map_err(|e| e.display(&input))?;
-	println!("Procedures: {proc_db:?}\n");
+	println!("Procedures: {proc_db:?}");
 	for (proc_id, list) in &proc_db {
 		println!("  {}:", lex_data.text(&input, proc_id));
 		for ast in list {
 			println!("    {ast:?}");
 		}
 	}
+	println!();
 
-	let lay_data = packing::eval(&prs_data);
-	println!("Layout: {lay_data:?}");
+	let pak_data = packing::eval(&prs_data);
+	println!("Packing:");
+	for (rec_id, record) in &pak_data.records {
+		println!("  {}: {record:?}", lex_data.text(&input, rec_id));
+	}
+	for (tab_id, table) in &pak_data.tables {
+		println!("  {}: {table:?}", lex_data.text(&input, tab_id));
+	}
+
+	println!("Layout:");
+	let lay_data = layout::eval(&prs_data, &pak_data)
+		.map_err(|e| e.display(&input, &lex_data))?;
+	for (reg_id, offset) in lay_data {
+		println!("  {}: {offset}", lex_data.text(&input, &reg_id));
+	}
 
 	/*
 	let section_db = vsmc::eval(&input, &lex_data, &prs_data, &lay_data)
