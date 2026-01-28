@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 index_vec = "0.1.4"
+interavl = "0.5.0"
 
 [features]
 record=[]
