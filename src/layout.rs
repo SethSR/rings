@@ -73,6 +73,7 @@ pub fn eval(
 	}
 
 	let mut region_offsets = IdentMap::<u32>::new();
+	let mut locations = IdentMap::<u32>::new();
 
 	let mut table_map = IntervalTree::<u32, IdentId>::default();
 	for (id, table) in &prs_data.tables {
@@ -88,6 +89,8 @@ pub fn eval(
 		if let Some(old_id) = table_map.insert(start..end, *id) {
 			return Err(Error::new(*id, old_id));
 		}
+
+		locations.insert(*id, start);
 	}
 
 	let mut record_map = IntervalTree::<u32, IdentId>::default();
@@ -108,9 +111,11 @@ pub fn eval(
 		for (_, name) in table_map.iter_overlaps(&(start..end)) {
 			return Err(Error::new(*id, *name));
 		}
+
+		locations.insert(*id, start);
 	}
 
-	Ok(region_offsets)
+	Ok(locations)
 }
 
 fn placement_start(
