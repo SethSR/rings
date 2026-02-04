@@ -33,8 +33,8 @@ use expression::evaluate_expr;
 
 pub use ast::{Ast, AstId, Kind as AstKind, AstList, PathSegment};
 pub use data::{Procedure, Record, Region, Table, Value};
-pub use data::{ProcMap, RecordMap, RegionMap, TableMap, TypeMap, ValueMap};
-pub use types::Type;
+pub use data::{ProcMap, RecordMap, RegionMap, TableMap, ValueMap};
+pub use types::{Type, TypeMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryPlacement {
@@ -92,7 +92,7 @@ impl<T: Debug> Debug for Data<T> {
 				.collect::<Vec<_>>()
 				.join("\n"))?;
 		writeln!(f, "types: \n{}", self.types.iter()
-				.map(|a| format!("  {a:?}"))
+				.map(|(proc_id, depth, id, typ)| format!("  ({proc_id:?}, {depth}, {id:?}) -> {typ:?}"))
 				.collect::<Vec<_>>()
 				.join("\n"))?;
 		writeln!(f, "}}")
@@ -698,7 +698,7 @@ fn process_proc(
 		let params = process_fields(cursor, data, TokenKind::CParen)?;
 		cursor.expect(TokenKind::CParen)?;
 		for (param_id, param_type) in &params {
-			data.types.insert((proc_id, start_depth, *param_id), *param_type);
+			data.types.insert(proc_id, start_depth, *param_id, *param_type);
 		}
 		params
 	} else {

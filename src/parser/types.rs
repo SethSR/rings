@@ -36,3 +36,26 @@ impl Type {
 		self == Self::Dec
 	}
 }
+
+/// Maps (procedure name, scope depth, variable name) to variable type
+#[derive(Debug, Default, Clone)]
+pub struct TypeMap {
+	data: Vec<(IdentId, u16, IdentId, Type)>,
+}
+
+impl TypeMap {
+	pub fn insert(&mut self, proc_id: IdentId, scope_depth: u16, id: IdentId, typ: Type) {
+		self.data.push((proc_id, scope_depth, id, typ));
+	}
+
+	pub fn get(&self, proc_id: IdentId, scope_depth: u16, id: IdentId) -> Option<Type> {
+		self.data.iter()
+				.rev()
+				.find(|(p_id, depth, t_id, _)| *p_id == proc_id && *t_id == id && *depth <= scope_depth)
+				.map(|(_,_,_,typ)| *typ)
+	}
+	
+	pub fn iter(&self) -> impl Iterator<Item=&(IdentId, u16, IdentId, Type)> {
+		self.data.iter()
+	}
+}

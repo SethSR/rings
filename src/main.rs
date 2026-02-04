@@ -45,15 +45,15 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	//println!("{input}");
 
 	let lex_data = lexer::eval(&input.source)
-		.map_err(|e| e.display(&input))?;
+			.map_err(|e| e.display(&input))?;
 	lex_data.print(&input, false);
 
 	let prs_data = parser::eval(&input, &lex_data, false)
-		.map_err(|e| e.display(&input))?;
+			.map_err(|e| e.display(&input))?;
 	println!("{prs_data:?}\n");
 
 	let proc_db = type_checker::eval(&input, &lex_data, &prs_data)
-		.map_err(|e| e.display(&input))?;
+			.map_err(|e| e.display(&input))?;
 	println!("Procedures: {proc_db:?}");
 	for (proc_id, list) in &proc_db {
 		println!("  {}:", lex_data.text(&input, proc_id));
@@ -74,15 +74,16 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 
 	println!("Layout:");
 	let lay_data = layout::eval(&prs_data, &pak_data)
-		.map_err(|e| e.display(&input, &lex_data))?;
-	for (reg_id, offset) in lay_data {
+			.map_err(|e| e.display(&input, &lex_data))?;
+	for (reg_id, offset) in &lay_data {
 		println!("  {}: {offset}", lex_data.text(&input, &reg_id));
 	}
 
 	/*
-	let section_db = vsmc::eval(&input, &lex_data, &prs_data, &lay_data)
-		.map_err(|e| e.display(&input))?;
-	vsmc::print(&section_db, &input, &lex_data);
+	let section_db = vsmc::eval(&prs_data, &proc_db, &lay_data)
+			.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
+			.map_err(|e| e.display(&input))?;
+	println!("Sections {section_db:?}");
 
 	let asm_db = asm::eval(&input, &lex_data, section_db);
 	//println!("{asm_db:?}");

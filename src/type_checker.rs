@@ -1,26 +1,31 @@
 
 use std::collections::HashSet;
 
+use index_vec::IndexVec;
+
 use crate::error;
 use crate::identifier::{IdentId, Identifier, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::parser::{Ast, AstId, AstKind, AstList, Data as PrsData, PathSegment, Type, Value};
+use crate::parser::{Ast, AstId, AstKind, Data as PrsData, PathSegment, Type, Value};
 use crate::token::Id as TokenId;
 use crate::{token_source, Span, SrcPos};
 
-pub type TypedList = AstList<TypedKind, SrcPos>;
+pub type TypedList = IndexVec<AstId, TypedAst>;
 
 #[derive(Debug, Clone)]
-pub struct TypedKind(AstKind, Type);
-
-type TypedAst = Ast<TypedKind, SrcPos>;
+pub struct TypedAst {
+	pub kind: AstKind,
+	pub typ: Type,
+	pub location: Span<SrcPos>,
+}
 
 impl TypedAst {
-	fn new(value: Ast<AstKind, SrcPos>, typ: Type) -> Self {
+	fn new(value: &Ast<AstKind, SrcPos>, typ: Type) -> Self {
 		Self {
-			kind: TypedKind(value.kind, typ),
+			kind: value.kind.clone(),
+			typ,
 			location: value.location,
 		}
 	}
@@ -145,7 +150,7 @@ impl Error {
 				error::Error::new(location, message)
 			}
 			Self::NoType(ast) => {
-				let message = format!("no type for access {ast:?}");
+				let message = format!("no type for item {ast:?}");
 				error::Error::new(ast.location, message)
 			}
 		}
@@ -191,35 +196,10 @@ pub fn eval(
 		}
 	}
 
-	// Check for region overlap
-	let regions_vec: Vec<_> = prs_data.regions.iter().collect();
-
-	for i in 0..regions_vec.len() {
-		for j in i+1..regions_vec.len() {
-			let (i_name, i_span) = regions_vec[i];
-			let (j_name, j_span) = regions_vec[j];
-			if i_span.span.start >= j_span.span.end || i_span.span.end <= j_span.span.start {
-				continue;
-			}
-
-			let i_src_loc = lex_data.location(i_name);
-			let j_src_loc = lex_data.location(j_name);
-			let i_text = lex_data.text(input, i_name);
-			let j_text = lex_data.text(input, j_name);
-			return Err(error::Error::new(i_src_loc, format!("regions {i_text} and {j_text} overlap"))
-				.with_note_at(i_src_loc, format!("{i_text} has a memory range of {i_span:?}"))
-				.with_note_at(j_src_loc, format!("{j_text} has a memory range of {j_span:?}"))
-				.with_kind(error::Kind::Checker));
-		}
-	}
-
-	// Check Record placement
-	// TODO - srenshaw - Ensure records fit within their respective regions.
-
 	// Check procedures
 	let mut typed_procedures = IdentMap::with_capacity(prs_data.procedures.len());
 	for proc_id in prs_data.procedures.keys() {
-		match check_proc(&prs_data, *proc_id) {
+		match check_proc(&prs_data, *proc_id).and_then(resolve_types) {
 			Ok(new_ast) => {
 				typed_procedures.insert(*proc_id, new_ast);
 			}
@@ -238,7 +218,7 @@ fn meet_ast(
 	lhs: &TypedAst,
 	rhs: &TypedAst,
 ) -> Result<Type, Error> {
-	meet(lhs.kind.1, rhs.kind.1, lhs.location + rhs.location)
+	meet(lhs.typ, rhs.typ, lhs.location + rhs.location)
 }
 
 fn meet(lhs: Type, rhs: Type, location: Span<SrcPos>,
@@ -274,15 +254,14 @@ fn meet(lhs: Type, rhs: Type, location: Span<SrcPos>,
 fn check_proc(
 	prs_data: &PrsData<SrcPos>,
 	proc_id: IdentId,
-) -> Result<AstList<TypedKind, SrcPos>, Error> {
-	let mut out = AstList::default();
+) -> Result<TypedList, Error> {
+	let mut out = TypedList::default();
 	let mut scope_depth = 0;
 	let mut mark_set = HashSet::<IdentId>::default();
 
 	let proc_data = &prs_data.procedures[&proc_id];
 
-	for ast_id in 0..proc_data.body.len() {
-		let ast = proc_data.body[ast_id].clone();
+	for ast in &proc_data.body {
 		match ast.kind {
 			AstKind::Int(_) => {
 				out.push(TypedAst::new(ast, Type::Int));
@@ -296,23 +275,25 @@ fn check_proc(
 				let ex_type = match prs_data.values.get(&ident_id) {
 					Some(Value::Integer(_)) => Type::Int,
 					Some(Value::Decimal(_)) => Type::Dec,
-					None => *prs_data.types.get(&(proc_id, scope_depth, ident_id))
-							.unwrap_or_else(|| panic!("missing type for {ident_id}: ({proc_id}, {scope_depth}, {ident_id})")),
+					None => prs_data.types.get(proc_id, scope_depth, ident_id)
+							.ok_or_else(|| Error::NoType(ast.clone()))?,
 				};
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
 			AstKind::Assign { lhs, rhs } => {
-				let lhs = &out[lhs];
-				let rhs = &out[rhs];
-				let ex_type = meet_ast(lhs, rhs)?;
+				let lhs_ast = &out[lhs];
+				let rhs_ast = &out[rhs];
+				let ex_type = meet_ast(lhs_ast, rhs_ast)?;
+				out[lhs].typ = ex_type;
+				out[rhs].typ = ex_type;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
 			AstKind::BinOp { op, lhs, rhs } => {
-				let lhs = &out[lhs];
-				let rhs = &out[rhs];
-				let typ = meet_ast(lhs, rhs)?;
+				let lhs_ast = &out[lhs];
+				let rhs_ast = &out[rhs];
+				let typ = meet_ast(lhs_ast, rhs_ast)?;
 
 				let valid_op = match op {
 					BinaryOp::Add |
@@ -349,17 +330,19 @@ fn check_proc(
 				if !valid_op {
 					return Err(Error::InvalidBinOp {
 						op,
-						lhs: lhs.kind.1,
-						rhs: rhs.kind.1,
+						lhs: lhs_ast.typ,
+						rhs: rhs_ast.typ,
 						location: ast.location,
 					});
 				}
 
+				out[lhs].typ = typ;
+				out[rhs].typ = typ;
 				out.push(TypedAst::new(ast, typ));
 			}
 
 			AstKind::UnOp { op, rhs } => {
-				let rhs_type = out[rhs].kind.1;
+				let rhs_type = out[rhs].typ;
 
 				let valid_op = match op {
 					UnaryOp::Neg => {
@@ -382,8 +365,9 @@ fn check_proc(
 			}
 
 			AstKind::Return(Some(ret)) => {
-				let ret = &out[ret];
-				let ex_type = meet(ret.kind.1, proc_data.ret_type, ret.location)?;
+				let ret_ast = &out[ret];
+				let ex_type = meet(ret_ast.typ, proc_data.ret_type, ret_ast.location)?;
+				out[ret].typ = ex_type;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
@@ -406,13 +390,13 @@ fn check_proc(
 
 			AstKind::Block(ref block) => {
 				let ex_type = block.last()
-						.map(|&id| out[id].kind.1)
+						.map(|&id| out[id].typ)
 						.unwrap_or(Type::Void);
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
 			AstKind::If { cond, ref then_block, ref else_block } => {
-				let cond_type = out[cond].kind.1;
+				let cond_type = out[cond].typ;
 				if !cond_type.is_integer() {
 					return Err(Error::TypeMismatch {
 						expected: Type::Int,
@@ -422,10 +406,10 @@ fn check_proc(
 				}
 
 				let then_type = then_block.last()
-						.map(|&id| out[id].kind.1)
+						.map(|&id| out[id].typ)
 						.unwrap_or(Type::Void);
 				let else_type = else_block.last()
-						.map(|&id| out[id].kind.1)
+						.map(|&id| out[id].typ)
 						.unwrap_or(Type::Void);
 				let ex_type = meet(then_type, else_type, ast.location)?;
 
@@ -433,7 +417,7 @@ fn check_proc(
 			}
 
 			AstKind::While { cond, ..} => {
-				let cond_type = out[cond].kind.1;
+				let cond_type = out[cond].typ;
 				if !cond_type.is_integer() {
 					return Err(Error::TypeMismatch {
 						expected: Type::Int,
@@ -449,7 +433,7 @@ fn check_proc(
 					let Some(ast_id) = ast_id_opt else {
 						return Err(Error::MissingLoopBounds(location));
 					};
-					let ast_type = list[ast_id].kind.1;
+					let ast_type = list[ast_id].typ;
 
 					// TODO - srenshaw - Check for constant values
 
@@ -469,23 +453,23 @@ fn check_proc(
 					}
 
 					for idx_id in indexes.iter() {
-						let idx_ast = &out[*idx_id].kind;
-						let AstKind::Ident(idx_ident) = idx_ast.0 else {
+						let idx_ast = &out[*idx_id];
+						let AstKind::Ident(idx_ident) = idx_ast.kind else {
 							return Err(Error::NonIdentifierField {
-								field_kind: idx_ast.0.clone(),
+								field_kind: idx_ast.kind.clone(),
 								location: out[*idx_id].location,
 							});
 						};
 
 						// TODO - srenshaw - We may want to add destructuring for Records eventually.
 
-						let Type::Unknown = idx_ast.1 else {
+						if idx_ast.typ != Type::Unknown {
 							return Err(Error::TypeMismatch {
 								expected: Type::Unknown,
-								found: idx_ast.1,
+								found: idx_ast.typ,
 								location: out[*idx_id].location,
 							});
-						};
+						}
 
 						let Some((_, f_type)) = table.fields.iter()
 								.find(|field| field.0 == idx_ident) else {
@@ -496,7 +480,7 @@ fn check_proc(
 							});
 						};
 
-						out[*idx_id].kind.1 = *f_type;
+						out[*idx_id].typ = *f_type;
 					}
 
 					// TODO - srenshaw - Handle Table special cases
@@ -512,18 +496,34 @@ fn check_proc(
 							location: ast.location,
 						});
 					}
+
+					out.push(TypedAst::new(ast, bound_type));
 				} else {
 					if indexes.len() > 1 {
 						return Err(Error::TooManyLoopVariables(ast.location));
 					}
 
+					for idx_id in indexes {
+						out[*idx_id].typ = Type::Int;
+					}
+
 					// TODO - srenshaw - Handle non-table special cases
 
+					if let Some(start_id) = range_start {
+						if let AstKind::Int(val) = out[start_id].kind {
+							//
+						}
+					}
 					let start_type = get_bounds_type(&out, ast.location, range_start)?;
+					if let Some(end_id) = range_end {
+						if let AstKind::Int(val) = out[end_id].kind {
+							//
+						}
+					}
 					let end_type = get_bounds_type(&out, ast.location, range_end)?;
 
 					let bound_type = meet(start_type, end_type, ast.location)?;
-					let index_type = out[indexes[0]].kind.1;
+					let index_type = out[indexes[0]].typ;
 
 					let loop_type = meet(index_type, bound_type, ast.location)?;
 					if !loop_type.is_integer() {
@@ -533,9 +533,9 @@ fn check_proc(
 							location: ast.location,
 						});
 					}
-				}
 
-				out.push(TypedAst::new(ast, Type::Void));
+					out.push(TypedAst::new(ast, loop_type));
+				}
 			}
 
 			#[cfg(feature = "forloop")]
@@ -572,23 +572,23 @@ fn check_proc(
 			}
 
 			AstKind::Call { proc_id, ref block } => {
-				let proc_data = &prs_data.procedures[&proc_id];
+				let proc = &prs_data.procedures[&proc_id];
 
-				if proc_data.params.len() != block.len() {
+				if proc.params.len() != block.len() {
 					return Err(Error::ParamCountMismatch {
 						proc_id,
-						param_count: proc_data.params.len(),
+						param_count: proc.params.len(),
 						arg_count: block.len(),
 						location: ast.location,
 					});
 				}
 
-				for ((_, p_type), arg_id) in proc_data.params.iter().zip(block.iter()) {
-					let arg_type = out[*arg_id].kind.1;
+				for ((_, p_type), arg_id) in proc.params.iter().zip(block.iter()) {
+					let arg_type = out[*arg_id].typ;
 					meet(*p_type, arg_type, out[*arg_id].location)?;
 				}
 
-				out.push(TypedAst::new(ast, proc_data.ret_type));
+				out.push(TypedAst::new(ast, proc.ret_type));
 			}
 
 			AstKind::Access { base_id, ref path } => {
@@ -614,7 +614,7 @@ fn check_proc(
 				}
 
 				if typ.is_none() {
-					return Err(Error::NoType(ast));
+					return Err(Error::NoType(ast.clone()));
 				}
 
 				out.push(TypedAst::new(ast, typ.unwrap()));
@@ -668,6 +668,71 @@ fn check_proc(
 	}
 
 	Ok(out)
+}
+
+fn resolve_types(
+	mut typed_list: TypedList,
+) -> Result<TypedList, Error> {
+	let mut needs_update = true;
+
+	while needs_update {
+		needs_update = false;
+		for ast_id in 0..typed_list.len() {
+			let ast = typed_list[ast_id].clone();
+			match ast.kind {
+				AstKind::Assign { lhs, rhs } |
+				AstKind::BinOp { lhs, rhs, ..} => {
+					let lhs_ast = &mut typed_list[lhs];
+					if lhs_ast.typ != ast.typ {
+						lhs_ast.typ = ast.typ;
+						needs_update = true;
+					}
+
+					let rhs_ast = &mut typed_list[rhs];
+					if rhs_ast.typ != ast.typ {
+						rhs_ast.typ = ast.typ;
+						needs_update = true;
+					}
+				}
+
+				AstKind::Return(Some(ret)) => {
+					let ret_ast = &mut typed_list[ret];
+					if ret_ast.typ != ast.typ {
+						ret_ast.typ = ast.typ;
+						needs_update = true;
+					}
+				}
+
+				AstKind::For { ref indexes, range_start, range_end, .. } => {
+					let start_id = range_start.unwrap();
+					let start = &mut typed_list[start_id];
+					if start.typ != ast.typ {
+						start.typ = ast.typ;
+						needs_update = true;
+					}
+
+					let end_id = range_end.unwrap();
+					let end = &mut typed_list[end_id];
+					if end.typ != ast.typ {
+						end.typ = ast.typ;
+						needs_update = true;
+					}
+
+					for index in indexes {
+						let index_ast = &mut typed_list[*index];
+						if index_ast.typ != ast.typ {
+							index_ast.typ = ast.typ;
+							needs_update = true;
+						}
+					}
+				}
+
+				_ => {}
+			}
+		}
+	}
+
+	Ok(typed_list)
 }
 
 // TODO - srenshaw - Add type-checker tests

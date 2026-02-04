@@ -98,7 +98,7 @@ fn parse_let_statement(
 	cursor.expect(TKind::Semicolon)?;
 	let tok_end = cursor.index();
 	let ident = nodes.push(Ast::ident(ident_id, (id_start..id_end).into()));
-	data.types.insert((proc_id, depth, ident_id), var_type);
+	data.types.insert(proc_id, depth, ident_id, var_type);
 	Ok(nodes.push(Ast::assign(ident, ast_id, (tok_start..tok_end).into())))
 }
 
@@ -248,7 +248,7 @@ fn parse_for_statement(
 
 	let vars = vars.into_iter()
 			.map(|(ident_id, span)| {
-				data.types.insert((proc_id, depth, ident_id), super::Type::Unknown);
+				data.types.insert(proc_id, depth, ident_id, super::Type::Unknown);
 				nodes.push(Ast::ident(ident_id, span))
 			})
 			.collect();

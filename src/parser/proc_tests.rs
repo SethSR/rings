@@ -103,7 +103,7 @@ fn with_typed_params() {
 		AstKind::Return(None),
 		AstKind::Block(vec![3.into(), 5.into()]),
 	]);
-	assert_eq!(data.types.get(&("main".id(), 1, "a".id())), Some(&Type::U16));
+	assert_eq!(data.types.get("main".id(), 1, "a".id()), Some(Type::U16));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn with_inferred_params() {
 	").unwrap_or_else(|e| panic!("{e}"));
 	let proc = &data.procedures[&"main".id()];
 	assert_eq!(proc.body.len(), 7);
-	assert_eq!(data.types.get(&("main".id(), 1, "a".id())), Some(&Type::Unknown));
+	assert_eq!(data.types.get("main".id(), 1, "a".id()), Some(Type::Unknown));
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn with_if() {
 			}
 		}
 	").unwrap_or_else(|e| panic!("{e}"));
-	assert_eq!(data.types.get(&("a".id(), 0, "b".id())), Some(&Type::Bool));
+	assert_eq!(data.types.get("a".id(), 0, "b".id()), Some(Type::Bool));
 	let proc = &data.procedures[&"a".id()];
 	assert_eq!(proc.params, [
 		("b".id(), Type::Bool),
@@ -182,7 +182,7 @@ fn with_while() {
 			return b;
 		}
 	").unwrap_or_else(|e| panic!("{e}"));
-	assert_eq!(data.types.get(&("a".id(), 0, "b".id())), Some(&Type::S8));
+	assert_eq!(data.types.get("a".id(), 0, "b".id()), Some(Type::S8));
 	let proc = &data.procedures[&"a".id()];
 	assert_eq!(proc.params, [
 		("b".id(), Type::S8),
@@ -222,9 +222,9 @@ fn with_multiple_scopes() {
 		}
 	").unwrap_or_else(|e| panic!("{e}"));
 	let main_id = "main".id();
-	assert_eq!(data.types.get(&(main_id, 1, "a".id())), Some(&Type::S16));
-	assert_eq!(data.types.get(&(main_id, 2, "b".id())), Some(&Type::S32));
-	assert_eq!(data.types.get(&(main_id, 3, "c".id())), Some(&Type::S16));
+	assert_eq!(data.types.get(main_id, 1, "a".id()), Some(Type::S16));
+	assert_eq!(data.types.get(main_id, 2, "b".id()), Some(Type::S32));
+	assert_eq!(data.types.get(main_id, 3, "c".id()), Some(Type::S16));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn with_internal_expressions() {
 		AstKind::Return(None),
 		AstKind::Block(vec![5.into(), 7.into()]),
 	]);
-	assert_eq!(data.types.get(&("main".id(), 1, "a".id())), Some(&Type::S8));
+	assert_eq!(data.types.get("main".id(), 1, "a".id()), Some(Type::S8));
 }
 
 #[test]
@@ -272,7 +272,7 @@ fn with_internal_sub_expressions() {
 		AstKind::Return(None),
 		AstKind::Block(vec![9.into(), 11.into()]),
 	]);
-	assert_eq!(data.types.get(&("main".id(), 1, "a".id())), Some(&Type::S8));
+	assert_eq!(data.types.get("main".id(), 1, "a".id()), Some(Type::S8));
 }
 
 #[test]
