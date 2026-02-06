@@ -503,38 +503,60 @@ fn check_proc(
 						return Err(Error::TooManyLoopVariables(ast.location));
 					}
 
-					for idx_id in indexes {
-						out[*idx_id].typ = Type::Int;
-					}
-
 					// TODO - srenshaw - Handle non-table special cases
 
-					if let Some(start_id) = range_start {
-						if let AstKind::Int(val) = out[start_id].kind {
-							//
-						}
+					fn get_val(out: &TypedList, ast_opt: Option<AstId>) -> Option<i64> {
+						ast_opt.map(|id| &out[id].kind)
+								.and_then(|typ| match typ {
+									AstKind::Int(val) => Some(*val),
+									_ => None,
+								})
 					}
+					let start_val = get_val(&out, range_start);
+					let end_val = get_val(&out, range_end);
+
 					let start_type = get_bounds_type(&out, ast.location, range_start)?;
-					if let Some(end_id) = range_end {
-						if let AstKind::Int(val) = out[end_id].kind {
-							//
-						}
-					}
 					let end_type = get_bounds_type(&out, ast.location, range_end)?;
 
 					let bound_type = meet(start_type, end_type, ast.location)?;
-					let index_type = out[indexes[0]].typ;
 
-					let loop_type = meet(index_type, bound_type, ast.location)?;
-					if !loop_type.is_integer() {
+					let index_type = match (start_val, end_val) {
+						(Some(sval), Some(eval)) => {
+							let diff = eval - sval;
+							if sval < 0 {
+								if (i8::MIN as i64..i8::MAX as i64).contains(&diff) {
+									meet(bound_type, Type::S8, ast.location)?
+								} else if (i16::MIN as i64..i16::MAX as i64).contains(&diff) {
+									meet(bound_type, Type::S16, ast.location)?
+								} else {
+									meet(bound_type, Type::S32, ast.location)?
+								}
+							} else {
+								if (u8::MIN as i64..u8::MAX as i64).contains(&diff) {
+									meet(bound_type, Type::U8, ast.location)?
+								} else if (u16::MIN as i64..u16::MAX as i64).contains(&diff) {
+									meet(bound_type, Type::U16, ast.location)?
+								} else {
+									meet(bound_type, Type::U32, ast.location)?
+								}
+							}
+						}
+						_ => bound_type,
+					};
+
+					for idx_id in indexes {
+						out[*idx_id].typ = index_type;
+					}
+
+					if !index_type.is_integer() {
 						return Err(Error::TypeMismatch {
 							expected: Type::Int,
-							found: loop_type,
+							found: index_type,
 							location: ast.location,
 						});
 					}
 
-					out.push(TypedAst::new(ast, loop_type));
+					out.push(TypedAst::new(ast, index_type));
 				}
 			}
 

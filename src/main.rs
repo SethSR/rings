@@ -16,9 +16,9 @@ mod operators;
 mod parser;
 mod types;
 mod span;
+mod tac;
 mod token;
 mod type_checker;
-//mod vsmc;
 
 use span::Span;
 
@@ -79,12 +79,12 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		println!("  {}: {offset}", lex_data.text(&input, &reg_id));
 	}
 
-	/*
-	let section_db = vsmc::eval(&prs_data, &proc_db, &lay_data)
+	let tac_data = tac::eval(&prs_data, &proc_db)
 			.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
 			.map_err(|e| e.display(&input))?;
-	println!("Sections {section_db:?}");
+	println!("TAC: {tac_data:?}");
 
+	/*
 	let asm_db = asm::eval(&input, &lex_data, section_db);
 	//println!("{asm_db:?}");
 
