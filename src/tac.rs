@@ -3,6 +3,7 @@ use crate::identifier::{IdentId, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
+use crate::packing::Data as PakData;
 use crate::parser::{
 	AstId,
 	AstKind,
@@ -10,12 +11,14 @@ use crate::parser::{
 	PathSegment,
 	Procedure,
 	Type,
+	Value,
 };
 use crate::type_checker::TypedList;
 use crate::{
 	error,
 	SrcPos, Target,
 };
+use crate::packing::RecordPacking;
 
 pub type LabelId = u32;
 pub type VRegId = u32;
@@ -23,13 +26,15 @@ pub type VRegId = u32;
 pub fn eval(
 	prs_data: &PrsData<SrcPos>,
 	proc_db: &IdentMap<TypedList>,
+	pak_data: &PakData,
+	loc_data: &IdentMap<u32>,
 ) -> Result<IdentMap<Data>, Error> {
 	let mut out = IdentMap::<Data>::with_capacity(proc_db.len());
 
 	for (proc_id, typed_body) in proc_db {
 		let proc_data = &prs_data.procedures[proc_id];
 
-		let mut tac = TACData::new(typed_body);
+		let mut tac = TACData::new(typed_body, &prs_data, &pak_data, &loc_data);
 
 		let mut data = Data::new(*proc_id, proc_data, prs_data);
 
@@ -38,6 +43,7 @@ pub fn eval(
 			&mut tac,
 			&mut data,
 		)?;
+		data.next_label = tac.next_label;
 		out.insert(*proc_id, data);
 	}
 
@@ -88,6 +94,9 @@ pub enum TAC {
 struct TACData<'a> {
 	typed_body: &'a TypedList,
 	local_map: IdentMap<Location>,
+	prs_data: &'a PrsData<SrcPos>,
+	pak_data: &'a PakData,
+	loc_data: &'a IdentMap<u32>,
 	next_label: LabelId,
 	next_reg: VRegId,
 }
@@ -95,9 +104,15 @@ struct TACData<'a> {
 impl<'a> TACData<'a> {
 	fn new(
 		typed_body: &'a TypedList,
+		prs_data: &'a PrsData<SrcPos>,
+		pak_data: &'a PakData,
+		loc_data: &'a IdentMap<u32>,
 	) -> Self {
 		Self {
 			typed_body,
+			prs_data,
+			pak_data,
+			loc_data,
 			local_map: IdentMap::default(),
 			next_label: 0,
 			next_reg: 0,
@@ -121,6 +136,7 @@ pub struct Data {
 	pub target: Target,
 	pub locals: Vec<IdentId>,
 	pub instructions: Vec<TAC>,
+	pub next_label: LabelId,
 }
 
 impl Data {
@@ -136,6 +152,7 @@ impl Data {
 					.map(|(_,_,id,_)| *id)
 					.collect(),
 			instructions: vec![],
+			next_label: 0,
 		}
 	}
 
@@ -215,6 +232,13 @@ fn lower_node(
 				let loc = Location::Stack(idx, ast.typ);
 				tac.local_map.insert(ident_id, loc);
 				Ok(Some(loc))
+			} else if let Some(value) = tac.prs_data.values.get(&ident_id) {
+				let loc = match value {
+					Value::Integer(val) => Location::Const(*val, ast.typ),
+					Value::Decimal(_) => todo!("implement TAC constants for decimals"),
+				};
+				tac.local_map.insert(ident_id, loc);
+				Ok(Some(loc))
 			} else {
 				Err(Error::unknown_ident(data.name, ident_id))
 			}
@@ -273,7 +297,6 @@ fn lower_node(
 		}
 
 		AstKind::If { cond, ref then_block, ref else_block } => {
-
 			let else_label = tac.label();
 			let end_label = tac.label();
 
@@ -472,16 +495,42 @@ fn lower_node(
 			todo!("lower proc-call")
 		}
 
-		AstKind::Access { base_id: _, ref path } => {
+		AstKind::Access { base_id, ref path } => {
+			let mut curr_id = base_id;
+			let mut location = tac.loc_data[&curr_id];
+
 			for segment in path {
 				match segment {
-					PathSegment::Field(_field_id) => todo!("record-field access"),
+					PathSegment::Field(field_id) => {
+						let rec_pak = &tac.pak_data.records[&curr_id];
+						let record = &tac.prs_data.records[&curr_id];
+						let (idx, typ) = record.fields.iter()
+								.enumerate()
+								.find(|(_, (id, _))| id == field_id)
+								.map(|(idx, (_, typ))| (idx, typ))
+								.expect("missing field");
+						let offset = rec_pak.offsets[idx];
+						location += offset as u32;
 
-					PathSegment::Index(_expr_id, _field_id) => todo!("table-indexed access"),
+						match typ {
+							Type::Record(rid) => curr_id = *rid,
+							Type::Table(_) => panic!("Table used as a field"),
+							_ => {}
+						}
+					}
+
+					PathSegment::Index(_expr_id, _field_id) => {
+						todo!("table-indexed access")
+					}
 				}
 			}
 
-			todo!("lower access")
+			let vr = tac.reg();
+			data.emit(TAC::Load {
+				loc: Location::Addr(location, ast.typ),
+				vr,
+			});
+			Ok(Some(Location::VReg(vr, ast.typ)))
 		}
 	}
 }
@@ -559,7 +608,7 @@ impl Error {
 		};
 
 		error::Error::new(location, message)
-			.with_kind(error::Kind::LoweringVSMC)
+			.with_kind(error::Kind::LoweringTAC)
 	}
 }
 
@@ -583,7 +632,7 @@ mod tests {
 		let prs_data = parser::eval(&input, &lex_data, false)
 				.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let proc_db = type_checker::eval(&input, &lex_data, &prs_data)
+		let typ_data = type_checker::eval(&input, &lex_data, &prs_data)
 				.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
 		let pak_data = packing::eval(&prs_data);
@@ -591,7 +640,7 @@ mod tests {
 		let lay_data = layout::eval(&prs_data, &pak_data)
 				.unwrap_or_else(|e| panic!("{}", e.display(&input, &lex_data)));
 
-		let sections = eval(&prs_data, &proc_db)
+		let sections = eval(&prs_data, &typ_data, &pak_data, &lay_data)
 				.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
 				.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 

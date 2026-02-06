@@ -52,10 +52,10 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 			.map_err(|e| e.display(&input))?;
 	println!("{prs_data:?}\n");
 
-	let proc_db = type_checker::eval(&input, &lex_data, &prs_data)
+	let typ_data = type_checker::eval(&input, &lex_data, &prs_data)
 			.map_err(|e| e.display(&input))?;
-	println!("Procedures: {proc_db:?}");
-	for (proc_id, list) in &proc_db {
+	println!("Procedures: {typ_data:?}");
+	for (proc_id, list) in &typ_data {
 		println!("  {}:", lex_data.text(&input, proc_id));
 		for ast in list {
 			println!("    {ast:?}");
@@ -79,7 +79,7 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		println!("  {}: {offset}", lex_data.text(&input, &reg_id));
 	}
 
-	let tac_data = tac::eval(&prs_data, &proc_db)
+	let tac_data = tac::eval(&prs_data, &typ_data, &pak_data, &lay_data)
 			.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
 			.map_err(|e| e.display(&input))?;
 	println!("TAC: {tac_data:?}");

@@ -33,7 +33,7 @@ pub enum Kind {
 	Lexer,
 	Parser,
 	Checker,
-	LoweringVSMC,
+	LoweringTAC,
 }
 
 #[derive(Debug, Default, Clone)]
