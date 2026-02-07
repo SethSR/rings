@@ -33,7 +33,7 @@ impl Data {
 		input: &'a input::Data,
 		ident_id: &identifier::IdentId,
 	) -> &'a str {
-		let Span { start, end } =  self.identifiers[ident_id];
+		let Span { start, end } = self.identifiers[ident_id];
 		&input.source[start..end]
 	}
 	

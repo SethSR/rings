@@ -234,7 +234,7 @@ fn token_source(
 ) -> Span<SrcPos> {
 	let kind = lex_data.tok_list[token_id];
 	let start = lex_data.tok_pos[token_id];
-	Span { start, end: start + kind.size(&input, &lex_data) }
+	Span::new(start, start + kind.size(&input, &lex_data))
 }
 
 fn type_text(

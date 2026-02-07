@@ -6,7 +6,7 @@ use interavl::IntervalTree;
 use crate::identifier::{IdentId, Map as IdentMap};
 use crate::packing::Data as PakData;
 use crate::parser::{Data as PrsData, MemoryPlacement};
-use crate::{Span, SrcPos};
+use crate::SrcPos;
 
 enum EType {
 	Basic,
@@ -60,15 +60,14 @@ pub fn eval(
 ) -> Result<IdentMap<u32>, Error> {
 	let mut memory_map = IntervalTree::<u32, IdentId>::default();
 	for (id, region) in &prs_data.regions {
-		memory_map.insert(region.span.start..region.span.end, *id);
+		memory_map.insert(region.span.into(), *id);
 	}
 
 	// Check for region overlap
 	for (id, region) in &prs_data.regions {
-		let Span { start, end } = region.span;
-		for (interval, name) in memory_map.iter_overlaps(&(start..end)) {
+		for (interval, name) in memory_map.iter_overlaps(&region.span.into()) {
 			if name == id { continue };
-			return Err(Error::with_regions(*id, start..end, *name, interval.clone()));
+			return Err(Error::with_regions(*id, region.span.into(), *name, interval.clone()));
 		}
 	}
 

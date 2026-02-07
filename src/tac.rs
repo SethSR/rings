@@ -18,7 +18,6 @@ use crate::{
 	error,
 	SrcPos, Target,
 };
-use crate::packing::RecordPacking;
 
 pub type LabelId = u32;
 pub type VRegId = u32;
