@@ -5,7 +5,8 @@ use std::{env, fs};
 //use std::path::PathBuf;
 //use std::process::{Command, Stdio};
 
-//mod asm;
+mod asm;
+//mod dom;
 mod error;
 mod identifier;
 mod input;
@@ -82,12 +83,26 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	let tac_data = tac::eval(&prs_data, &typ_data, &pak_data, &lay_data)
 			.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
 			.map_err(|e| e.display(&input))?;
-	println!("TAC: {tac_data:?}");
+	println!("TAC:");
+	for (proc_id, list) in &tac_data {
+		println!("  {}:", lex_data.text(&input, proc_id));
+		for tac in &list.instructions {
+			println!("    {tac:?}");
+		}
+	}
+
+	let asm_db = asm::eval(&input, &lex_data, tac_data);
+	println!("ASM:");
+	for (proc_id, data) in &asm_db {
+		println!("  {}:", lex_data.text(&input, proc_id));
+		match data {
+			asm::Data::M68k(list) => for asm in list {
+				println!("{asm}");
+			}
+		}
+	}
 
 	/*
-	let asm_db = asm::eval(&input, &lex_data, section_db);
-	//println!("{asm_db:?}");
-
 	output(&input.source_file, asm_db);
 	*/
 

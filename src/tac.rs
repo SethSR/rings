@@ -445,6 +445,10 @@ fn lower_node(
 					vr1: idx_vr,
 					vr2: temp_vr,
 				});
+				data.emit(TAC::Store {
+					vr: temp_vr,
+					loc: Location::VReg(idx_vr, idx_typ),
+				});
 
 				// goto start
 				data.emit(TAC::Jump(start_label));
@@ -524,12 +528,7 @@ fn lower_node(
 				}
 			}
 
-			let vr = tac.reg();
-			data.emit(TAC::Load {
-				loc: Location::Addr(location, ast.typ),
-				vr,
-			});
-			Ok(Some(Location::VReg(vr, ast.typ)))
+			Ok(Some(Location::Addr(location, ast.typ)))
 		}
 	}
 }
@@ -613,6 +612,7 @@ impl Error {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
 	use crate::{input, layout, lexer, packing, parser, type_checker};
 	use crate::identifier::Identifier;
 
@@ -783,6 +783,7 @@ mod tests {
 			TAC::Store { vr: 9, loc: Location::Stack(1, Type::S8) },
 			TAC::Load { loc: Location::Const(1, Type::U8), vr: 10 },
 			TAC::BinOp { op: BinaryOp::Add, typ: Type::U8, vr0: 10, vr1: 2, vr2: 10 },
+			TAC::Store { vr: 10, loc: Location::VReg(2, Type::U8) },
 			TAC::Jump(0),
 			// Loop end
 			TAC::Label(1),
@@ -829,6 +830,195 @@ mod tests {
 		assert_eq!(rec_packing.size, 3);
 		assert_eq!(*rec_packing.sizes, [1, 1, 1]);
 		assert_eq!(*rec_packing.offsets, [0, 1, 2]);
+	}
+
+	#[test]
+	fn run() {
+		let (tac_data,_,_) = setup("\
+		main {
+			let b: s8 = 4;
+			let c: s8 = 0;
+			for i in [0..10] {
+				c += b * 2;
+			}
+		}
+		");
+		let proc_tac = &tac_data[&"main".id()];
+		let tac_emu = interpret(proc_tac);
+		assert!(tac_emu.mem.is_empty());
+		assert_eq!(tac_emu.labels.len(), 2);
+		assert_eq!(tac_emu.stack.len(), 2);
+		assert_eq!(tac_emu.stack[&1], 4 * 2 * 10);
+	}
+
+	#[derive(Debug, Default)]
+	struct TacEmu {
+		pc: usize,
+		regs: HashMap<VRegId, i64>,
+		mem: HashMap<u32, i64>,
+		stack: HashMap<usize, i64>,
+		labels: HashMap<LabelId, usize>,
+	}
+
+	fn interpret(data: &Data) -> TacEmu {
+		let mut tac_emu = TacEmu::default();
+		for (idx, tac) in data.instructions.iter().enumerate() {
+			if let TAC::Label(label) = tac {
+				tac_emu.labels.insert(*label, idx);
+			}
+		}
+
+		loop {
+			let tac = &data.instructions[tac_emu.pc];
+			tac_emu.pc += 1;
+			match tac {
+				TAC::Label(_) => {}
+				TAC::Return(with_value) => match with_value {
+					None => {
+						eprintln!("Return");
+						break;
+					}
+					Some(value) => {
+						eprintln!("Return {}", tac_emu.regs[value]);
+						break;
+					}
+				}
+				TAC::Jump(label) => {
+					eprintln!("Jump {label}");
+					tac_emu.pc = tac_emu.labels[label];
+				}
+				TAC::JumpIf { lbl, vr } => {
+					eprintln!("JumpIf {lbl}");
+					if tac_emu.regs[vr] != 0 {
+						tac_emu.pc = tac_emu.labels[lbl];
+					}
+				}
+				TAC::Load { loc, vr } => {
+					eprintln!("Load {loc:?} -> {vr}({:?})", tac_emu.regs.get(vr));
+					match loc {
+						Location::Addr(addr, typ) => {
+							eprintln!("  {typ:?}");
+							let val = tac_emu.mem.entry(*addr)
+									.or_insert(-1);
+							tac_emu.regs.insert(*vr, *val);
+						}
+						Location::Const(val, typ) => {
+							eprintln!("  {typ:?}");
+							tac_emu.regs.insert(*vr, *val);
+						}
+						Location::Stack(idx, typ) => {
+							eprintln!("  {typ:?}");
+							let val = tac_emu.stack.entry(*idx)
+									.or_insert(-1);
+							tac_emu.regs.insert(*vr, *val);
+						}
+						Location::VReg(vr1, typ) => {
+							eprintln!("  {typ:?}");
+							let val = tac_emu.regs.get(vr1)
+									.expect("missing vreg");
+							tac_emu.regs.insert(*vr, *val);
+						}
+					}
+				}
+				TAC::Store { vr, loc } => {
+					eprintln!("Store {vr}({}) -> {loc:?}", tac_emu.regs[vr]);
+					match loc {
+						Location::Addr(addr, typ) => {
+							eprintln!("  {typ:?}");
+							tac_emu.mem.insert(*addr, tac_emu.regs[vr]);
+						}
+						Location::Const(val, typ) => {
+							panic!("storing into a constant value: {val}");
+						}
+						Location::Stack(idx, typ) => {
+							eprintln!("  {typ:?}");
+							tac_emu.stack.insert(*idx, tac_emu.regs[vr]);
+						}
+						Location::VReg(vr1, typ) => {
+							eprintln!("  {typ:?}");
+							let val = tac_emu.regs.get(vr)
+									.expect("missing vr");
+							tac_emu.regs.insert(*vr1, *val);
+						}
+					}
+				}
+				TAC::UnOp { op, typ, vr0, vr1 } => {
+					eprintln!("UnOp {op}:{typ:?} {vr0}({}) -> {vr1}", tac_emu.regs[vr0]);
+					match op {
+						UnaryOp::Neg => {
+							tac_emu.regs.insert(*vr1, -tac_emu.regs[vr0]);
+						}
+						UnaryOp::Not => {
+							tac_emu.regs.insert(*vr1, !tac_emu.regs[vr0]);
+						}
+					}
+				}
+				TAC::BinOp { op, typ, vr0, vr1, vr2 } => {
+					eprintln!("BinOp {vr0}({}) {op}:{typ:?} {vr1}({}) -> {vr2}", tac_emu.regs[vr0], tac_emu.regs[vr1]);
+					match op {
+						BinaryOp::Add => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] + tac_emu.regs[vr1]);
+						}
+						BinaryOp::BinAnd => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] & tac_emu.regs[vr1]);
+						}
+						BinaryOp::BinOr => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] | tac_emu.regs[vr1]);
+						}
+						BinaryOp::BinXor => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] ^ tac_emu.regs[vr1]);
+						}
+						BinaryOp::CmpEQ => {
+							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] == tac_emu.regs[vr1]) as i64);
+						}
+						BinaryOp::CmpNE => {
+							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] != tac_emu.regs[vr1]) as i64);
+						}
+						BinaryOp::CmpLT => {
+							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] < tac_emu.regs[vr1]) as i64);
+						}
+						BinaryOp::CmpGT => {
+							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] > tac_emu.regs[vr1]) as i64);
+						}
+						BinaryOp::CmpGE => {
+							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] >= tac_emu.regs[vr1]) as i64);
+						}
+						BinaryOp::CmpLE => {
+							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] <= tac_emu.regs[vr1]) as i64);
+						}
+						BinaryOp::Div => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] / tac_emu.regs[vr1]);
+						}
+						BinaryOp::LogAnd => {
+							tac_emu.regs.insert(*vr2, ((tac_emu.regs[vr0] != 0) && (tac_emu.regs[vr1] != 0)) as i64);
+						}
+						BinaryOp::LogOr => {
+							tac_emu.regs.insert(*vr2, ((tac_emu.regs[vr0] != 0) || (tac_emu.regs[vr1] != 0)) as i64);
+						}
+						BinaryOp::LogXor => {
+							tac_emu.regs.insert(*vr2, ((tac_emu.regs[vr0] != 0) ^ (tac_emu.regs[vr1] != 0)) as i64);
+						}
+						BinaryOp::Mod => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] % tac_emu.regs[vr1]);
+						}
+						BinaryOp::Mul => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] * tac_emu.regs[vr1]);
+						}
+						BinaryOp::ShL => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] << tac_emu.regs[vr1]);
+						}
+						BinaryOp::ShR => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] >> tac_emu.regs[vr1]);
+						}
+						BinaryOp::Sub => {
+							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] - tac_emu.regs[vr1]);
+						}
+					}
+				}
+			}
+		}
+
+		tac_emu
 	}
 }
 
