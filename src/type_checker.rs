@@ -10,7 +10,7 @@ use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::parser::{Ast, AstId, AstKind, Data as PrsData, PathSegment, Type, Value};
 use crate::token::Id as TokenId;
-use crate::{token_source, Span, SrcPos};
+use crate::{token_source, Span, SrcPos, Target};
 
 pub type TypedList = IndexVec<AstId, TypedAst>;
 
@@ -54,6 +54,11 @@ enum Error {
 	},
 	InvalidUnOp {
 		op: UnaryOp,
+		rhs: Type,
+		location: Span<SrcPos>,
+	},
+	NotSupported {
+		lhs: Type,
 		rhs: Type,
 		location: Span<SrcPos>,
 	},
@@ -113,6 +118,10 @@ impl Error {
 			}
 			Self::InvalidUnOp{ op, rhs, location } => {
 				let message = format!("Unable to apply '{op}' to '{rhs:?}'");
+				error::Error::new(location, message)
+			}
+			Self::NotSupported { lhs: _, rhs: _, location } => {
+				let message = "Reading from 32-bit values is not supported when targeting the Z80".to_string();
 				error::Error::new(location, message)
 			}
 			Self::TooManyLoopVariables(location) => {
@@ -217,12 +226,15 @@ pub fn eval(
 fn meet_ast(
 	lhs: &TypedAst,
 	rhs: &TypedAst,
+	on_z80: bool,
 ) -> Result<Type, Error> {
-	meet(lhs.typ, rhs.typ, lhs.location + rhs.location)
+	meet(lhs.typ, rhs.typ, lhs.location + rhs.location, on_z80)
 }
 
 fn meet(lhs: Type, rhs: Type, location: Span<SrcPos>,
+	on_z80: bool,
 ) -> Result<Type, Error> {
+	// TODO - srenshaw - Restrict 32-bit values when targeting Z80
 	match (lhs, rhs) {
 		(Type::Unknown, typ) |
 		(typ, Type::Unknown) => Ok(typ),
@@ -232,16 +244,27 @@ fn meet(lhs: Type, rhs: Type, location: Span<SrcPos>,
 		(typ, Type::Int) if typ.is_integer() => Ok(typ),
 		(Type::U8, Type::S16) |
 		(Type::S16, Type::U8) => Ok(Type::S16),
+
+		(Type::U8, Type::S32) if on_z80 => Err(Error::NotSupported { lhs, rhs, location }),
+		(Type::U16, Type::S32) if on_z80 => Err(Error::NotSupported { lhs, rhs, location }),
+		(Type::S8, Type::S32) if on_z80 => Err(Error::NotSupported { lhs, rhs, location }),
+		(Type::S16, Type::S32) if on_z80 => Err(Error::NotSupported { lhs, rhs, location }),
+		(Type::S32, Type::U8) if on_z80 => Ok(Type::U16),
+		(Type::S32, Type::U16) if on_z80 => Ok(Type::U16),
+		(Type::S32, Type::S8) if on_z80 => Ok(Type::S16),
+		(Type::S32, Type::S16) if on_z80 => Ok(Type::S16),
+
 		(Type::U8, Type::S32) |
 		(Type::S32, Type::U8) => Ok(Type::S32),
 		(Type::U16, Type::S32) |
 		(Type::S32, Type::U16) => Ok(Type::S32),
-		(Type::S8, Type::S16) |
-		(Type::S16, Type::S8) => Ok(Type::S16),
 		(Type::S8, Type::S32) |
 		(Type::S32, Type::S8) => Ok(Type::S32),
 		(Type::S16, Type::S32) |
 		(Type::S32, Type::S16) => Ok(Type::S32),
+
+		(Type::S8, Type::S16) |
+		(Type::S16, Type::S8) => Ok(Type::S16),
 		(a, b) if a == b => Ok(a),
 		_ => Err(Error::TypeMismatch {
 			expected: lhs,
@@ -260,6 +283,7 @@ fn check_proc(
 	let mut mark_set = HashSet::<IdentId>::default();
 
 	let proc_data = &prs_data.procedures[&proc_id];
+	let on_z80 = proc_data.target == Some(Target::Z80);
 
 	for ast in &proc_data.body {
 		match ast.kind {
@@ -284,7 +308,7 @@ fn check_proc(
 			AstKind::Assign { lhs, rhs } => {
 				let lhs_ast = &out[lhs];
 				let rhs_ast = &out[rhs];
-				let ex_type = meet_ast(lhs_ast, rhs_ast)?;
+				let ex_type = meet(lhs_ast.typ, rhs_ast.typ, rhs_ast.location, on_z80)?;
 				out[lhs].typ = ex_type;
 				out[rhs].typ = ex_type;
 				out.push(TypedAst::new(ast, ex_type));
@@ -293,7 +317,7 @@ fn check_proc(
 			AstKind::BinOp { op, lhs, rhs } => {
 				let lhs_ast = &out[lhs];
 				let rhs_ast = &out[rhs];
-				let typ = meet_ast(lhs_ast, rhs_ast)?;
+				let typ = meet_ast(lhs_ast, rhs_ast, on_z80)?;
 
 				let valid_op = match op {
 					BinaryOp::Add |
@@ -366,13 +390,13 @@ fn check_proc(
 
 			AstKind::Return(Some(ret)) => {
 				let ret_ast = &out[ret];
-				let ex_type = meet(ret_ast.typ, proc_data.ret_type, ret_ast.location)?;
+				let ex_type = meet(ret_ast.typ, proc_data.ret_type, ret_ast.location, on_z80)?;
 				out[ret].typ = ex_type;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
 			AstKind::Return(None) => {
-				let ex_type = meet(Type::Void, proc_data.ret_type, ast.location)?;
+				let ex_type = meet(Type::Void, proc_data.ret_type, ast.location, on_z80)?;
 				out.push(TypedAst::new(ast, ex_type));
 			}
 
@@ -411,7 +435,7 @@ fn check_proc(
 				let else_type = else_block.last()
 						.map(|&id| out[id].typ)
 						.unwrap_or(Type::Void);
-				let ex_type = meet(then_type, else_type, ast.location)?;
+				let ex_type = meet(then_type, else_type, ast.location, on_z80)?;
 
 				out.push(TypedAst::new(ast, ex_type));
 			}
@@ -488,7 +512,7 @@ fn check_proc(
 					let start_type = get_bounds_type(&out, ast.location, range_start)?;
 					let end_type = get_bounds_type(&out, ast.location, range_end)?;
 
-					let bound_type = meet(start_type, end_type, ast.location)?;
+					let bound_type = meet(start_type, end_type, ast.location, on_z80)?;
 					if !bound_type.is_integer() {
 						return Err(Error::TypeMismatch {
 							expected: Type::Int,
@@ -518,26 +542,26 @@ fn check_proc(
 					let start_type = get_bounds_type(&out, ast.location, range_start)?;
 					let end_type = get_bounds_type(&out, ast.location, range_end)?;
 
-					let bound_type = meet(start_type, end_type, ast.location)?;
+					let bound_type = meet(start_type, end_type, ast.location, on_z80)?;
 
 					let index_type = match (start_val, end_val) {
 						(Some(sval), Some(eval)) => {
 							let diff = eval - sval;
 							if sval < 0 {
 								if (i8::MIN as i64..i8::MAX as i64).contains(&diff) {
-									meet(bound_type, Type::S8, ast.location)?
+									meet(bound_type, Type::S8, ast.location, on_z80)?
 								} else if (i16::MIN as i64..i16::MAX as i64).contains(&diff) {
-									meet(bound_type, Type::S16, ast.location)?
+									meet(bound_type, Type::S16, ast.location, on_z80)?
 								} else {
-									meet(bound_type, Type::S32, ast.location)?
+									meet(bound_type, Type::S32, ast.location, on_z80)?
 								}
 							} else {
 								if (u8::MIN as i64..u8::MAX as i64).contains(&diff) {
-									meet(bound_type, Type::U8, ast.location)?
+									meet(bound_type, Type::U8, ast.location, on_z80)?
 								} else if (u16::MIN as i64..u16::MAX as i64).contains(&diff) {
-									meet(bound_type, Type::U16, ast.location)?
+									meet(bound_type, Type::U16, ast.location, on_z80)?
 								} else {
-									meet(bound_type, Type::U32, ast.location)?
+									meet(bound_type, Type::U32, ast.location, on_z80)?
 								}
 							}
 						}
@@ -607,7 +631,7 @@ fn check_proc(
 
 				for ((_, p_type), arg_id) in proc.params.iter().zip(block.iter()) {
 					let arg_type = out[*arg_id].typ;
-					meet(*p_type, arg_type, out[*arg_id].location)?;
+					meet(*p_type, arg_type, out[*arg_id].location, on_z80)?;
 				}
 
 				out.push(TypedAst::new(ast, proc.ret_type));

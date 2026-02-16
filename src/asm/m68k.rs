@@ -1,11 +1,10 @@
 
-use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result};
+
 use crate::asm::LabelGenerator;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::parser::Type;
-use crate::tac::{Data as TacData, Location, TAC, VRegId};
-use crate::Span;
+use crate::tac::{Data as TacData, Location, TAC};
 
 fn get_arithmetic_size(typ: &Type) -> Sz {
 	match typ {
@@ -17,55 +16,23 @@ fn get_arithmetic_size(typ: &Type) -> Sz {
 	}
 }
 
-pub fn lower(proc_name: &str, tac_data: TacData) -> Vec<Asm> {
-	fn update_interval(
-		intervals: &mut HashMap<VRegId, Span<usize>>,
-		vr: VRegId,
-		idx: usize,
-	) {
-		intervals.entry(vr)
-				.and_modify(|interval| interval.start = idx)
-				.or_insert(Span::point(idx));
-	}
-
-	let mut intervals = HashMap::<VRegId, Span<usize>>::new();
-	for (idx, tac) in tac_data.instructions.iter().enumerate().rev() {
-		match tac {
-			TAC::Load { vr, loc: Location::VReg(vr1,_) } |
-			TAC::Store { vr, loc: Location::VReg(vr1,_) } => {
-				update_interval(&mut intervals, *vr, idx);
-				update_interval(&mut intervals, *vr1, idx);
-			}
-			TAC::Load { vr, ..} |
-			TAC::Store { vr, ..} |
-			TAC::Return(Some(vr)) => {
-				update_interval(&mut intervals, *vr, idx);
-			}
-			TAC::UnOp { vr0, vr1, ..} => {
-				update_interval(&mut intervals, *vr0, idx);
-				update_interval(&mut intervals, *vr1, idx);
-			}
-			TAC::BinOp { vr0, vr1, vr2, ..} => {
-				update_interval(&mut intervals, *vr0, idx);
-				update_interval(&mut intervals, *vr1, idx);
-				update_interval(&mut intervals, *vr2, idx);
-			}
-			_ => {}
-		}
-	}
-
+pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 	let mut reg_allocator = super::Allocator::new(&[
 		Data::D0, Data::D1, Data::D2, Data::D3, Data::D4, Data::D5, Data::D6,
 	]);
-	reg_allocator.eval(intervals.values().cloned().collect());
-
-	// The base address for the variable stack
-	const VAR_SP: Addr = Addr::A6;
+	let intervals = reg_allocator.eval(&tac_data.instructions);
 
 	let mut label_gen = LabelGenerator::new(tac_data.next_label);
 	let mut data = vec![
 		Asm::Label(proc_name.to_string()),
 	];
+
+	// The base address for the variable stack
+	const VAR_SP: Addr = Addr::A6;
+
+	if proc_name == "main" {
+		data.push(Asm::Move(Sz::L, EA::Imm(stack_addr as i32), EA::Adr(VAR_SP)));
+	}
 
 	for tac in &tac_data.instructions {
 		match tac {
@@ -478,48 +445,37 @@ pub fn lower(proc_name: &str, tac_data: TacData) -> Vec<Asm> {
 				}
 			}
 
-			TAC::Load { loc, vr } => {
-				let r = reg_allocator.registers[&intervals[vr]];
-				match loc {
-					Location::Addr(addr, typ) => {
-						let sz = Sz::L;//get_arithmetic_size(typ);
-						data.push(Asm::Move(sz, EA::AbL(*addr as i32), EA::Dat(r)));
+			TAC::Move { src, dst } => {
+				let ea_src = match src {
+					Location::Addr(addr,_) => {
+						EA::AbL(*addr as i32)
 					}
-					Location::Const(val, typ) => {
-						let sz = Sz::L;//get_arithmetic_size(typ);
-						data.push(Asm::Move(sz, EA::Imm(*val as i32), EA::Dat(r)));
+					Location::Const(val,_) => {
+						EA::Imm(*val as i32)
 					}
-					Location::Stack(idx, typ) => {
-						let sz = Sz::L;//get_arithmetic_size(typ);
-						data.push(Asm::Move(sz, EA::Dsp((idx * 4) as i16, VAR_SP), EA::Dat(r)));
+					Location::Stack(idx,_) => {
+						EA::Dsp((idx * 4) as i16, VAR_SP)
 					}
-					Location::VReg(vr1, typ) => {
-						let sz = Sz::L;//get_arithmetic_size(typ);
-						let r1 = reg_allocator.registers[&intervals[vr1]];
-						data.push(Asm::Move(sz, EA::Dat(r1), EA::Dat(r)));
+					Location::VReg(vr,_) => {
+						EA::Dat(reg_allocator.registers[&intervals[vr]])
 					}
-				}
-			}
+				};
 
-			TAC::Store { vr, loc } => {
-				let r = reg_allocator.registers[&intervals[vr]];
-				match loc {
-					Location::Addr(addr, typ) => {
-						let sz = Sz::L;//get_arithmetic_size(typ);
-						data.push(Asm::Move(sz, EA::Dat(r), EA::AbL(*addr as i32)));
+				let ea_dst = match dst {
+					Location::Addr(addr,_) => {
+						EA::AbL(*addr as i32)
 					}
 					Location::Const(..) => panic!("Can't store into an immediate"),
-					Location::Stack(idx, typ) => {
-						let sz = Sz::L;//get_arithmetic_size(typ);
-						let r = reg_allocator.registers[&intervals[vr]];
-						data.push(Asm::Move(sz, EA::Dat(r), EA::Dsp((idx * 4) as i16, VAR_SP)));
+					Location::Stack(idx,_) => {
+						EA::Dsp((idx * 4) as i16, VAR_SP)
 					}
-					Location::VReg(vr1, typ) => {
-						let sz = Sz::L;//get_arithmetic_size(typ);
-						let r1 = reg_allocator.registers[&intervals[vr1]];
-						data.push(Asm::Move(sz, EA::Dat(r), EA::Dat(r1)));
+					Location::VReg(vr,_) => {
+						EA::Dat(reg_allocator.registers[&intervals[vr]])
 					}
-				}
+				};
+
+				let sz = Sz::L;//get_arithmetic_size(typ);
+				data.push(Asm::Move(sz, ea_src, ea_dst));
 			}
 
 			TAC::Label(id) => {
@@ -820,6 +776,8 @@ impl Display for Asm {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+
 	use crate::{input, layout, lexer, packing, parser, tac, type_checker};
 	use crate::identifier::{Identifier, Map as IdentMap};
 	use super::*;
@@ -1411,12 +1369,17 @@ mod tests {
 		let tac_data = tac::eval(&prs_data, &typ_data, &pak_data, &loc_data)
 				.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
 				.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+		
+		let stack_addr = prs_data.regions.get(&"Stack".id())
+				.or(prs_data.regions.get(&"DataStack".id()))
+				.expect("missing stack address")
+				.span.start;
 
 		let mut out = IdentMap::<Vec<Asm>>::default();
 
 		for (proc_id, tac) in tac_data {
 			let proc_name = lex_data.text(&input, &proc_id).to_owned();
-			out.insert(proc_id, lower(&proc_name, tac));
+			out.insert(proc_id, lower(&proc_name, tac, stack_addr));
 		}
 
 		out

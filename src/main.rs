@@ -32,8 +32,9 @@ fn main() {
 	let source = fs::read_to_string(&file_path)
 		.expect("unable to read source file");
 
-	compile(file_path, &source)
-		.unwrap_or_else(|msg| panic!("{msg}"));
+	if let Err(error) = compile(file_path, &source) {
+		eprintln!("{error}");
+	}
 }
 
 type SrcPos = usize;
@@ -91,12 +92,24 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		}
 	}
 
-	let asm_db = asm::eval(&input, &lex_data, tac_data);
+	/*
+	let dom_data = dom::eval(&tac_data);
+	println!("Domination Frontiers: {dom_data:?}");
+	*/
+
+	use identifier::Identifier;
+	let stack_addr = prs_data.regions.get(&"Stack".id())
+			.or(prs_data.regions.get(&"DataStack".id()))
+			.expect("missing stack address")
+			.span.start;
+	let asm_db = asm::eval(&input, &lex_data, &prs_data, tac_data, stack_addr);
 	println!("ASM:");
-	for (proc_id, data) in &asm_db {
-		println!("  {}:", lex_data.text(&input, proc_id));
+	for (_, data) in &asm_db {
 		match data {
 			asm::Data::M68k(list) => for asm in list {
+				println!("{asm}");
+			}
+			asm::Data::Z80(list) => for asm in list {
 				println!("{asm}");
 			}
 		}

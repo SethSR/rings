@@ -43,6 +43,7 @@ pub fn eval(
 			&mut data,
 		)?;
 		data.next_label = tac.next_label;
+		data.next_reg = tac.next_reg;
 		out.insert(*proc_id, data);
 	}
 
@@ -64,10 +65,8 @@ pub enum Location {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TAC {
 	// Move operations
-	/// Move data from Location to VRegId
-	Load { loc: Location, vr: VRegId },
-	/// Move data from VRegId to Location
-	Store { vr: VRegId, loc: Location },
+	/// Move data from Location to Location
+	Move { src: Location, dst: Location },
 
 	// Arithmetic
 	/// vr2 = op(vr0, vr1)
@@ -136,6 +135,7 @@ pub struct Data {
 	pub locals: Vec<IdentId>,
 	pub instructions: Vec<TAC>,
 	pub next_label: LabelId,
+	pub next_reg: VRegId,
 }
 
 impl Data {
@@ -152,6 +152,7 @@ impl Data {
 					.collect(),
 			instructions: vec![],
 			next_label: 0,
+			next_reg: 0,
 		}
 	}
 
@@ -166,14 +167,17 @@ fn get_location_reg(
 	data: &mut Data,
 ) -> Result<(VRegId, Type), Error> {
 	match lower_node(id, tac, data)? {
-		Some(loc) => match loc {
+		Some(src) => match src {
 			Location::VReg(vr, typ) => Ok((vr, typ)),
 			Location::Addr(_, typ) |
 			Location::Const(_, typ) |
 			Location::Stack(_, typ) => {
 				let vr = tac.reg();
 				let typ = typ.clone();
-				data.emit(TAC::Load { loc, vr });
+				data.emit(TAC::Move {
+					src,
+					dst: Location::VReg(vr, typ),
+				});
 				Ok((vr, typ))
 			}
 		}
@@ -208,12 +212,10 @@ fn lower_node(
 				_ => {}
 			}
 
-			let vr = tac.reg();
-			data.emit(TAC::Load {
-				loc: Location::Const(val, ast.typ),
-				vr,
-			});
-			Ok(Some(Location::VReg(vr, ast.typ)))
+			let src = Location::Const(val, ast.typ);
+			let dst = Location::VReg(tac.reg(), ast.typ);
+			data.emit(TAC::Move { src, dst });
+			Ok(Some(dst))
 		}
 
 		AstKind::Dec(_value) => {
@@ -244,13 +246,14 @@ fn lower_node(
 		}
 
 		AstKind::Assign { lhs, rhs } => {
-			let Some(loc) = lower_node(lhs, tac, data)? else {
+			let Some(dst) = lower_node(lhs, tac, data)? else {
 				return Err(Error::missing_ast_node(data.name, lhs));
 			};
 
-			let (vr, _) = get_location_reg(rhs, tac, data)?;
+			let (vr, typ) = get_location_reg(rhs, tac, data)?;
 
-			data.emit(TAC::Store { vr, loc });
+			let src = Location::VReg(vr, typ);
+			data.emit(TAC::Move { src, dst });
 
 			Ok(Some(Location::VReg(vr, ast.typ)))
 		}
@@ -434,20 +437,17 @@ fn lower_node(
 
 				// i = i + 1
 				let temp_vr = tac.reg();
-				data.emit(TAC::Load {
-					loc: Location::Const(1, idx_typ),
-					vr: temp_vr,
+				let temp = Location::VReg(temp_vr, idx_typ);
+				data.emit(TAC::Move {
+					src: Location::Const(1, idx_typ),
+					dst: temp,
 				});
 				data.emit(TAC::BinOp {
 					op: BinaryOp::Add,
 					typ: idx_typ,
-					vr0: temp_vr,
-					vr1: idx_vr,
-					vr2: temp_vr,
-				});
-				data.emit(TAC::Store {
-					vr: temp_vr,
-					loc: Location::VReg(idx_vr, idx_typ),
+					vr0: idx_vr,
+					vr1: temp_vr,
+					vr2: idx_vr,
 				});
 
 				// goto start
@@ -668,8 +668,14 @@ mod tests {
 		assert_eq!(section_db.len(), 2);
 		let section = &section_db[&"a".id()];
 		assert_eq!(section.instructions, [
-			TAC::Load { loc: Location::Const(100, Type::S8), vr: 0 },
-			TAC::Load { loc: Location::Const(200, Type::S8), vr: 1 },
+			TAC::Move {
+				src: Location::Const(100, Type::S8),
+				dst: Location::VReg(0, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(200, Type::S8),
+				dst: Location::VReg(1, Type::S8),
+			},
 			TAC::BinOp { op: BinaryOp::Sub, typ: Type::S8, vr0: 0, vr1: 1, vr2: 2 },
 			TAC::Return(Some(2)),
 		]);
@@ -694,24 +700,60 @@ mod tests {
 			"c".id(),
 		]);
 		assert_eq!(section.instructions, [
-			TAC::Load { loc: Location::Const(5, Type::S8), vr: 0 },
-			TAC::Store { vr: 0, loc: Location::Stack(0, Type::S8) },
-			TAC::Load { loc: Location::Const(3, Type::S8), vr: 1 },
-			TAC::Store { vr: 1, loc: Location::Stack(1, Type::S8) },
-			TAC::Load { loc: Location::Stack(0, Type::S8), vr: 2 },
-			TAC::Load { loc: Location::Const(10, Type::S8), vr: 3 },
+			TAC::Move {
+				src: Location::Const(5, Type::S8),
+				dst: Location::VReg(0, Type::S8),
+			},
+			TAC::Move {
+				src: Location::VReg(0, Type::S8),
+				dst: Location::Stack(0, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(3, Type::S8),
+				dst: Location::VReg(1, Type::S8),
+			},
+			TAC::Move {
+				src: Location::VReg(1, Type::S8),
+				dst: Location::Stack(1, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Stack(0, Type::S8),
+				dst: Location::VReg(2, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(10, Type::S8),
+				dst: Location::VReg(3, Type::S8),
+			},
 			TAC::BinOp { op: BinaryOp::CmpLT, typ: Type::S8, vr0: 2, vr1: 3, vr2: 4 },
 			TAC::UnOp { op: UnaryOp::Not, typ: Type::S8, vr0: 4, vr1: 5 },
 			TAC::JumpIf { lbl: 0, vr: 5 },
-			TAC::Load { loc: Location::Const(2, Type::S8), vr: 6 },
-			TAC::Store { vr: 6, loc: Location::Stack(1, Type::S8) },
+			TAC::Move {
+				src: Location::Const(2, Type::S8),
+				dst: Location::VReg(6, Type::S8),
+			},
+			TAC::Move {
+				src: Location::VReg(6, Type::S8),
+				dst: Location::Stack(1, Type::S8),
+			},
 			TAC::Jump(1),
 			TAC::Label(0),
-			TAC::Load { loc: Location::Const(1, Type::S8), vr: 7 },
-			TAC::Store { vr: 7, loc: Location::Stack(0, Type::S8) },
+			TAC::Move {
+				src: Location::Const(1, Type::S8),
+				dst: Location::VReg(7, Type::S8),
+			},
+			TAC::Move {
+				src: Location::VReg(7, Type::S8),
+				dst: Location::Stack(0, Type::S8),
+			},
 			TAC::Label(1),
-			TAC::Load { loc: Location::Stack(0, Type::S8), vr: 8 },
-			TAC::Load { loc: Location::Stack(1, Type::S8), vr: 9 },
+			TAC::Move {
+				src: Location::Stack(0, Type::S8),
+				dst: Location::VReg(8, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Stack(1, Type::S8),
+				dst: Location::VReg(9, Type::S8),
+			},
 			TAC::BinOp { op: BinaryOp::Add, typ: Type::S8, vr0: 8, vr1: 9, vr2: 10 },
 			TAC::Return(Some(10)),
 		]);
@@ -731,17 +773,38 @@ mod tests {
 			"b".id(),
 		]);
 		assert_eq!(section.instructions, [
-			TAC::Load { loc: Location::Const(5, Type::S8), vr: 0 },
-			TAC::Store { vr: 0, loc: Location::Stack(0, Type::S8) },
+			TAC::Move {
+				src: Location::Const(5, Type::S8),
+				dst: Location::VReg(0, Type::S8),
+			},
+			TAC::Move {
+				src: Location::VReg(0, Type::S8),
+				dst: Location::Stack(0, Type::S8),
+			},
 			TAC::Jump(0),
 			TAC::Label(1),
-			TAC::Load { loc: Location::Stack(0, Type::S8), vr: 1 },
-			TAC::Load { loc: Location::Const(1, Type::S8), vr: 2 },
+			TAC::Move {
+				src: Location::Stack(0, Type::S8),
+				dst: Location::VReg(1, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(1, Type::S8),
+				dst: Location::VReg(2, Type::S8),
+			},
 			TAC::BinOp { op: BinaryOp::Sub, typ: Type::S8, vr0: 1, vr1: 2, vr2: 3 },
-			TAC::Store { vr: 3, loc: Location::Stack(0, Type::S8) },
+			TAC::Move {
+				src: Location::VReg(3, Type::S8),
+				dst: Location::Stack(0, Type::S8),
+			},
 			TAC::Label(0),
-			TAC::Load { loc: Location::Stack(0, Type::S8), vr: 4 },
-			TAC::Load { loc: Location::Const(0, Type::S8), vr: 5 },
+			TAC::Move {
+				src: Location::Stack(0, Type::S8),
+				dst: Location::VReg(4, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(0, Type::S8),
+				dst: Location::VReg(5, Type::S8),
+			},
 			TAC::BinOp { op: BinaryOp::CmpGT, typ: Type::S8, vr0: 4, vr1: 5, vr2: 6 },
 			TAC::JumpIf { lbl: 1, vr: 6 },
 			TAC::Return(None),
@@ -764,26 +827,58 @@ mod tests {
 			"i".id(),
 		]);
 		assert_eq!(section.instructions, [
-			TAC::Load { loc: Location::Const(4, Type::S8), vr: 0 },
-			TAC::Store { vr: 0, loc: Location::Stack(0, Type::S8) },
-			TAC::Load { loc: Location::Const(0, Type::S8), vr: 1 },
-			TAC::Store { vr: 1, loc: Location::Stack(1, Type::S8) },
+			TAC::Move {
+				src: Location::Const(4, Type::S8),
+				dst: Location::VReg(0, Type::S8),
+			},
+			TAC::Move {
+				src: Location::VReg(0, Type::S8),
+				dst: Location::Stack(0, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(0, Type::S8),
+				dst: Location::VReg(1, Type::S8),
+			},
+			TAC::Move {
+				src: Location::VReg(1, Type::S8),
+				dst: Location::Stack(1, Type::S8),
+			},
 			// Loop head
-			TAC::Load { loc: Location::Const(0, Type::U8), vr: 2 },
+			TAC::Move {
+				src: Location::Const(0, Type::U8),
+				dst: Location::VReg(2, Type::U8),
+			},
 			TAC::Label(0),
-			TAC::Load { loc: Location::Const(10, Type::U8), vr: 3 },
+			TAC::Move {
+				src: Location::Const(10, Type::U8),
+				dst: Location::VReg(3, Type::U8),
+			},
 			TAC::BinOp { op: BinaryOp::CmpGE, typ: Type::Bool, vr0: 2, vr1: 3, vr2: 4 },
 			TAC::JumpIf { lbl: 1, vr: 4 },
 			// Loop body
-			TAC::Load { loc: Location::Stack(1, Type::S8), vr: 5 },
-			TAC::Load { loc: Location::Stack(0, Type::S8), vr: 6 },
-			TAC::Load { loc: Location::Const(2, Type::S8), vr: 7 },
+			TAC::Move {
+				src: Location::Stack(1, Type::S8),
+				dst: Location::VReg(5, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Stack(0, Type::S8),
+				dst: Location::VReg(6, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(2, Type::S8),
+				dst: Location::VReg(7, Type::S8),
+			},
 			TAC::BinOp { op: BinaryOp::Mul, typ: Type::S8, vr0: 6, vr1: 7, vr2: 8 },
 			TAC::BinOp { op: BinaryOp::Add, typ: Type::S8, vr0: 5, vr1: 8, vr2: 9 },
-			TAC::Store { vr: 9, loc: Location::Stack(1, Type::S8) },
-			TAC::Load { loc: Location::Const(1, Type::U8), vr: 10 },
-			TAC::BinOp { op: BinaryOp::Add, typ: Type::U8, vr0: 10, vr1: 2, vr2: 10 },
-			TAC::Store { vr: 10, loc: Location::VReg(2, Type::U8) },
+			TAC::Move {
+				src: Location::VReg(9, Type::S8),
+				dst: Location::Stack(1, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(1, Type::U8),
+				dst: Location::VReg(10, Type::U8),
+			},
+			TAC::BinOp { op: BinaryOp::Add, typ: Type::U8, vr0: 2, vr1: 10, vr2: 2 },
 			TAC::Jump(0),
 			// Loop end
 			TAC::Label(1),
@@ -801,14 +896,29 @@ mod tests {
 			"a".id(),
 		]);
 		assert_eq!(section.instructions, [
-			TAC::Load { loc: Location::Const(2, Type::S8), vr: 0 },
-			TAC::Load { loc: Location::Const(3, Type::S8), vr: 1 },
+			TAC::Move {
+				src: Location::Const(2, Type::S8),
+				dst: Location::VReg(0, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(3, Type::S8),
+				dst: Location::VReg(1, Type::S8),
+			},
 			TAC::BinOp { op: BinaryOp::Add, typ: Type::S8, vr0: 0, vr1: 1, vr2: 2 },
-			TAC::Load { loc: Location::Const(4, Type::S8), vr: 3 },
-			TAC::Load { loc: Location::Const(5, Type::S8), vr: 4 },
+			TAC::Move {
+				src: Location::Const(4, Type::S8),
+				dst: Location::VReg(3, Type::S8),
+			},
+			TAC::Move {
+				src: Location::Const(5, Type::S8),
+				dst: Location::VReg(4, Type::S8),
+			},
 			TAC::BinOp { op: BinaryOp::Sub, typ: Type::S8, vr0: 3, vr1: 4, vr2: 5 },
 			TAC::BinOp { op: BinaryOp::Mul, typ: Type::S8, vr0: 2, vr1: 5, vr2: 6 },
-			TAC::Store { vr: 6, loc: Location::Stack(0, Type::S8) },
+			TAC::Move {
+				src: Location::VReg(6, Type::S8),
+				dst: Location::Stack(0, Type::S8),
+			},
 			TAC::Return(None),
 		]);
 	}
@@ -893,52 +1003,38 @@ mod tests {
 						tac_emu.pc = tac_emu.labels[lbl];
 					}
 				}
-				TAC::Load { loc, vr } => {
-					eprintln!("Load {loc:?} -> {vr}({:?})", tac_emu.regs.get(vr));
-					match loc {
-						Location::Addr(addr, typ) => {
-							eprintln!("  {typ:?}");
-							let val = tac_emu.mem.entry(*addr)
-									.or_insert(-1);
-							tac_emu.regs.insert(*vr, *val);
+				TAC::Move { src, dst } => {
+					eprintln!("Load {src:?} -> {dst:?}");
+					let val = match src {
+						Location::Addr(addr,_) => {
+							*tac_emu.mem.entry(*addr)
+									.or_insert(-1)
 						}
-						Location::Const(val, typ) => {
-							eprintln!("  {typ:?}");
-							tac_emu.regs.insert(*vr, *val);
+						Location::Const(val,_) => {
+							*val
 						}
-						Location::Stack(idx, typ) => {
-							eprintln!("  {typ:?}");
-							let val = tac_emu.stack.entry(*idx)
-									.or_insert(-1);
-							tac_emu.regs.insert(*vr, *val);
+						Location::Stack(idx,_) => {
+							*tac_emu.stack.entry(*idx)
+									.or_insert(-1)
 						}
-						Location::VReg(vr1, typ) => {
-							eprintln!("  {typ:?}");
-							let val = tac_emu.regs.get(vr1)
-									.expect("missing vreg");
-							tac_emu.regs.insert(*vr, *val);
+						Location::VReg(vr1,_) => {
+							*tac_emu.regs.get(vr1)
+									.expect("missing vreg")
 						}
-					}
-				}
-				TAC::Store { vr, loc } => {
-					eprintln!("Store {vr}({}) -> {loc:?}", tac_emu.regs[vr]);
-					match loc {
-						Location::Addr(addr, typ) => {
-							eprintln!("  {typ:?}");
-							tac_emu.mem.insert(*addr, tac_emu.regs[vr]);
+					};
+
+					match dst {
+						Location::Addr(addr,_) => {
+							tac_emu.mem.insert(*addr, val);
 						}
-						Location::Const(val, typ) => {
+						Location::Const(val,_) => {
 							panic!("storing into a constant value: {val}");
 						}
-						Location::Stack(idx, typ) => {
-							eprintln!("  {typ:?}");
-							tac_emu.stack.insert(*idx, tac_emu.regs[vr]);
+						Location::Stack(idx,_) => {
+							tac_emu.stack.insert(*idx, val);
 						}
-						Location::VReg(vr1, typ) => {
-							eprintln!("  {typ:?}");
-							let val = tac_emu.regs.get(vr)
-									.expect("missing vr");
-							tac_emu.regs.insert(*vr1, *val);
+						Location::VReg(vr,_) => {
+							tac_emu.regs.insert(*vr, val);
 						}
 					}
 				}
