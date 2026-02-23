@@ -71,7 +71,7 @@ pub enum TAC {
 	/// dst = lhs \<op\> rhs
 	BinOp { op: BinaryOp, lhs: Location, rhs: Location, dst: Location },
 	/// vr1 = op(vr0)
-	UnOp { op: UnaryOp, typ: Type, vr0: VRegId, vr1: VRegId },
+	UnOp { op: UnaryOp, rhs: Location, dst: Location },
 
 	// Control Flow
 	Label(LabelId),
@@ -271,15 +271,12 @@ fn lower_node(
 		}
 
 		AstKind::UnOp { op, rhs } => {
-			let (vr0, _) = get_location_reg(rhs, tac, data)?;
-			let vr1 = tac.reg();
-			data.emit(TAC::UnOp {
-				op,
-				typ: ast.typ,
-				vr0,
-				vr1,
-			});
-			Ok(Some(Location::VReg(vr1, ast.typ)))
+			let Some(rhs) = lower_node(rhs, tac, data)? else {
+				return Err(Error::missing_ast_node(data.name, rhs));
+			};
+			let dst = Location::VReg(tac.reg(), ast.typ);
+			data.emit(TAC::UnOp { op, rhs, dst });
+			Ok(Some(dst))
 		}
 
 		AstKind::Return(maybe_expr) => {
@@ -980,6 +977,32 @@ mod tests {
 		labels: HashMap<LabelId, usize>,
 	}
 
+	impl TacEmu {
+		fn get_val(&self, loc: &Location) -> i64 {
+			match loc {
+				Location::Addr(adr, _) => self.mem.get(adr).cloned().unwrap_or(-1),
+				Location::Const(val, _) => *val,
+				Location::Stack(idx, _) => self.stack.get(idx).cloned().unwrap_or(-1),
+				Location::VReg(reg, _) => self.regs[reg].clone(),
+			}
+		}
+
+		fn set_val(&mut self, loc: &Location, val: i64) {
+			match loc {
+				Location::Addr(adrd, _) => {
+					self.mem.insert(*adrd, val);
+				}
+				Location::Const(..) => panic!("cannot store into a constant value"),
+				Location::Stack(idxd, _) => {
+					self.stack.insert(*idxd, val);
+				}
+				Location::VReg(vrd, _) => {
+					self.regs.insert(*vrd, val);
+				}
+			}
+		}
+	}
+
 	fn interpret(data: &Data) -> TacEmu {
 		let mut tac_emu = TacEmu::default();
 		for (idx, tac) in data.instructions.iter().enumerate() {
@@ -1013,103 +1036,55 @@ mod tests {
 						tac_emu.pc = tac_emu.labels[lbl];
 					}
 				}
+
 				TAC::Move { src, dst } => {
 					eprintln!("Load {src:?} -> {dst:?}");
-					let val = match src {
-						Location::Addr(addr,_) => {
-							*tac_emu.mem.entry(*addr)
-									.or_insert(-1)
-						}
-						Location::Const(val,_) => {
-							*val
-						}
-						Location::Stack(idx,_) => {
-							*tac_emu.stack.entry(*idx)
-									.or_insert(-1)
-						}
-						Location::VReg(vr1,_) => {
-							*tac_emu.regs.get(vr1)
-									.expect("missing vreg")
-						}
+					let val = tac_emu.get_val(src);
+					tac_emu.set_val(dst, val);
+				}
+
+				TAC::UnOp { op, rhs, dst } => {
+					eprintln!("UnOp {op} {rhs:?} -> {dst:?}");
+
+					let val = tac_emu.get_val(rhs);
+
+					let result = match op {
+						UnaryOp::Neg => -val,
+						UnaryOp::Not => !val,
 					};
 
-					match dst {
-						Location::Addr(addr,_) => {
-							tac_emu.mem.insert(*addr, val);
-						}
-						Location::Const(val,_) => {
-							panic!("storing into a constant value: {val}");
-						}
-						Location::Stack(idx,_) => {
-							tac_emu.stack.insert(*idx, val);
-						}
-						Location::VReg(vr,_) => {
-							tac_emu.regs.insert(*vr, val);
-						}
-					}
+					tac_emu.set_val(dst, result);
 				}
-				TAC::UnOp { op, typ, vr0, vr1 } => {
-					eprintln!("UnOp {op}:{typ:?} {vr0}({}) -> {vr1}", tac_emu.regs[vr0]);
-					match op {
-						UnaryOp::Neg => {
-							tac_emu.regs.insert(*vr1, -tac_emu.regs[vr0]);
-						}
-						UnaryOp::Not => {
-							tac_emu.regs.insert(*vr1, !tac_emu.regs[vr0]);
-						}
-					}
-				}
+
 				TAC::BinOp { op, lhs, rhs, dst } => {
 					eprintln!("BinOp {lhs:?} {op} {rhs:?} -> {dst:?}");
 
-					let vall = match lhs {
-						Location::Addr(adrl,_) => tac_emu.mem.get(adrl).cloned().unwrap_or(-1),
-						Location::Const(vall,_) => *vall,
-						Location::Stack(idxl,_) => tac_emu.stack.get(idxl).cloned().unwrap_or(-1),
-						Location::VReg(vrl,_) => tac_emu.regs[vrl].clone(),
-					};
-
-					let valr = match rhs {
-						Location::Addr(adrr,_) => tac_emu.mem.get(adrr).cloned().unwrap_or(-1),
-						Location::Const(valr,_) => *valr,
-						Location::Stack(idxr,_) => tac_emu.stack.get(idxr).cloned().unwrap_or(-1),
-						Location::VReg(vrr,_) => tac_emu.regs[vrr].clone(),
-					};
+					let lval = tac_emu.get_val(lhs);
+					let rval = tac_emu.get_val(rhs);
 
 					let result = match op {
-						BinaryOp::Add => vall + valr,
-						BinaryOp::BinAnd => vall & valr,
-						BinaryOp::BinOr => vall | valr,
-						BinaryOp::BinXor => vall ^ valr,
-						BinaryOp::CmpEQ => (vall == valr) as i64,
-						BinaryOp::CmpNE => (vall != valr) as i64,
-						BinaryOp::CmpLT => (vall < valr) as i64,
-						BinaryOp::CmpGT => (vall > valr) as i64,
-						BinaryOp::CmpGE => (vall >= valr) as i64,
-						BinaryOp::CmpLE => (vall <= valr) as i64,
-						BinaryOp::Div => vall / valr,
-						BinaryOp::LogAnd => ((vall != 0) && (valr != 0)) as i64,
-						BinaryOp::LogOr => ((vall != 0) || (valr != 0)) as i64,
-						BinaryOp::LogXor => ((vall != 0) ^ (valr != 0)) as i64,
-						BinaryOp::Mod => vall % valr,
-						BinaryOp::Mul => vall * valr,
-						BinaryOp::ShL => vall << valr,
-						BinaryOp::ShR => vall >> valr,
-						BinaryOp::Sub => vall - valr,
+						BinaryOp::Add => lval + rval,
+						BinaryOp::BinAnd => lval & rval,
+						BinaryOp::BinOr => lval | rval,
+						BinaryOp::BinXor => lval ^ rval,
+						BinaryOp::CmpEQ => (lval == rval) as i64,
+						BinaryOp::CmpNE => (lval != rval) as i64,
+						BinaryOp::CmpLT => (lval < rval) as i64,
+						BinaryOp::CmpGT => (lval > rval) as i64,
+						BinaryOp::CmpGE => (lval >= rval) as i64,
+						BinaryOp::CmpLE => (lval <= rval) as i64,
+						BinaryOp::Div => lval / rval,
+						BinaryOp::LogAnd => ((lval != 0) && (rval != 0)) as i64,
+						BinaryOp::LogOr => ((lval != 0) || (rval != 0)) as i64,
+						BinaryOp::LogXor => ((lval != 0) ^ (rval != 0)) as i64,
+						BinaryOp::Mod => lval % rval,
+						BinaryOp::Mul => lval * rval,
+						BinaryOp::ShL => lval << rval,
+						BinaryOp::ShR => lval >> rval,
+						BinaryOp::Sub => lval - rval,
 					};
 
-					match dst {
-						Location::Addr(adrd,_) => {
-							tac_emu.mem.insert(*adrd, result);
-						}
-						Location::Const(..) => panic!("cannot store into a constant value"),
-						Location::Stack(idxd,_) => {
-							tac_emu.stack.insert(*idxd, result);
-						}
-						Location::VReg(vrd,_) => {
-							tac_emu.regs.insert(*vrd, result);
-						}
-					}
+					tac_emu.set_val(dst, result);
 				}
 			}
 		}

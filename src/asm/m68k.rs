@@ -225,18 +225,21 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 				}
 			}
 
-			TAC::UnOp { op, typ: _, vr0, vr1 } => {
-				data.push(Asm::Comment(format!("{op}{vr0} -> {vr1}")));
+			TAC::UnOp { op, rhs, dst } => {
+				data.push(Asm::Comment(format!("{op}{rhs:?} -> {dst:?}")));
 
-				let sz = Sz::L; //get_arithmetic_size(typ);
-				let r0 = registers[vr0];
-				let r1 = registers[vr1];
+				let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
+				let (ea_dst, dsz,_) = get_dst_from_location(&registers, dst);
 
-				data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r1)));
+				data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+				extend_register(rsz, dsz, is_rneg, TR, &mut data);
+
 				match op {
-					UnaryOp::Neg => data.push(Asm::Neg(sz, EA::Dat(r1))),
-					UnaryOp::Not => data.push(Asm::Not(sz, EA::Dat(r1))),
+					UnaryOp::Neg => data.push(Asm::Neg(dsz, EA::Dat(TR))),
+					UnaryOp::Not => data.push(Asm::Not(dsz, EA::Dat(TR))),
 				}
+
+				data.push(Asm::Move(dsz, EA::Dat(TR), ea_dst));
 			}
 
 			TAC::Move { src, dst } => {

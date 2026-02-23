@@ -143,9 +143,13 @@ impl<Reg: Copy> Allocator<Reg> {
 				TAC::Return(Some(vr)) => {
 					update_interval(&mut interval_map, *vr, idx);
 				}
-				TAC::UnOp { vr0, vr1, ..} => {
-					update_interval(&mut interval_map, *vr0, idx);
-					update_interval(&mut interval_map, *vr1, idx);
+				TAC::UnOp { rhs, dst, ..} => {
+					if let Location::VReg(vr, _) = rhs {
+						update_interval(&mut interval_map, *vr, idx);
+					}
+					if let Location::VReg(vr, _) = dst {
+						update_interval(&mut interval_map, *vr, idx);
+					}
 				}
 				TAC::BinOp { lhs, rhs, dst, ..} => {
 					if let Location::VReg(vr,_) = lhs {
