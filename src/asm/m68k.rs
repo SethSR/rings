@@ -18,7 +18,9 @@ fn get_arithmetic_size(typ: &Type) -> Sz {
 
 // The base address for the variable stack
 const VAR_SP: Addr = Addr::A6;
+/// Left-hand side temporary register
 const TL: Data = Data::D6;
+/// Right-hand side temporary register
 const TR: Data = Data::D7;
 
 pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
@@ -41,13 +43,13 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 			TAC::BinOp { op, lhs, rhs, dst } => {
 				data.push(Asm::Comment(format!("{lhs:?} {op} {rhs:?} -> {dst:?}")));
 
+				let (ea_lhs, lsz, is_lneg) = get_src_from_location(&registers, lhs);
+				let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
+				let (ea_dst, dsz, is_dneg) = get_dst_from_location(&registers, dst);
+
 				match op {
 					BinaryOp::Add => {
-						let (ea_lhs, lsz, is_lneg) = get_src_from_location(&registers, lhs);
-						let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
-						let (ea_dst, dsz,_) = get_dst_from_location(&registers, dst);
-
-						let msz = lsz.max(rsz).max(dsz);
+						let msz = lsz.max(rsz);
 
 						data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
 						extend_register(lsz, msz, is_lneg, TL, &mut data);
@@ -56,27 +58,24 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 						extend_register(rsz, msz, is_rneg, TR, &mut data);
 
 						data.push(Asm::Add1(msz, EA::Dat(TR), TL));
+						extend_register(msz, dsz, is_dneg, TL, &mut data);
+
 						data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
 					}
 
 					BinaryOp::Sub => {
-						let (ea_lhs, szl,_) = get_src_from_location(&registers, lhs);
-						let (ea_rhs, szr,_) = get_src_from_location(&registers, rhs);
-						let (ea_dst, szd,_) = get_dst_from_location(&registers, dst);
+						let msz = lsz.max(rsz);
 
-						debug_assert!(szd >= szl && szd >= szr);
+						data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
+						extend_register(lsz, msz, is_lneg, TL, &mut data);
 
-						data.push(Asm::Move(szd, EA::Imm(0), EA::Dat(TL)));
-						if szl <= szr {
-							data.push(Asm::Move(szl, ea_lhs, EA::Dat(TL)));
-							data.push(Asm::Sub1(szr, ea_rhs, TL));
-						} else /* szl > szr */ {
-							data.push(Asm::Move(szr, ea_rhs, EA::Dat(TL)));
-							data.push(Asm::Neg(szr, EA::Dat(TL)));
-							data.push(Asm::Add1(szl, ea_lhs, TL));
-						}
+						data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+						extend_register(rsz, msz, is_rneg, TR, &mut data);
 
-						data.push(Asm::Move(szd, EA::Dat(TL), ea_dst));
+						data.push(Asm::Sub1(msz, EA::Dat(TR), TL));
+						extend_register(msz, dsz, is_dneg, TL, &mut data);
+
+						data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
 					}
 
 					// 15*23
@@ -88,10 +87,6 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 					// = (1*2)*100 + (1*3 + 5*2)*10 + 5*3
 					// -> (h1*h2)<<32 + (h1*l2 + l1*h2)<<16 + l1*l2
 					BinaryOp::Mul => {
-						let (ea_lhs, lsz, is_lneg) = get_src_from_location(&registers, lhs);
-						let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
-						let (ea_dst, dsz, is_dneg) = get_dst_from_location(&registers, dst);
-
 						debug_assert!(lsz < Sz::L);
 						debug_assert!(rsz < Sz::L);
 
@@ -111,103 +106,66 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 					}
 
 					BinaryOp::Div | BinaryOp::Mod => {
-						let (ea_lhs, szl, is_lneg) = get_src_from_location(&registers, lhs);
-						let (ea_rhs, szr,_) = get_src_from_location(&registers, rhs);
-						let (ea_dst, szd, is_dneg) = get_dst_from_location(&registers, dst);
+						debug_assert!(rsz < Sz::L);
+						debug_assert!(lsz <= dsz && rsz <= dsz);
 
-						debug_assert!(Sz::L > szr);
-						debug_assert!(szd >= szl && szd >= szr);
+						data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
+						extend_register(lsz, Sz::L, is_lneg, TL, &mut data);
 
-						data.push(Asm::Move(szl, ea_lhs, EA::Dat(TL)));
-						extend_register(szl, Sz::L, is_lneg, TL, &mut data);
+						data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+						extend_register(rsz, Sz::W, is_rneg, TR, &mut data);
+
 						if is_dneg {
-							data.push(Asm::DivS(ea_rhs, TL));
+							data.push(Asm::DivS(EA::Dat(TR), TL));
 						} else {
-							data.push(Asm::DivU(ea_rhs, TL));
+							data.push(Asm::DivU(EA::Dat(TR), TL));
 						}
 
 						// r2 = rem
 						if *op == BinaryOp::Mod {
 							data.push(Asm::Swap(TL));
 						}
+						extend_register(Sz::W, dsz, is_dneg, TL, &mut data);
 
-						data.push(Asm::Move(Sz::W, EA::Dat(TL), ea_dst));
+						data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
 					}
 
 					BinaryOp::ShL => {
-						let sz = Sz::L;
-						let Location::VReg(vr0,_) = lhs else { panic!() };
-						let Location::VReg(vr1,_) = rhs else { panic!() };
-						let Location::VReg(vr2,typ) = dst else { panic!() };
-						let r0 = registers[vr0];
-						let r1 = registers[vr1];
-						let r2 = registers[vr2];
-						let shl = if typ.is_signed_integer() { Asm::Asl } else { Asm::Lsl };
+						let msz = lsz.max(rsz);
 
-						// (A & B) | B
-						// A B ?
-						// (A | B) & B
-						if (r0 == r1 && r0 == r2) || (r0 == r2) {
-							// All equal
-							// r <<= r
-							data.push(shl(r1, r2));
-						} else if r0 == r1 {
-							// r2 varies
-							// r2 = r0
-							// r2 <<= r2
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(shl(r2, r2));
-						} else if r1 == r2 {
-							// r0 varies
-							// r2 = r0 << r2
-							data.push(Asm::Move(sz, EA::Dat(r2), EA::Dat(TL)));
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(shl(TL, r2));
+						data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
+						extend_register(lsz, msz, is_lneg, TL, &mut data);
+
+						data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+						extend_register(rsz, msz, is_rneg, TR, &mut data);
+
+						if is_dneg {
+							data.push(Asm::Asl(msz, TR, TL));
 						} else {
-							// All varies
-							// r2 = r0
-							// r2 <<= r1
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(shl(r1, r2));
+							data.push(Asm::Lsl(msz, TR, TL));
 						}
+						extend_register(msz, dsz, is_dneg, TL, &mut data);
+
+						data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
 					}
 
 					BinaryOp::ShR => {
-						let sz = Sz::L;
-						let Location::VReg(vr0,_) = lhs else { panic!() };
-						let Location::VReg(vr1,_) = rhs else { panic!() };
-						let Location::VReg(vr2,typ) = dst else { panic!() };
-						let r0 = registers[vr0];
-						let r1 = registers[vr1];
-						let r2 = registers[vr2];
-						// r2 >>= r1
-						let shr = if typ.is_signed_integer() { Asm::Asr } else { Asm::Lsr };
+						let msz = lsz.max(rsz);
 
-						if r0 == r1 && r0 == r2 {
-							// All equal
-							// r >>= r
-							data.push(shr(r1, r2));
-						} else if r0 == r1 {
-							// r2 varies
-							// r2 = r0 >> r0
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(shr(r2, r2));
-						} else if r0 == r2 {
-							// r1 varies
-							// r2 >>= r1
-							data.push(shr(r1, r2));
-						} else if r1 == r2 {
-							// r0 varies
-							// r2 = r0 >> r2
-							data.push(Asm::Move(sz, EA::Dat(r1), EA::Dat(TL)));
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(shr(TL, r2));
+						data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
+						extend_register(lsz, msz, is_lneg, TL, &mut data);
+
+						data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+						extend_register(rsz, msz, is_rneg, TR, &mut data);
+
+						if is_dneg {
+							data.push(Asm::Asr(msz, TR, TL));
 						} else {
-							// All varies
-							// r2 = r0 >> r1
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(shr(r1, r2));
+							data.push(Asm::Lsr(msz, TR, TL));
 						}
+						extend_register(msz, dsz, is_dneg, TL, &mut data);
+
+						data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
 					}
 
 					BinaryOp::BinAnd => output_binary_logic(&registers, lhs, rhs, dst, Asm::And2, &mut data),
@@ -568,8 +526,8 @@ pub enum Asm {
 	///
 	/// Size: (Byte, Word, Long)
 	And2(Sz,Data,EA),
-	Asl(Data,Data),
-	Asr(Data,Data),
+	Asl(Sz,Data,Data),
+	Asr(Sz,Data,Data),
 	Bcc(Cond,String),
 	Bra(String),
 	Clr(Sz,EA),
@@ -579,8 +537,8 @@ pub enum Asm {
 	DivU(EA,Data),
 	Eor(Sz,Data,EA),
 	Ext(Sz,Data),
-	Lsl(Data,Data),
-	Lsr(Data,Data),
+	Lsl(Sz,Data,Data),
+	Lsr(Sz,Data,Data),
 	Move(Sz,EA,EA),
 	MulS(EA,Data),
 	MulU(EA,Data),
@@ -612,8 +570,8 @@ impl Display for Asm {
 			Self::Add2(sz,d,ea) => write!(f, "\tadd.{sz} {d},{ea}"),
 			Self::And1(sz,ea,d) => write!(f, "\tand.{sz} {ea},{d}"),
 			Self::And2(sz,d,ea) => write!(f, "\tand.{sz} {d},{ea}"),
-			Self::Asl(dx,dy) => write!(f, "\tasl {dx},{dy}"),
-			Self::Asr(dx,dy) => write!(f, "\tasr {dx},{dy}"),
+			Self::Asl(sz,dx,dy) => write!(f, "\tasl.{sz} {dx},{dy}"),
+			Self::Asr(sz,dx,dy) => write!(f, "\tasr.{sz} {dx},{dy}"),
 			Self::Bcc(cond,label) => write!(f, "\tb{cond} {label}"),
 			Self::Bra(label) => write!(f, "\tbra {label}"),
 			Self::Clr(sz,ea) => write!(f, "\tcls.{sz} {ea}"),
@@ -623,8 +581,8 @@ impl Display for Asm {
 			Self::DivU(ea,d) => write!(f, "\tdivu {ea},{d}"),
 			Self::Eor(sz,d,ea) => write!(f, "\teor.{sz} {d},{ea}"),
 			Self::Ext(sz,d) => write!(f, "\text.{sz} {d}"),
-			Self::Lsl(dx,dy) => write!(f, "\tlsl {dx},{dy}"),
-			Self::Lsr(dx,dy) => write!(f, "\tlsr {dx},{dy}"),
+			Self::Lsl(sz,dx,dy) => write!(f, "\tlsl.{sz} {dx},{dy}"),
+			Self::Lsr(sz,dx,dy) => write!(f, "\tlsr.{sz} {dx},{dy}"),
 			Self::Move(sz,src,dst) => write!(f, "\tmove.{sz} {src},{dst}"),
 			Self::MulS(ea,d) => write!(f, "\tmuls {ea},{d}"),
 			Self::MulU(ea,d) => write!(f, "\tmulu {ea},{d}"),
@@ -667,7 +625,7 @@ mod tests {
 	}
 
 	impl M68kEmu {
-		fn flags(&self, cc: Cond) -> bool {
+		fn get_cond(&self, cc: Cond) -> bool {
 			match cc {
 				Cond::CC => !self.c,
 				Cond::CS => self.c,
@@ -680,6 +638,14 @@ mod tests {
 				Cond::LT => self.n && !self.v || !self.n && self.v,
 				Cond::NE => !self.z,
 			}
+		}
+
+		fn set_flags(&mut self, x: bool, n: bool, z: bool, v: bool, c: bool) {
+			self.x = x;
+			self.n = n;
+			self.z = z;
+			self.v = v;
+			self.c = c;
 		}
 
 		fn set_n(&mut self, sz: &Sz, res: u32) {
@@ -884,37 +850,80 @@ mod tests {
 				Asm::Add1(sz,ea,d) => {
 					let src = emu.get_src(sz, ea, 0xFFF);
 					let dst = &mut emu.d[*d as usize];
-					let (res,c) = dst.overflowing_add(src);
-					*dst = res;
-					emu.x = c;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = c;
-					print!("; {d} = {res}");
+					match sz {
+						Sz::B => {
+							let (res,c) = (*dst as u8).overflowing_add(src as u8);
+							*dst &= 0xFFFFFF00;
+							*dst |= res as u32;
+							emu.set_flags(c, res & 0x80 > 0, res == 0, c, c);
+							print!("; {d} = {res}");
+						}
+						Sz::W => {
+							let (res,c) = (*dst as u16).overflowing_add(src as u16);
+							*dst &= 0xFFFF0000;
+							*dst |= res as u32;
+							emu.set_flags(c, res & 0x8000 > 0, res == 0, c, c);
+							print!("; {d} = {res}");
+						}
+						Sz::L => {
+							let (res,c) = dst.overflowing_add(src);
+							*dst = res;
+							emu.set_flags(c, res & 0x80000000 > 0, res == 0, c, c);
+							print!("; {d} = {res}");
+						}
+					}
 				}
 				Asm::Add2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
 					let dst = emu.get_dst(sz, ea, 0x3F8);
-					let (res,c) = dst.overflowing_add(src);
-					*dst = res;
-					emu.x = c;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = c;
-					print!("; {ea} = {res}");
+					match sz {
+						Sz::B => {
+							let (res,c) = (*dst as u8).overflowing_add(src as u8);
+							*dst &= 0xFFFFFF00;
+							*dst |= res as u32;
+							emu.set_flags(c, res & 0x80 > 0, res == 0, c, c);
+							print!("; {ea} = {res}");
+						}
+						Sz::W => {
+							let (res,c) = (*dst as u16).overflowing_add(src as u16);
+							*dst &= 0xFFFF0000;
+							*dst |= res as u32;
+							emu.set_flags(c, res & 0x8000 > 0, res == 0, c, c);
+							print!("; {ea} = {res}");
+						}
+						Sz::L => {
+							let (res,c) = dst.overflowing_add(src);
+							*dst = res;
+							emu.set_flags(c, res & 0x80000000 > 0, res == 0, c, c);
+							print!("; {ea} = {res}");
+						}
+					}
 				}
 				Asm::And1(sz,ea,d) => {
 					let src = emu.get_src(sz, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
-					let res = *dst & src;
-					*dst = res;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
-					print!("; {d} = {res}");
+					match sz {
+						Sz::B => {
+							let res = *dst as u8 & src as u8;
+							*dst &= 0xFFFFFF00;
+							*dst |= res as u32;
+							emu.set_flags(emu.x, res & 0x80 > 0, res == 0, false, false);
+							print!("; {d} = {res}");
+						}
+						Sz::W => {
+							let res = *dst as u16 & src as u16;
+							*dst &= 0xFFFF0000;
+							*dst |= res as u32;
+							emu.set_flags(emu.x, res & 0x8000 > 0, res == 0, false, false);
+							print!("; {d} = {res}");
+						}
+						Sz::L => {
+							let res = *dst & src;
+							*dst = res;
+							emu.set_flags(emu.x, res & 0x80000000 > 0, res == 0, false, false);
+							print!("; {d} = {res}");
+						}
+					}
 				}
 				Asm::And2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
@@ -927,7 +936,7 @@ mod tests {
 					emu.c = false;
 					print!("; {ea} = {res}");
 				}
-				Asm::Asl(s,d) => {
+				Asm::Asl(sz,s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
 					let dst = &mut emu.d[*d as usize];
 					let res = *dst << src;
@@ -944,7 +953,7 @@ mod tests {
 					*dst = res;
 					print!("; {d} = {res}");
 				}
-				Asm::Asr(s,d) => {
+				Asm::Asr(sz,s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
 					let dst = &mut emu.d[*d as usize];
 					let res = *dst >> src;
@@ -961,7 +970,7 @@ mod tests {
 					print!("; {d} = {res}");
 				}
 				Asm::Bcc(cc,label) => {
-					if emu.flags(*cc) {
+					if emu.get_cond(*cc) {
 						emu.pc = emu.labels[label];
 					}
 				}
@@ -1047,7 +1056,7 @@ mod tests {
 					emu.c = false;
 					print!("; {d} = {res}");
 				}
-				Asm::Lsl(s,d) => {
+				Asm::Lsl(sz,s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
 					let dst = &mut emu.d[*d as usize];
 					let res = *dst << src;
@@ -1060,7 +1069,7 @@ mod tests {
 					emu.c = src != 0 && bit != 0;
 					print!("; {d} = {res}");
 				}
-				Asm::Lsr(s,d) => {
+				Asm::Lsr(sz,s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
 					let dst = &mut emu.d[*d as usize];
 					let res = *dst >> src;
@@ -1154,7 +1163,7 @@ mod tests {
 					break
 				}
 				Asm::Scc(cc,ea) => {
-					let c = emu.flags(*cc);
+					let c = emu.get_cond(*cc);
 					let dst = emu.get_dst(&Sz::B, ea, 0xBF8);
 					*dst = if c { 0xFF } else { 0x00 };
 					print!("; {ea} = {dst}");
