@@ -58,10 +58,9 @@ pub enum Location {
 	Addr(u32, Type),
 }
 
-/// Virtual Stack-Machine Code
+/// Three Address Code
 ///
-/// This is the debug output for now. Output targets will act as a stack-machine regardless of the
-/// actual architecture.
+/// Mid to high-level lowering IR. Will be replaced with a graph-based IR for optimizing builds.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TAC {
 	// Move operations
@@ -69,8 +68,8 @@ pub enum TAC {
 	Move { src: Location, dst: Location },
 
 	// Arithmetic
-	/// vr2 = op(vr0, vr1)
-	BinOp { op: BinaryOp, typ: Type, vr0: VRegId, vr1: VRegId, vr2: VRegId },
+	/// dst = lhs \<op\> rhs
+	BinOp { op: BinaryOp, lhs: Location, rhs: Location, dst: Location },
 	/// vr1 = op(vr0)
 	UnOp { op: UnaryOp, typ: Type, vr0: VRegId, vr1: VRegId },
 
@@ -259,16 +258,16 @@ fn lower_node(
 		}
 
 		AstKind::BinOp { op, lhs, rhs } => {
-			let (vr0, _) = get_location_reg(lhs, tac, data)?;
-			let (vr1, _) = get_location_reg(rhs, tac, data)?;
+			let Some(lhs) = lower_node(lhs, tac, data)? else {
+				return Err(Error::missing_ast_node(data.name, lhs));
+			};
+			let Some(rhs) = lower_node(rhs, tac, data)? else {
+				return Err(Error::missing_ast_node(data.name, rhs));
+			};
 
-			let vr2 = tac.reg();
-			data.emit(TAC::BinOp {
-				op,
-				typ: ast.typ,
-				vr0, vr1, vr2,
-			});
-			Ok(Some(Location::VReg(vr2, ast.typ)))
+			let dst = Location::VReg(tac.reg(), ast.typ);
+			data.emit(TAC::BinOp { op, lhs, rhs, dst });
+			Ok(Some(dst))
 		}
 
 		AstKind::UnOp { op, rhs } => {
@@ -299,32 +298,25 @@ fn lower_node(
 		}
 
 		AstKind::If { cond, ref then_block, ref else_block } => {
-			let else_label = tac.label();
+			let then_label = tac.label();
 			let end_label = tac.label();
 
-			// if !cond goto else
-			let (cond_vr, typ) = get_location_reg(cond, tac, data)?;
-			let jmp_vr = tac.reg();
-			data.emit(TAC::UnOp {
-				op: UnaryOp::Not,
-				typ,
-				vr0: cond_vr,
-				vr1: jmp_vr,
-			});
+			// if cond goto then
+			let (cond_vr,_) = get_location_reg(cond, tac, data)?;
 			data.emit(TAC::JumpIf {
-				lbl: else_label,
-				vr: jmp_vr,
+				lbl: then_label,
+				vr: cond_vr,
 			});
 
-			// then block
-			for stmt_id in then_block {
+			// else block
+			for stmt_id in else_block {
 				lower_node(*stmt_id, tac, data)?;
 			}
 			data.emit(TAC::Jump(end_label));
 
-			// else block
-			data.emit(TAC::Label(else_label));
-			for stmt_id in else_block {
+			// then block
+			data.emit(TAC::Label(then_label));
+			for stmt_id in then_block {
 				lower_node(*stmt_id, tac, data)?;
 			}
 
@@ -410,20 +402,25 @@ fn lower_node(
 				let end_label = tac.label();
 
 				// i = start
-				let (idx_vr, idx_typ) = get_location_reg(start_id, tac, data)?;
+				let Some(idx) = lower_node(start_id, tac, data)? else {
+					return Err(Error::missing_ast_node(data.name, start_id));
+				};
 
 				// start:
 				data.emit(TAC::Label(start_label));
 
 				// if i >= end goto end
-				let (end_vr, _) = get_location_reg(end_id, tac, data)?;
+				let Some(cmp_rhs) = lower_node(end_id, tac, data)? else {
+					return Err(Error::missing_ast_node(data.name, end_id));
+				};
+
 				let vr2 = tac.reg();
+				let cmp_dst = Location::VReg(vr2, Type::Bool);
 				data.emit(TAC::BinOp {
 					op: BinaryOp::CmpGE,
-					typ: Type::Bool,
-					vr0: idx_vr,
-					vr1: end_vr,
-					vr2,
+					lhs: idx,
+					rhs: cmp_rhs,
+					dst: cmp_dst,
 				});
 				data.emit(TAC::JumpIf {
 					lbl: end_label,
@@ -436,18 +433,11 @@ fn lower_node(
 				}
 
 				// i = i + 1
-				let temp_vr = tac.reg();
-				let temp = Location::VReg(temp_vr, idx_typ);
-				data.emit(TAC::Move {
-					src: Location::Const(1, idx_typ),
-					dst: temp,
-				});
 				data.emit(TAC::BinOp {
 					op: BinaryOp::Add,
-					typ: idx_typ,
-					vr0: idx_vr,
-					vr1: temp_vr,
-					vr2: idx_vr,
+					lhs: idx,
+					rhs: Location::Const(1, Type::S8),
+					dst: idx,
 				});
 
 				// goto start
@@ -676,7 +666,12 @@ mod tests {
 				src: Location::Const(200, Type::S8),
 				dst: Location::VReg(1, Type::S8),
 			},
-			TAC::BinOp { op: BinaryOp::Sub, typ: Type::S8, vr0: 0, vr1: 1, vr2: 2 },
+			TAC::BinOp {
+				op: BinaryOp::Sub,
+				lhs: Location::VReg(0, Type::S8),
+				rhs: Location::VReg(1, Type::S8),
+				dst: Location::VReg(2, Type::S8),
+			},
 			TAC::Return(Some(2)),
 		]);
 	}
@@ -700,6 +695,7 @@ mod tests {
 			"c".id(),
 		]);
 		assert_eq!(section.instructions, [
+			// let b: s8 = 5;
 			TAC::Move {
 				src: Location::Const(5, Type::S8),
 				dst: Location::VReg(0, Type::S8),
@@ -708,6 +704,7 @@ mod tests {
 				src: Location::VReg(0, Type::S8),
 				dst: Location::Stack(0, Type::S8),
 			},
+			// let c: s8 = 3;
 			TAC::Move {
 				src: Location::Const(3, Type::S8),
 				dst: Location::VReg(1, Type::S8),
@@ -716,46 +713,47 @@ mod tests {
 				src: Location::VReg(1, Type::S8),
 				dst: Location::Stack(1, Type::S8),
 			},
-			TAC::Move {
-				src: Location::Stack(0, Type::S8),
-				dst: Location::VReg(2, Type::S8),
-			},
+			// if b < 10 {
 			TAC::Move {
 				src: Location::Const(10, Type::S8),
+				dst: Location::VReg(2, Type::S8),
+			},
+			TAC::BinOp {
+				op: BinaryOp::CmpLT,
+				lhs: Location::Stack(0, Type::S8),
+				rhs: Location::VReg(2, Type::S8),
 				dst: Location::VReg(3, Type::S8),
 			},
-			TAC::BinOp { op: BinaryOp::CmpLT, typ: Type::S8, vr0: 2, vr1: 3, vr2: 4 },
-			TAC::UnOp { op: UnaryOp::Not, typ: Type::S8, vr0: 4, vr1: 5 },
-			TAC::JumpIf { lbl: 0, vr: 5 },
+			TAC::JumpIf { lbl: 0, vr: 3 },
+			// b = 1;
 			TAC::Move {
-				src: Location::Const(2, Type::S8),
-				dst: Location::VReg(6, Type::S8),
+				src: Location::Const(1, Type::S8),
+				dst: Location::VReg(4, Type::S8),
 			},
 			TAC::Move {
-				src: Location::VReg(6, Type::S8),
-				dst: Location::Stack(1, Type::S8),
+				src: Location::VReg(4, Type::S8),
+				dst: Location::Stack(0, Type::S8),
 			},
 			TAC::Jump(1),
 			TAC::Label(0),
+			// c = 2;
 			TAC::Move {
-				src: Location::Const(1, Type::S8),
-				dst: Location::VReg(7, Type::S8),
+				src: Location::Const(2, Type::S8),
+				dst: Location::VReg(5, Type::S8),
 			},
 			TAC::Move {
-				src: Location::VReg(7, Type::S8),
-				dst: Location::Stack(0, Type::S8),
+				src: Location::VReg(5, Type::S8),
+				dst: Location::Stack(1, Type::S8),
 			},
 			TAC::Label(1),
-			TAC::Move {
-				src: Location::Stack(0, Type::S8),
-				dst: Location::VReg(8, Type::S8),
+			// return b + c;
+			TAC::BinOp {
+				op: BinaryOp::Add,
+				lhs: Location::Stack(0, Type::S8),
+				rhs: Location::Stack(1, Type::S8),
+				dst: Location::VReg(6, Type::S8),
 			},
-			TAC::Move {
-				src: Location::Stack(1, Type::S8),
-				dst: Location::VReg(9, Type::S8),
-			},
-			TAC::BinOp { op: BinaryOp::Add, typ: Type::S8, vr0: 8, vr1: 9, vr2: 10 },
-			TAC::Return(Some(10)),
+			TAC::Return(Some(6)),
 		]);
 	}
 
@@ -784,29 +782,31 @@ mod tests {
 			TAC::Jump(0),
 			TAC::Label(1),
 			TAC::Move {
-				src: Location::Stack(0, Type::S8),
+				src: Location::Const(1, Type::S8),
 				dst: Location::VReg(1, Type::S8),
 			},
-			TAC::Move {
-				src: Location::Const(1, Type::S8),
+			TAC::BinOp {
+				op: BinaryOp::Sub,
+				lhs: Location::Stack(0, Type::S8),
+				rhs: Location::VReg(1, Type::S8),
 				dst: Location::VReg(2, Type::S8),
 			},
-			TAC::BinOp { op: BinaryOp::Sub, typ: Type::S8, vr0: 1, vr1: 2, vr2: 3 },
 			TAC::Move {
-				src: Location::VReg(3, Type::S8),
+				src: Location::VReg(2, Type::S8),
 				dst: Location::Stack(0, Type::S8),
 			},
 			TAC::Label(0),
 			TAC::Move {
-				src: Location::Stack(0, Type::S8),
+				src: Location::Const(0, Type::S8),
+				dst: Location::VReg(3, Type::S8),
+			},
+			TAC::BinOp {
+				op: BinaryOp::CmpGT,
+				lhs: Location::Stack(0, Type::S8),
+				rhs: Location::VReg(3, Type::S8),
 				dst: Location::VReg(4, Type::S8),
 			},
-			TAC::Move {
-				src: Location::Const(0, Type::S8),
-				dst: Location::VReg(5, Type::S8),
-			},
-			TAC::BinOp { op: BinaryOp::CmpGT, typ: Type::S8, vr0: 4, vr1: 5, vr2: 6 },
-			TAC::JumpIf { lbl: 1, vr: 6 },
+			TAC::JumpIf { lbl: 1, vr: 4 },
 			TAC::Return(None),
 		]);
 	}
@@ -853,32 +853,42 @@ mod tests {
 				src: Location::Const(10, Type::U8),
 				dst: Location::VReg(3, Type::U8),
 			},
-			TAC::BinOp { op: BinaryOp::CmpGE, typ: Type::Bool, vr0: 2, vr1: 3, vr2: 4 },
+			// TODO - srenshaw - Should probably unify Byte and Bool types at this stage in the compiler
+			TAC::BinOp {
+				op: BinaryOp::CmpGE,
+				lhs: Location::VReg(2, Type::U8),
+				rhs: Location::VReg(3, Type::U8),
+				dst: Location::VReg(4, Type::Bool),
+			},
 			TAC::JumpIf { lbl: 1, vr: 4 },
 			// Loop body
 			TAC::Move {
-				src: Location::Stack(1, Type::S8),
+				src: Location::Const(2, Type::S8),
 				dst: Location::VReg(5, Type::S8),
 			},
-			TAC::Move {
-				src: Location::Stack(0, Type::S8),
+			TAC::BinOp {
+				op: BinaryOp::Mul,
+				lhs: Location::Stack(0, Type::S8),
+				rhs: Location::VReg(5, Type::S8),
 				dst: Location::VReg(6, Type::S8),
 			},
-			TAC::Move {
-				src: Location::Const(2, Type::S8),
+			TAC::BinOp {
+				op: BinaryOp::Add,
+				lhs: Location::Stack(1, Type::S8),
+				rhs: Location::VReg(6, Type::S8),
 				dst: Location::VReg(7, Type::S8),
 			},
-			TAC::BinOp { op: BinaryOp::Mul, typ: Type::S8, vr0: 6, vr1: 7, vr2: 8 },
-			TAC::BinOp { op: BinaryOp::Add, typ: Type::S8, vr0: 5, vr1: 8, vr2: 9 },
 			TAC::Move {
-				src: Location::VReg(9, Type::S8),
+				src: Location::VReg(7, Type::S8),
 				dst: Location::Stack(1, Type::S8),
 			},
-			TAC::Move {
-				src: Location::Const(1, Type::U8),
-				dst: Location::VReg(10, Type::U8),
+			// TODO - operands have different types
+			TAC::BinOp {
+				op: BinaryOp::Add,
+				lhs: Location::VReg(2, Type::U8),
+				rhs: Location::Const(1, Type::S8),
+				dst: Location::VReg(2, Type::U8),
 			},
-			TAC::BinOp { op: BinaryOp::Add, typ: Type::U8, vr0: 2, vr1: 10, vr2: 2 },
 			TAC::Jump(0),
 			// Loop end
 			TAC::Label(1),
@@ -904,7 +914,7 @@ mod tests {
 				src: Location::Const(3, Type::S8),
 				dst: Location::VReg(1, Type::S8),
 			},
-			TAC::BinOp { op: BinaryOp::Add, typ: Type::S8, vr0: 0, vr1: 1, vr2: 2 },
+			TAC::BinOp { op: BinaryOp::Add, lhs: Location::VReg(0, Type::S8), rhs: Location::VReg(1, Type::S8), dst: Location::VReg(2, Type::S8) },
 			TAC::Move {
 				src: Location::Const(4, Type::S8),
 				dst: Location::VReg(3, Type::S8),
@@ -913,8 +923,8 @@ mod tests {
 				src: Location::Const(5, Type::S8),
 				dst: Location::VReg(4, Type::S8),
 			},
-			TAC::BinOp { op: BinaryOp::Sub, typ: Type::S8, vr0: 3, vr1: 4, vr2: 5 },
-			TAC::BinOp { op: BinaryOp::Mul, typ: Type::S8, vr0: 2, vr1: 5, vr2: 6 },
+			TAC::BinOp { op: BinaryOp::Sub, lhs: Location::VReg(3, Type::S8), rhs: Location::VReg(4, Type::S8), dst: Location::VReg(5, Type::S8) },
+			TAC::BinOp { op: BinaryOp::Mul, lhs: Location::VReg(2, Type::S8), rhs: Location::VReg(5, Type::S8), dst: Location::VReg(6, Type::S8) },
 			TAC::Move {
 				src: Location::VReg(6, Type::S8),
 				dst: Location::Stack(0, Type::S8),
@@ -1049,65 +1059,55 @@ mod tests {
 						}
 					}
 				}
-				TAC::BinOp { op, typ, vr0, vr1, vr2 } => {
-					eprintln!("BinOp {vr0}({}) {op}:{typ:?} {vr1}({}) -> {vr2}", tac_emu.regs[vr0], tac_emu.regs[vr1]);
-					match op {
-						BinaryOp::Add => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] + tac_emu.regs[vr1]);
+				TAC::BinOp { op, lhs, rhs, dst } => {
+					eprintln!("BinOp {lhs:?} {op} {rhs:?} -> {dst:?}");
+
+					let vall = match lhs {
+						Location::Addr(adrl,_) => tac_emu.mem.get(adrl).cloned().unwrap_or(-1),
+						Location::Const(vall,_) => *vall,
+						Location::Stack(idxl,_) => tac_emu.stack.get(idxl).cloned().unwrap_or(-1),
+						Location::VReg(vrl,_) => tac_emu.regs[vrl].clone(),
+					};
+
+					let valr = match rhs {
+						Location::Addr(adrr,_) => tac_emu.mem.get(adrr).cloned().unwrap_or(-1),
+						Location::Const(valr,_) => *valr,
+						Location::Stack(idxr,_) => tac_emu.stack.get(idxr).cloned().unwrap_or(-1),
+						Location::VReg(vrr,_) => tac_emu.regs[vrr].clone(),
+					};
+
+					let result = match op {
+						BinaryOp::Add => vall + valr,
+						BinaryOp::BinAnd => vall & valr,
+						BinaryOp::BinOr => vall | valr,
+						BinaryOp::BinXor => vall ^ valr,
+						BinaryOp::CmpEQ => (vall == valr) as i64,
+						BinaryOp::CmpNE => (vall != valr) as i64,
+						BinaryOp::CmpLT => (vall < valr) as i64,
+						BinaryOp::CmpGT => (vall > valr) as i64,
+						BinaryOp::CmpGE => (vall >= valr) as i64,
+						BinaryOp::CmpLE => (vall <= valr) as i64,
+						BinaryOp::Div => vall / valr,
+						BinaryOp::LogAnd => ((vall != 0) && (valr != 0)) as i64,
+						BinaryOp::LogOr => ((vall != 0) || (valr != 0)) as i64,
+						BinaryOp::LogXor => ((vall != 0) ^ (valr != 0)) as i64,
+						BinaryOp::Mod => vall % valr,
+						BinaryOp::Mul => vall * valr,
+						BinaryOp::ShL => vall << valr,
+						BinaryOp::ShR => vall >> valr,
+						BinaryOp::Sub => vall - valr,
+					};
+
+					match dst {
+						Location::Addr(adrd,_) => {
+							tac_emu.mem.insert(*adrd, result);
 						}
-						BinaryOp::BinAnd => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] & tac_emu.regs[vr1]);
+						Location::Const(..) => panic!("cannot store into a constant value"),
+						Location::Stack(idxd,_) => {
+							tac_emu.stack.insert(*idxd, result);
 						}
-						BinaryOp::BinOr => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] | tac_emu.regs[vr1]);
-						}
-						BinaryOp::BinXor => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] ^ tac_emu.regs[vr1]);
-						}
-						BinaryOp::CmpEQ => {
-							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] == tac_emu.regs[vr1]) as i64);
-						}
-						BinaryOp::CmpNE => {
-							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] != tac_emu.regs[vr1]) as i64);
-						}
-						BinaryOp::CmpLT => {
-							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] < tac_emu.regs[vr1]) as i64);
-						}
-						BinaryOp::CmpGT => {
-							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] > tac_emu.regs[vr1]) as i64);
-						}
-						BinaryOp::CmpGE => {
-							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] >= tac_emu.regs[vr1]) as i64);
-						}
-						BinaryOp::CmpLE => {
-							tac_emu.regs.insert(*vr2, (tac_emu.regs[vr0] <= tac_emu.regs[vr1]) as i64);
-						}
-						BinaryOp::Div => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] / tac_emu.regs[vr1]);
-						}
-						BinaryOp::LogAnd => {
-							tac_emu.regs.insert(*vr2, ((tac_emu.regs[vr0] != 0) && (tac_emu.regs[vr1] != 0)) as i64);
-						}
-						BinaryOp::LogOr => {
-							tac_emu.regs.insert(*vr2, ((tac_emu.regs[vr0] != 0) || (tac_emu.regs[vr1] != 0)) as i64);
-						}
-						BinaryOp::LogXor => {
-							tac_emu.regs.insert(*vr2, ((tac_emu.regs[vr0] != 0) ^ (tac_emu.regs[vr1] != 0)) as i64);
-						}
-						BinaryOp::Mod => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] % tac_emu.regs[vr1]);
-						}
-						BinaryOp::Mul => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] * tac_emu.regs[vr1]);
-						}
-						BinaryOp::ShL => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] << tac_emu.regs[vr1]);
-						}
-						BinaryOp::ShR => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] >> tac_emu.regs[vr1]);
-						}
-						BinaryOp::Sub => {
-							tac_emu.regs.insert(*vr2, tac_emu.regs[vr0] - tac_emu.regs[vr1]);
+						Location::VReg(vrd,_) => {
+							tac_emu.regs.insert(*vrd, result);
 						}
 					}
 				}

@@ -13,7 +13,7 @@ use crate::{Span, SrcPos, Target};
 mod m68k;
 //mod sh2;
 //mod x86_64;
-mod z80;
+//mod z80;
 
 pub fn eval(
 	input: &InputData,
@@ -32,7 +32,7 @@ pub fn eval(
 			Target::M68k => Data::M68k(m68k::lower(&proc_name, section, stack_addr)),
 			//Target::SH2 => Data::SH2(sh2::lower(&proc_name, section)),
 			//Target::X86_64 => Data::X86(x86_64::lower(&proc_name, section)),
-			Target::Z80 => Data::Z80(z80::lower(&proc_name, section, ret_type)),
+			//Target::Z80 => Data::Z80(z80::lower(&proc_name, section, ret_type)),
 			_ => unreachable!(),
 		};
 
@@ -54,7 +54,7 @@ pub enum Data {
 	M68k(Vec<m68k::Asm>),
 	//SH2(Vec<sh2::Asm>),
 	//X86(Vec<x86_64::Asm>),
-	Z80(Vec<z80::Asm>),
+	//Z80(Vec<z80::Asm>),
 }
 
 impl Display for Data {
@@ -74,9 +74,9 @@ impl Display for Data {
 					//out.push(asm.to_string());
 				//}
 			//}
-			Self::Z80(data) => out.extend(
-				data.iter().map(|asm| asm.to_string())
-			),
+			//Self::Z80(data) => out.extend(
+				//data.iter().map(|asm| asm.to_string())
+			//),
 		}
 		write!(f, "{}", out.join("\n"))
 	}
@@ -92,6 +92,11 @@ impl LabelGenerator {
 		self.0 += 1;
 		format!("{name}_{}", self.0 - 1)
 	}
+}
+
+fn allocate<Reg: Copy>(pool: &[Reg], instructions: &[TAC]) -> HashMap<u32, Reg> {
+	let mut allocator = Allocator::new(pool);
+	allocator.eval(instructions)
 }
 
 type Addr = u32;
@@ -117,7 +122,7 @@ impl<Reg: Copy> Allocator<Reg> {
 		}
 	}
 
-	fn eval(&mut self, instructions: &[TAC]) -> HashMap<u32, Interval> {
+	fn eval(&mut self, instructions: &[TAC]) -> HashMap<u32, Reg> {
 		fn update_interval(interval_map: &mut HashMap<VRegId, Interval>, vr: VRegId, idx: usize) {
 			interval_map.entry(vr)
 					.and_modify(|interval| interval.start = idx)
@@ -142,10 +147,16 @@ impl<Reg: Copy> Allocator<Reg> {
 					update_interval(&mut interval_map, *vr0, idx);
 					update_interval(&mut interval_map, *vr1, idx);
 				}
-				TAC::BinOp { vr0, vr1, vr2, ..} => {
-					update_interval(&mut interval_map, *vr0, idx);
-					update_interval(&mut interval_map, *vr1, idx);
-					update_interval(&mut interval_map, *vr2, idx);
+				TAC::BinOp { lhs, rhs, dst, ..} => {
+					if let Location::VReg(vr,_) = lhs {
+						update_interval(&mut interval_map, *vr, idx);
+					}
+					if let Location::VReg(vr,_) = rhs {
+						update_interval(&mut interval_map, *vr, idx);
+					}
+					if let Location::VReg(vr,_) = dst {
+						update_interval(&mut interval_map, *vr, idx);
+					}
 				}
 				_ => {}
 			}
@@ -171,7 +182,9 @@ impl<Reg: Copy> Allocator<Reg> {
 			}
 		}
 
-		interval_map
+		interval_map.into_iter()
+				.map(|(vreg, interval)| (vreg, self.registers[&interval]))
+				.collect()
 	}
 
 	fn expire_old_intervals(&mut self, interval_i: &Interval) {

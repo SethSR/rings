@@ -1,331 +1,305 @@
 
 use std::fmt::{Display, Formatter, Result};
+
 use crate::operators::{BinaryOp, UnaryOp};
-use crate::vsmc::{Section, Vsmc};
+use crate::parser::Type;
+use crate::tac::{Data as TacData, Location, TAC};
 
-use super::inner_label;
+use super::LabelGenerator;
 
-pub fn lower(proc_name: &str, section: Section) -> Vec<Asm> {
-	let Section {
-		instructions,
-		next_label: mut label_id,
-		..
-	} = section;
+pub fn lower(proc_name: &str, tac_data: TacData, ret_type: Type) -> Vec<Asm> {
+	let stack_cells = tac_data.locals.len() + tac_data.next_reg as usize;
 
+	// Use extra stack space as "registers" to fit 16 bit arguments
+	let regs: Vec<usize> = (tac_data.locals.len()..stack_cells).collect();
+	let registers = super::allocate(&regs, &tac_data.instructions);
+
+	let mut labels = LabelGenerator::new(tac_data.next_label);
 	let mut data = vec![
 		Asm::Label(proc_name.to_owned()),
+		Asm::MovIX16(0),
+		Asm::AddIXSP,
 	];
-	for asm in instructions {
+
+	for asm in tac_data.instructions {
 		match asm {
-			Vsmc::Push(value) => {
-				data.push(Asm::Mov8(value as u8));
-				data.push(Asm::Dec16(R16::HL));
-				data.push(Asm::StIntoHL(R8::A));
-			}
-			Vsmc::BinOp(op) => {
-				data.push(Asm::LdWithHL(R8::B));
-				data.push(Asm::Inc16(R16::HL));
-				data.push(Asm::LdWithHL(R8::A));
+			TAC::BinOp { op, lhs, rhs, dst } => {
+				let r0 = registers[&vr0];
+				let r1 = registers[&vr1];
+				let r2 = registers[&vr2];
+
+				data.push(Asm::Comment(format!("binary {op}:{typ:?}")));
 				match op {
-					BinaryOp::Add => data.push(Asm::Add(R8::B)),
-					BinaryOp::Sub => data.push(Asm::Sub(R8::B)),
-					BinaryOp::Mul => {
-						let clear = inner_label(proc_name, &mut label_id);
-						let mul_loop = inner_label(proc_name, &mut label_id);
-						let end = inner_label(proc_name, &mut label_id);
-						// if c == 0 goto end
-						data.push(Asm::CpN(0));
-						data.push(Asm::JrZ(clear.clone()));
-						data.push(Asm::Mov(R8::C, R8::A));
-						data.push(Asm::Xor(R8::A));
-						data.push(Asm::Label(mul_loop.clone()));
-						data.push(Asm::Add(R8::C));
-						data.push(Asm::DJNZ(mul_loop));
-						data.push(Asm::Jr(end.clone()));
-						data.push(Asm::Label(clear));
-						data.push(Asm::Xor(R8::A));
-						data.push(Asm::Label(end));
+					BinaryOp::Add => {
+						z80_byte_op(&mut data, 1, Asm::AddIX, r0, r1, r2);
+						if is_16bit(typ) {
+							z80_byte_op(&mut data, 0, Asm::AdCIX, r0, r1, r2);
+						}
 					}
-					BinaryOp::Div => {
-						let b_neg = inner_label(proc_name, &mut label_id);
-						let a_neg = inner_label(proc_name, &mut label_id);
-						let check = inner_label(proc_name, &mut label_id);
-						let div_loop = inner_label(proc_name, &mut label_id);
-						let end = inner_label(proc_name, &mut label_id);
-						// let flip = false;
-						data.push(Asm::Mov(R8::C, R8::A)); // remember A
-						data.push(Asm::Mov8(0));
-						data.push(Asm::Mov(R8::D, R8::A)); // D = false
-						// if b < 0 {
-						data.push(Asm::Bit(7, R8::B));     // if (B & 0x80) > 0
-						data.push(Asm::JrZ(b_neg.clone()));
-						//   flip = !flip;
-						data.push(Asm::Mov(R8::A, R8::D));
-						data.push(Asm::Cpl);
-						data.push(Asm::Mov(R8::D, R8::A)); // D = !D
-						//   b = -b;
-						data.push(Asm::Mov(R8::A, R8::B));
-						data.push(Asm::Neg);
-						data.push(Asm::Mov(R8::B, R8::A)); // B = -B
-						// }
-						data.push(Asm::Label(b_neg));
-						data.push(Asm::Mov(R8::A, R8::C)); // restore A
-						// if a < 0 {
-						data.push(Asm::Bit(7, R8::A));     // if (A & 0x80) > 0
-						data.push(Asm::JrZ(a_neg.clone()));
-						//   flip = !flip;
-						data.push(Asm::Mov(R8::A, R8::D));
-						data.push(Asm::Cpl);
-						data.push(Asm::Mov(R8::D, R8::A)); // D = !D
-						//   a = -a;
-						data.push(Asm::Mov(R8::A, R8::C)); // restore A
-						data.push(Asm::Neg);               // A = -A
-						// }
-						data.push(Asm::Label(a_neg));
-						data.push(Asm::Mov(R8::C, R8::A)); // remember A
-						data.push(Asm::Xor(R8::A));
-						data.push(Asm::Mov(R8::E, R8::A));
-						data.push(Asm::Mov(R8::A, R8::C));
-						// while a > b {
-						data.push(Asm::Jr(check.clone()));
-						data.push(Asm::Label(div_loop.clone()));
-						//   a -= b;
-						data.push(Asm::Sub(R8::B));
-						//   e += 1;
-						data.push(Asm::Inc(R8::E));
-						data.push(Asm::Label(check));
-						data.push(Asm::Cp(R8::B));
-						data.push(Asm::JrNC(div_loop));
-						// }
-						// e -= 1;
-						data.push(Asm::Dec(R8::E));
-						// a = e;
-						data.push(Asm::Mov(R8::A, R8::E));
-						// if flip {
-						data.push(Asm::Bit(0, R8::D));
-						data.push(Asm::JrZ(end.clone()));
-						//   a = -a;
-						data.push(Asm::Neg);
-						// }
-						data.push(Asm::Label(end));
+					BinaryOp::Sub => {
+						z80_byte_op(&mut data, 1, Asm::SubIX, r0, r1, r2);
+						if is_16bit(typ) {
+							z80_byte_op(&mut data, 0, Asm::SbCIX, r0, r1, r2);
+						}
 					}
-					BinaryOp::Mod => {
-						let b_check = inner_label(proc_name, &mut label_id);
-						let a_check = inner_label(proc_name, &mut label_id);
-						let check = inner_label(proc_name, &mut label_id);
-						let div_loop = inner_label(proc_name, &mut label_id);
-						let rem_check = inner_label(proc_name, &mut label_id);
-						let end = inner_label(proc_name, &mut label_id);
-						// let a_neg = false; // D = false;
-						// let b_neg = false; // E = false;
-						data.push(Asm::Mov(R8::C, R8::A)); // remember A
-						data.push(Asm::Xor(R8::A));        // A = 0
-						data.push(Asm::Mov(R8::D, R8::A)); // D = false
-						data.push(Asm::Mov(R8::E, R8::A)); // E = false
-						// if b < 0 {
-						data.push(Asm::Bit(7, R8::B));     // if (B & 0x80) > 0
-						data.push(Asm::JrZ(b_check.clone()));
-						//   b_neg = true;
-						data.push(Asm::Inc(R8::E));
-						//   b = -b;
-						data.push(Asm::Mov(R8::A, R8::B));
-						data.push(Asm::Neg);
-						data.push(Asm::Mov(R8::B, R8::A)); // B = -B
-						// }
-						data.push(Asm::Label(b_check));
-						data.push(Asm::Mov(R8::A, R8::C)); // restore A
-						// if a < 0 {
-						data.push(Asm::Bit(7, R8::A));     // if (A & 0x80) > 0
-						data.push(Asm::JrZ(a_check.clone()));
-						//   a_neg = true;
-						data.push(Asm::Inc(R8::D));
-						//   a = -a;
-						data.push(Asm::Mov(R8::A, R8::C)); // restore A
-						data.push(Asm::Neg);               // A = -A
-						// }
-						data.push(Asm::Label(a_check));
-						// while a > b {
-						data.push(Asm::Jr(check.clone()));
-						data.push(Asm::Label(div_loop.clone()));
-						//   a -= b;
-						data.push(Asm::Label(check));
-						data.push(Asm::Sub(R8::B));
-						data.push(Asm::JrNC(div_loop));
-						// }
-						data.push(Asm::Add(R8::B));
-						data.push(Asm::Mov(R8::C, R8::A)); // C = remainder
-						data.push(Asm::Mov(R8::A, R8::E));
-						data.push(Asm::Xor(R8::D));
-						// if A^B == 0 goto inv_rem
-						data.push(Asm::Mov(R8::A, R8::B)); // A = B
-						data.push(Asm::JrNZ(rem_check.clone()));
-						data.push(Asm::Xor(R8::A));        // A = 0
-						data.push(Asm::Label(rem_check));
-						data.push(Asm::Sub(R8::C));        // A = A - remainder
-						data.push(Asm::Mov(R8::C, R8::A)); // C = A
-						data.push(Asm::Mov(R8::A, R8::D)); // A = a_neg
-						data.push(Asm::CpN(1));
-						data.push(Asm::Mov(R8::A, R8::C)); // A = C
-						data.push(Asm::JrZ(end.clone()));
-						data.push(Asm::Neg);
-						data.push(Asm::Label(end));
+					BinaryOp::Mul => {}
+					BinaryOp::Div => {}
+					BinaryOp::Mod => {}
+					BinaryOp::ShL => {}
+					BinaryOp::ShR => {}
+					BinaryOp::BinAnd => {
+						z80_byte_op(&mut data, 1, Asm::AndIX, r0, r1, r2);
+						if is_16bit(typ) {
+							z80_byte_op(&mut data, 0, Asm::AndIX, r0, r1, r2);
+						}
 					}
-					BinaryOp::ShL => {
-						let shift_loop = inner_label(proc_name, &mut label_id);
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::Mov(R8::C, R8::A));
-						data.push(Asm::Mov(R8::A, R8::B));
-						data.push(Asm::CpN(0));
-						data.push(Asm::Mov(R8::A, R8::C));
-						data.push(Asm::JrNZ(end.clone()));
-						data.push(Asm::Label(shift_loop.clone()));
-						data.push(Asm::Sla(R8::A));
-						data.push(Asm::DJNZ(shift_loop));
-						data.push(Asm::Label(end));
+					BinaryOp::BinOr => {
+						z80_byte_op(&mut data, 1, Asm::OrIX, r0, r1, r2);
+						if is_16bit(typ) {
+							z80_byte_op(&mut data, 0, Asm::OrIX, r0, r1, r2);
+						}
 					}
-					BinaryOp::ShR => {
-						let shift_loop = inner_label(proc_name, &mut label_id);
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::Mov(R8::C, R8::A));
-						data.push(Asm::Mov(R8::A, R8::B));
-						data.push(Asm::CpN(0));
-						data.push(Asm::Mov(R8::A, R8::C));
-						data.push(Asm::JrNZ(end.clone()));
-						data.push(Asm::Label(shift_loop.clone()));
-						data.push(Asm::Sra(R8::A));
-						data.push(Asm::DJNZ(shift_loop));
-						data.push(Asm::Label(end));
+					BinaryOp::BinXor => {
+						z80_byte_op(&mut data, 1, Asm::XorIX, r0, r1, r2);
+						if is_16bit(typ) {
+							z80_byte_op(&mut data, 0, Asm::XorIX, r0, r1, r2);
+						}
 					}
-					BinaryOp::BinAnd => data.push(Asm::And(R8::B)),
-					BinaryOp::BinOr => data.push(Asm::Or(R8::B)),
-					BinaryOp::BinXor => data.push(Asm::Xor(R8::B)),
-					BinaryOp::LogAnd => {
-						let set_true = inner_label(proc_name, &mut label_id);
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::CpN(0));
-						data.push(Asm::JrZ(set_true.clone()));
-						data.push(Asm::Mov(R8::A, R8::B));
-						data.push(Asm::CpN(0));
-						data.push(Asm::JrZ(end.clone()));
-						data.push(Asm::Label(set_true));
-						data.push(Asm::Mov8(1));
-						data.push(Asm::Label(end));
+					BinaryOp::LogAnd => {}
+					BinaryOp::LogOr => {}
+					BinaryOp::LogXor => {}
+					BinaryOp::CmpEQ => {}
+					BinaryOp::CmpNE => {}
+					BinaryOp::CmpGE => {}
+					BinaryOp::CmpGT => {}
+					BinaryOp::CmpLE => {}
+					BinaryOp::CmpLT => {}
+				}
+			}
+
+			TAC::UnOp { op, typ, vr0, vr1 } => {
+				let r0 = registers[&vr0];
+				let r1 = registers[&vr1];
+
+				data.push(Asm::Comment(format!("unary {op}:{typ:?}")));
+
+				// 8/46 or 7/42
+				data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2 + 1)); // 3/19
+				match op {
+					UnaryOp::Neg => data.push(Asm::Neg),             // 2/8
+					UnaryOp::Not => data.push(Asm::Cpl),             // 1/4
+				}
+				data.push(Asm::StIntoIX(R8::A, r1 as i8 * 2 + 1)); // 3/19
+
+				// 16/92 or 14/84
+				if is_16bit(typ) {
+					data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2)); // 3/19
+					match op {
+						UnaryOp::Neg => data.push(Asm::Neg),         // 2/8
+						UnaryOp::Not => data.push(Asm::Cpl),         // 1/4
 					}
-					BinaryOp::LogOr => {
-						let set_true = inner_label(proc_name, &mut label_id);
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::CpN(0));
-						data.push(Asm::JrNZ(set_true.clone()));
-						data.push(Asm::Mov(R8::A, R8::B));
-						data.push(Asm::CpN(0));
-						data.push(Asm::JrNZ(end.clone()));
-						data.push(Asm::Jr(end.clone()));
-						data.push(Asm::Label(set_true));
-						data.push(Asm::Mov8(1));
-						data.push(Asm::Label(end));
-					}
-					BinaryOp::LogXor => {
-						let a_is_true = inner_label(proc_name, &mut label_id);
-						let set_true = inner_label(proc_name, &mut label_id);
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::CpN(0));
-						data.push(Asm::Mov(R8::A, R8::B));
-						data.push(Asm::JrZ(a_is_true.clone()));
-						data.push(Asm::CpN(0));
-						data.push(Asm::JrZ(set_true.clone()));
-						data.push(Asm::Xor(R8::A));
-						data.push(Asm::Jr(end.clone()));
-						data.push(Asm::Label(a_is_true));
-						data.push(Asm::CpN(0));
-						data.push(Asm::JrZ(end.clone()));
-						data.push(Asm::Label(set_true));
-						data.push(Asm::Inc(R8::A));
-						data.push(Asm::Label(end));
-					}
-					BinaryOp::CmpEQ => {
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::Cp(R8::B));
-						data.push(Asm::Mov8(0));
-						data.push(Asm::JrNZ(end.clone()));
-						data.push(Asm::Mov8(1));
-						data.push(Asm::Label(end));
-					}
-					BinaryOp::CmpNE => {
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::Cp(R8::B));
-						data.push(Asm::Mov8(1));
-						data.push(Asm::JrNZ(end.clone()));
-						data.push(Asm::Mov8(0));
-						data.push(Asm::Label(end));
-					}
-					BinaryOp::CmpGE => {
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::Cp(R8::B));
-						data.push(Asm::Mov8(1));
-						data.push(Asm::JrNC(end.clone()));
-						data.push(Asm::Mov8(0));
-						data.push(Asm::Label(end));
-					}
-					BinaryOp::CmpGT => {
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::Cp(R8::B));
-						data.push(Asm::Mov8(0));
-						data.push(Asm::JrZ(end.clone()));
-						data.push(Asm::JrC(end.clone()));
-						data.push(Asm::Mov8(1));
-						data.push(Asm::Label(end));
-					}
-					BinaryOp::CmpLE => {
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::Cp(R8::B));
-						data.push(Asm::Mov8(1));
-						data.push(Asm::JrZ(end.clone()));
-						data.push(Asm::JrC(end.clone()));
-						data.push(Asm::Mov8(0));
-						data.push(Asm::Label(end));
-					}
-					BinaryOp::CmpLT => {
-						let end = inner_label(proc_name, &mut label_id);
-						data.push(Asm::Cp(R8::B));
-						data.push(Asm::Mov8(0));
-						data.push(Asm::JrNC(end.clone()));
-						data.push(Asm::Mov8(1));
-						data.push(Asm::Label(end));
+					data.push(Asm::StIntoIX(R8::A, r1 as i8 * 2)); // 3/19
+				}
+			}
+
+			TAC::Move { src, dst } => match (src, dst) {
+				(_, Location::Const(..)) =>  unreachable!("cannot store into a constant"),
+
+				(Location::Addr(adrs,typs), Location::Addr(adrd, typd)) => {
+					data.push(Asm::Comment(format!("move ({adrs:X}:{typs:?}) -> ({adrd:X}:{typd:?})")));
+
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::LdAMem(adrs as u16 + 1));
+						data.push(Asm::StAMem(adrd as u16 + 1));
+						data.push(Asm::LdAMem(adrs as u16));
+						data.push(Asm::StAMem(adrd as u16));
+					} else {
+						data.push(Asm::LdAMem(adrs as u16));
+						data.push(Asm::StAMem(adrd as u16));
 					}
 				}
-				data.push(Asm::StIntoHL(R8::A));
-			}
-			Vsmc::UnOp(op) => {
-				data.push(Asm::LdWithHL(R8::A));
-				match op {
-					UnaryOp::Neg => data.push(Asm::Neg),
-					UnaryOp::Not => data.push(Asm::Cpl),
+
+				(Location::Addr(adrs,typs), Location::Stack(idxd, typd)) => {
+					data.push(Asm::Comment(format!("load ({adrs:X}:{typs:?}) -> [{idxd}:{typd:?}]")));
+
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::LdAMem(adrs as u16 + 1));
+						data.push(Asm::StIntoIX(R8::A, idxd as i8 * 2 + 1));
+						data.push(Asm::LdAMem(adrs as u16));
+						data.push(Asm::StIntoIX(R8::A, idxd as i8 * 2));
+					} else {
+						data.push(Asm::LdAMem(adrs as u16));
+						data.push(Asm::StIntoIX(R8::A, idxd as i8 * 2 + 1));
+					}
 				}
-				data.push(Asm::StIntoHL(R8::A));
+
+				(Location::Addr(adrs, typs), Location::VReg(vrd, typd)) => {
+					let r0 = registers[&vrd];
+
+					data.push(Asm::Comment(format!("load ({adrs:X}:{typs:?}) -> {vrd}:{typd:?}")));
+
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::LdAMem(adrs as u16 + 1));
+						data.push(Asm::StIntoIX(R8::A, r0 as i8 * 2 + 1));
+						data.push(Asm::LdAMem(adrs as u16));
+						data.push(Asm::StIntoIX(R8::A, r0 as i8 * 2));
+					} else {
+						data.push(Asm::LdAMem(adrs as u16));
+						data.push(Asm::StIntoIX(R8::A, r0 as i8 * 2 + 1));
+					}
+				}
+
+				(Location::Const(vals, typs), Location::Addr(adrd, typd)) => {
+					data.push(Asm::Comment(format!("load #{vals}:{typs:?} -> ({adrd:X}:{typd:?})")));
+
+					// 4/19 | 8/38
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::Mov8(R8::A, vals as u8));
+						data.push(Asm::StAMem(adrd as u16 + 1));
+						data.push(Asm::Mov8(R8::A, (vals >> 8) as u8)); // 4/19
+						data.push(Asm::StAMem(adrd as u16));
+					} else {
+						data.push(Asm::Mov8(R8::A, vals as u8));
+						data.push(Asm::StAMem(adrd as u16));
+					}
+				}
+
+				(Location::Const(vals, typs), Location::Stack(idxd, typd)) => {
+					data.push(Asm::Comment(format!("load #{vals}:{typs:?} -> [{idxd}:{typd:?}]")));
+
+					data.push(Asm::StIX8(idxd as i8 * 2 + 1, vals as u8));
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::StIX8(idxd as i8 * 2, (vals >> 8) as u8));
+					}
+				}
+
+				(Location::Const(vals, typs), Location::VReg(vrd, typd)) => {
+					let r0 = registers[&vrd];
+
+					data.push(Asm::Comment(format!("load #{vals}:{typs:?} -> {vrd}:{typd:?}")));
+
+					data.push(Asm::StIX8(r0 as i8 * 2 + 1, vals as u8));
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::StIX8(r0 as i8 * 2, (vals >> 8) as u8));
+					}
+				}
+
+				(Location::Stack(idxs, typs), Location::Addr(adrd, typd)) => {
+					data.push(Asm::Comment(format!("load [{idxs}:{typs:?}] -> ({adrd:X}:{typd:?})")));
+
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::LdWithIX(R8::A, idxs as i8 * 2 + 1));
+						data.push(Asm::StAMem(adrd as u16 + 1));
+						data.push(Asm::LdWithIX(R8::A, idxs as i8 * 2));
+						data.push(Asm::StAMem(adrd as u16));
+					} else {
+						data.push(Asm::LdWithIX(R8::A, idxs as i8 * 2 + 1));
+						data.push(Asm::StAMem(adrd as u16));
+					}
+				}
+
+				(Location::Stack(idxs, typs), Location::Stack(idxd, typd)) => {
+					data.push(Asm::Comment(format!("load [{idxs}:{typs:?}] -> [{idxd}:{typd:?}]")));
+
+					data.push(Asm::LdWithIX(R8::A, idxs as i8 * 2 + 1));
+					data.push(Asm::StIntoIX(R8::A, idxd as i8 * 2 + 1));
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::LdWithIX(R8::A, idxs as i8 * 2));
+						data.push(Asm::StIntoIX(R8::A, idxd as i8 * 2));
+					}
+				}
+
+				(Location::Stack(idxs, typs), Location::VReg(vrd, typd)) => {
+					let r0 = registers[&vrd];
+
+					data.push(Asm::Comment(format!("load [{idxs}:{typs:?}] -> {vrd}:{typd:?}")));
+
+					data.push(Asm::LdWithIX(R8::A, idxs as i8 * 2 + 1));
+					data.push(Asm::StIntoIX(R8::A, r0 as i8 * 2 + 1));
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::LdWithIX(R8::A, idxs as i8 * 2));
+						data.push(Asm::StIntoIX(R8::A, r0 as i8 * 2));
+					}
+				}
+
+				(Location::VReg(vrs, typs), Location::Addr(adrd, typd)) => {
+					let r0 = registers[&vrs];
+
+					data.push(Asm::Comment(format!("load {vrs}:{typs:?} -> ({adrd:X}:{typd:?})")));
+
+					if is_16bit(typs) && is_16bit(typd) {
+						for i in (0..2).rev() {
+							data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2 + i as i8));
+							data.push(Asm::StAMem(adrd as u16 + i as u16));
+						}
+					} else {
+						data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2 + 1));
+						data.push(Asm::StAMem(adrd as u16));
+					}
+				}
+
+				(Location::VReg(vrs, typs), Location::Stack(idxd, typd)) => {
+					let r0 = registers[&vrs];
+
+					data.push(Asm::Comment(format!("load {vrs}:{typs:?} -> [{idxd}:{typd:?}]")));
+
+					data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2 + 1));
+					data.push(Asm::StIntoIX(R8::A, idxd as i8 * 2 + 1));
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2));
+						data.push(Asm::StIntoIX(R8::A, idxd as i8 * 2));
+					}
+				}
+
+				(Location::VReg(vrs, typs), Location::VReg(vrd, typd)) => {
+					let r0 = registers[&vrs];
+					let r1 = registers[&vrd];
+
+					data.push(Asm::Comment(format!("load {vrs}:{typs:?} -> {vrd}:{typd:?}")));
+
+					data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2 + 1));
+					data.push(Asm::StIntoIX(R8::A, r1 as i8 * 2 + 1));
+					if is_16bit(typs) && is_16bit(typd) {
+						data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2));
+						data.push(Asm::StIntoIX(R8::A, r1 as i8 * 2));
+					}
+				}
 			}
-			Vsmc::Load(stack_idx) => {
-				// load `stack_base + stack_idx` to -(HL)
-				todo!("ld -(HL),(stack_base + {stack_idx})")
-			}
-			Vsmc::Store(stack_idx) => {
-				// store (HL)+ to `stack_base + stack_idx`
-				todo!("ld (stack_base + {stack_idx}),(HL)+")
-			}
-			Vsmc::Label(id) => data.push(Asm::Label(format!("{proc_name}_{id}"))),
-			Vsmc::Jump(id) => {
-				let label = format!("{proc_name}_{id}");
+
+			TAC::Label(lbl) => data.push(Asm::Label(format!("{proc_name}_{lbl}"))),
+
+			TAC::Jump(lbl) => {
+				data.push(Asm::Comment("jump".into()));
+				let label = format!("{proc_name}_{lbl}");
 				data.push(Asm::Jp(label));
 			}
-			Vsmc::JumpIf(id) => {
-				let label = format!("{proc_name}_{id}");
-				data.push(Asm::LdWithHL(R8::A));
+
+			TAC::JumpIf { lbl, vr } => {
+				let r0 = registers[&vr];
+
+				data.push(Asm::Comment("jump-if".into()));
+
+				let label = format!("{proc_name}_{lbl}");
+				data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2 + 1));
+				data.push(Asm::Cpl);
+				data.push(Asm::JpC(Cond::NZ,label.clone()));
+				data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2));
 				data.push(Asm::Cpl);
 				data.push(Asm::JpC(Cond::NZ,label));
 			}
-			Vsmc::Return(with_value) => {
-				if with_value {
-					data.push(Asm::LdWithHL(R8::A));
+
+			TAC::Return(with_value) => {
+				data.push(Asm::Comment("return".into()));
+
+				if let Some(vr) = with_value {
+					let r0 = registers[&vr];
+
+					data.push(Asm::LdWithIX(R8::E, r0 as i8 * 2 + 1));
+					if is_16bit(ret_type) {
+						data.push(Asm::LdWithIX(R8::D, r0 as i8 * 2));
+					}
 				}
+
 				data.push(Asm::Ret);
 			}
 		}
@@ -334,8 +308,29 @@ pub fn lower(proc_name: &str, section: Section) -> Vec<Asm> {
 	data
 }
 
+fn is_16bit(typ: Type) -> bool {
+	match typ {
+		Type::S8 | Type::U8 | Type::Bool => false,
+		Type::S16 | Type::U16 => true,
+		Type::S32 | Type::U32 => {
+			println!("Found {typ:?} variable");
+			true
+		}
+		_ => unreachable!("Unexpected type: {typ:?}"),
+	}
+}
+
+fn z80_byte_op(data: &mut Vec<Asm>,
+	i: i8, op: fn(i8) -> Asm,
+	r0: usize, r1: usize, r2: usize,
+) {
+	data.push(Asm::LdWithIX(R8::A, r0 as i8 * 2 + i)); // 3/19
+	data.push(op(r1 as i8 * 2 + i));                   // 3/19
+	data.push(Asm::StIntoIX(R8::A, r2 as i8 * 2 + i)); // 3/19
+}
+
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum R8 { A, B, C, D, E, H, L }
 impl Display for R8 {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -344,7 +339,7 @@ impl Display for R8 {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum R16 { BC, DE, HL }
 impl Display for R16 {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -353,7 +348,7 @@ impl Display for R16 {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Cond { NC, NZ, C, Z, PO, PE, P, M }
 impl Display for Cond {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -362,7 +357,7 @@ impl Display for Cond {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum RstTgt { H00, H08, H10, H18, H20, H28, H30, H38 }
 impl Display for RstTgt {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -380,21 +375,48 @@ impl Display for RstTgt {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Asm {
+	Comment(String),
+
 	Label(String),
 
+	/// nop
+	/// - bytes: 1
+	/// - cycles: 4
 	Nop,
 	/// ld r,r
+	/// - bytes: 1
+	/// - cycles: 4
 	Mov(R8, R8),
-	/// ld A,n
-	Mov8(u8),
+	/// ld A,n | ld B,n | ld C,n | ld D,n | ld E,n | ld H,n | ld L,n
+	/// - bytes: 2
+	/// - cycles: 7
+	Mov8(R8, u8),
 	/// ld BC,nn | ld DE,nn | ld HL,nn
+	/// - bytes: 3
+	/// - cycles: 10
 	Mov16(R16, u16),
+	/// ld IX,nn
+	/// - bytes: 4
+	/// - cycles: 14
+	MovIX16(u16),
 	/// ld SP,nn
+	/// - bytes: 3
+	/// - cycles: 10
 	MovSP(u16),
 	/// ld SP,HL
+	/// - bytes: 1
+	/// - cycles: 6
 	MovAdr,
+	/// ldi : (DE++) = (HL++); BC--
+	/// - bytes: 2
+	/// - cycles: 16
+	MovMemInc,
+	/// ldd : (DE--) = (HL--); BC--
+	/// - bytes: 2
+	/// - cycles: 16
+	MovMemDec,
 
 	/// ld A,(BC)
 	LdAWithBC,
@@ -406,6 +428,8 @@ pub enum Asm {
 	LdHL(u16),
 	/// ld A,(HL) | ld B,(HL) | ld C,(HL) | ld D,(HL) | ld E,(HL) | ld H,(HL) | ld L,(HL)
 	LdWithHL(R8),
+	/// ld A,(IX+n) | ld B,(IX+n) | ld C,(IX+n) | ld D,(IX+n) | ld E,(IX+n) | ld H,(IX+n) | ld L,(IX+n)
+	LdWithIX(R8, i8),
 
 	/// ld (BC),A
 	StAIntoBC,
@@ -417,8 +441,12 @@ pub enum Asm {
 	StHL(u16),
 	/// ld (HL),A | ld (HL),B | ld (HL),C | ld (HL),D | ld (HL),E | ld (HL),H | ld (HL),L
 	StIntoHL(R8),
+	/// ld (IX+n),A | ld (IX+n),B | ld (IX+n),C | ld (IX+n),D | ld (IX+n),E | ld (IX+n),H | ld (IX+n),L
+	StIntoIX(R8, i8),
 	/// ld (HL),n
 	St8(u8),
+	/// ld (IX+d),n
+	StIX8(i8, u8),
 
 	/// inc BC | inc DE | inc HL
 	Inc16(R16),
@@ -470,18 +498,24 @@ pub enum Asm {
 	Add16(R16),
 	/// add HL,SP
 	AddSP,
+	/// add IX,SP
+	AddIXSP,
 	/// add A | add B | add C | add D | add E | add H | add L
 	Add(R8),
 	/// add (HL)
 	AddMem,
 	/// add n
 	AddN(u8),
+	/// add (IX+n)
+	AddIX(i8),
 	/// adc A | adc B | adc C | adc D | adc E | adc H | adc L
 	AdC(R8),
 	/// adc (HL)
 	AdCMem,
 	/// adc n
 	AdCN(u8),
+	/// adc (IX+n)
+	AdCIX(i8),
 
 	/// sub A | sub B | sub C | sub D | sub E | sub H | sub L
 	Sub(R8),
@@ -489,12 +523,16 @@ pub enum Asm {
 	SubMem,
 	/// sub n
 	SubN(u8),
+	/// sub (IX+n)
+	SubIX(i8),
 	/// sbc A | sbc B | sbc C | sbc D | sbc E | sbc H | sbc L
 	SbC(R8),
 	/// sbc (HL)
 	SbCMem,
 	/// sbc n
 	SbCN(u8),
+	/// sbc (IX+n)
+	SbCIX(i8),
 
 	/// rlc A | rlc B | rlc C | rlc D | rlc E | rlc H | rlc L
 	Rlc(R8),
@@ -559,24 +597,32 @@ pub enum Asm {
 	AndMem,
 	/// and n
 	AndN(u8),
+	/// and (IX+n)
+	AndIX(i8),
 	/// xor a | xor b | xor c | xor d | xor e | xor h | xor l
 	Xor(R8),
 	/// xor (HL)
 	XorMem,
 	/// xor n
 	XorN(u8),
+	/// xor (IX+n)
+	XorIX(i8),
 	/// or a | or b | or c | or d | or e | or h | or l
 	Or(R8),
 	/// or (HL)
 	OrMem,
 	/// or n
 	OrN(u8),
+	/// or (IX+n)
+	OrIX(i8),
 	/// cp a | cp b | cp c | cp d | cp e | cp h | cp l
 	Cp(R8),
 	/// cp (HL)
 	CpMem,
 	/// cp n
 	CpN(u8),
+	/// cp (IX+n)
+	CpIX(i8),
 	/// neg
 	Neg,
 	/// ret
@@ -621,112 +667,128 @@ pub enum Asm {
 impl Display for Asm {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		match self {
+			Self::Comment(msg) => write!(f, "\t\t\t; {msg}"),
 			Self::Label(label) => write!(f, "{label}:"),
-			Self::Nop => write!(f, "  nop"),
-			Self::Mov(rd,rs) => write!(f, "  ld {rd},{rs}"),
-			Self::Mov8(n) => write!(f, "  ld a,{n}"),
-			Self::Mov16(rd,nn) => write!(f, "  ld {rd},{nn}"),
-			Self::MovSP(nn) => write!(f, "  ld SP,{nn}"),
-			Self::MovAdr => write!(f, "  ld SP,HL"),
-			Self::LdAWithBC => write!(f, "  ld A,(BC)"),
-			Self::LdAWithDE => write!(f, "  ld A,(DE)"),
-			Self::LdAMem(nn) => write!(f, "  ld A,({nn})"),
-			Self::LdHL(nn) => write!(f, "  ld HL,({nn})"),
-			Self::LdWithHL(rd) => write!(f, "  ld {rd},(HL)"),
-			Self::StAIntoBC => write!(f, "  ld (BC),A"),
-			Self::StAIntoDE => write!(f, "  ld (DE),A"),
-			Self::StAMem(nn) => write!(f, "  ld ({nn}),A"),
-			Self::StHL(nn) => write!(f, "  ld ({nn}),HL"),
-			Self::StIntoHL(rd) => write!(f, "  ld (HL),{rd}"),
-			Self::St8(n) => write!(f, "  ld (HL),{n}"),
-			Self::Inc(rd) => write!(f, "  inc {rd}"),
-			Self::Inc16(rd) => write!(f, "  inc {rd}"),
-			Self::IncSP => write!(f, "  inc SP"),
-			Self::IncMem => write!(f, "  inc (HL)"),
-			Self::Dec(rd) => write!(f, "  dec {rd}"),
-			Self::Dec16(rd) => write!(f, "  dec {rd}"),
-			Self::DecSP => write!(f, "  dec SP"),
-			Self::DecMem => write!(f, "  dec (HL)"),
-			Self::DJNZ(d) => write!(f, "  djnz {d}"),
-			Self::Jr(d) => write!(f, "  jr {d}"),
-			Self::JrC(d) => write!(f, "  jr C,{d}"),
-			Self::JrZ(d) => write!(f, "  jr Z,{d}"),
-			Self::JrNC(d) => write!(f, "  jr NC,{d}"),
-			Self::JrNZ(d) => write!(f, "  jr NZ,{d}"),
-			Self::Jp(nn) => write!(f, "  jp {nn}"),
-			Self::JpHL => write!(f, "  jp (HL)"),
-			Self::JpC(cc, nn) => write!(f, "  jp {cc},{nn}"),
-			Self::Add16(rs) => write!(f, "  add HL,{rs}"),
-			Self::AddSP => write!(f, "  add HL,SP"),
-			Self::Add(rs) => write!(f, "  add {rs}"),
-			Self::AddMem => write!(f, "  add (HL)"),
-			Self::AddN(n) => write!(f, "  add {n}"),
-			Self::AdC(rs) => write!(f, "  adc {rs}"),
-			Self::AdCMem => write!(f, "  adc (HL)"),
-			Self::AdCN(n) => write!(f, "  adc {n}"),
-			Self::Sub(rs) => write!(f, "  sub {rs}"),
-			Self::SubMem => write!(f, "  sub (HL)"),
-			Self::SubN(n) => write!(f, "  sub {n}"),
-			Self::SbC(rs) => write!(f, "  sbc {rs}"),
-			Self::SbCMem => write!(f, "  sbc (HL)"),
-			Self::SbCN(n) => write!(f, "  sbc {n}"),
-			Self::Rlc(rd) => write!(f, "  rlc {rd}"),
-			Self::RlcHL => write!(f, "  rlc (HL)"),
-			Self::Rl(rd) => write!(f, "  rl {rd}"),
-			Self::RlHL => write!(f, "  rl (HL)"),
-			Self::Rrc(rd) => write!(f, "  rrc {rd}"),
-			Self::RrcHL => write!(f, "  rrc (HL)"),
-			Self::Rr(rd) => write!(f, "  rr {rd}"),
-			Self::RrHL => write!(f, "  rr (HL)"),
-			Self::Sla(rd) => write!(f, "  sla {rd}"),
-			Self::SlaHL => write!(f, "  sla (HL)"),
-			Self::Sra(rd) => write!(f, "  sra {rd}"),
-			Self::SraHL => write!(f, "  sra (HL)"),
-			Self::Sll(rd) => write!(f, "  sll {rd}"),
-			Self::SllHL => write!(f, "  sll (HL)"),
-			Self::Srl(rd) => write!(f, "  srl {rd}"),
-			Self::SrlHL => write!(f, "  srl (HL)"),
-			Self::DAA => write!(f, "  daa"),
-			Self::Cpl => write!(f, "  cpl"),
-			Self::SCF => write!(f, "  scf"),
-			Self::CCF => write!(f, "  ccf"),
-			Self::Exx => write!(f, "  exx"),
-			Self::ExAF => write!(f, "  ex AF,AF'"),
-			Self::ExSP => write!(f, "  ex (SP),HL"),
-			Self::ExDE => write!(f, "  ex DE,HL"),
-			Self::Halt => write!(f, "  halt"),
-			Self::And(rs) => write!(f, "  and {rs}"),
-			Self::AndMem => write!(f, "  and (HL)"),
-			Self::AndN(n) => write!(f, "  and {n}"),
-			Self::Xor(rs) => write!(f, "  xor {rs}"),
-			Self::XorMem => write!(f, "  xor (HL)"),
-			Self::XorN(n) => write!(f, "  xor {n}"),
-			Self::Or(rs) => write!(f, "  or {rs}"),
-			Self::OrMem => write!(f, "  or (HL)"),
-			Self::OrN(n) => write!(f, "  or {n}"),
-			Self::Cp(rs) => write!(f, "  cp {rs}"),
-			Self::CpMem => write!(f, "  cp (HL)"),
-			Self::CpN(n) => write!(f, "  cp {n}"),
-			Self::Neg => write!(f, "  neg"),
-			Self::Ret => write!(f, "  ret"),
-			Self::RetC(cc) => write!(f, "  ret {cc}"),
-			Self::Rst(tgt) => write!(f, "  rst {tgt}"),
-			Self::Pop(rs) => write!(f, "  pop {rs}"),
-			Self::PopAF => write!(f, "  pop AF"),
-			Self::Push(rs) => write!(f, "  push {rs}"),
-			Self::PushAF => write!(f, "  push AF"),
-			Self::IrqEn(false) => write!(f, "  di"),
-			Self::IrqEn(true) => write!(f, "  ei"),
-			Self::In(n) => write!(f, "  in A,({n})"),
-			Self::Out(n) => write!(f, "  out ({n}),A"),
-			Self::Call(nn) => write!(f, "  call {nn}"),
-			Self::CallC(cc, nn) => write!(f, "  call {cc},{nn}"),
-			Self::Bit(n,rs) => write!(f, "bit {n},{rs}"),
-			Self::BitHL(n) => write!(f, "bit {n},(HL)"),
-			Self::Res(n,rs) => write!(f, "res {n},{rs}"),
-			Self::ResHL(n) => write!(f, "res {n},(HL)"),
-			Self::Set(n,rs) => write!(f, "set {n},{rs}"),
-			Self::SetHL(n) => write!(f, "set {n},(HL)"),
+			Self::Nop => write!(f, "\tnop"),
+			Self::Mov(rd,rs) => write!(f, "\tld {rd},{rs}"),
+			Self::Mov8(rd,n) => write!(f, "\tld {rd},{n}"),
+			Self::Mov16(rd,nn) => write!(f, "\tld {rd},{nn}"),
+			Self::MovIX16(nn) => write!(f, "\tld IX,{nn}"),
+			Self::MovSP(nn) => write!(f, "\tld SP,{nn}"),
+			Self::MovAdr => write!(f, "\tld SP,HL"),
+			Self::MovMemInc => write!(f, "\tldi"),
+			Self::MovMemDec => write!(f, "\tldd"),
+			Self::LdAWithBC => write!(f, "\tld A,(BC)"),
+			Self::LdAWithDE => write!(f, "\tld A,(DE)"),
+			Self::LdAMem(nn) => write!(f, "\tld A,({nn})"),
+			Self::LdHL(nn) => write!(f, "\tld HL,({nn})"),
+			Self::LdWithHL(rd) => write!(f, "\tld {rd},(HL)"),
+			Self::LdWithIX(rd,n) => write!(f, "\tld {rd},(IX+{n})"),
+			Self::StAIntoBC => write!(f, "\tld (BC),A"),
+			Self::StAIntoDE => write!(f, "\tld (DE),A"),
+			Self::StAMem(nn) => write!(f, "\tld ({nn}),A"),
+			Self::StHL(nn) => write!(f, "\tld ({nn}),HL"),
+			Self::StIntoHL(rs) => write!(f, "\tld (HL),{rs}"),
+			Self::StIntoIX(rs,n) => write!(f, "\tld (IX+{n}),{rs}"),
+			Self::St8(n) => write!(f, "\tld (HL),{n}"),
+			Self::StIX8(d,n) => write!(f, "\tld (IX+{d}),{n}"),
+			Self::Inc(rd) => write!(f, "\tinc {rd}"),
+			Self::Inc16(rd) => write!(f, "\tinc {rd}"),
+			Self::IncSP => write!(f, "\tinc SP"),
+			Self::IncMem => write!(f, "\tinc (HL)"),
+			Self::Dec(rd) => write!(f, "\tdec {rd}"),
+			Self::Dec16(rd) => write!(f, "\tdec {rd}"),
+			Self::DecSP => write!(f, "\tdec SP"),
+			Self::DecMem => write!(f, "\tdec (HL)"),
+			Self::DJNZ(d) => write!(f, "\tdjnz {d}"),
+			Self::Jr(d) => write!(f, "\tjr {d}"),
+			Self::JrC(d) => write!(f, "\tjr C,{d}"),
+			Self::JrZ(d) => write!(f, "\tjr Z,{d}"),
+			Self::JrNC(d) => write!(f, "\tjr NC,{d}"),
+			Self::JrNZ(d) => write!(f, "\tjr NZ,{d}"),
+			Self::Jp(nn) => write!(f, "\tjp {nn}"),
+			Self::JpHL => write!(f, "\tjp (HL)"),
+			Self::JpC(cc, nn) => write!(f, "\tjp {cc},{nn}"),
+			Self::Add16(rs) => write!(f, "\tadd HL,{rs}"),
+			Self::AddSP => write!(f, "\tadd HL,SP"),
+			Self::Add(rs) => write!(f, "\tadd {rs}"),
+			Self::AddMem => write!(f, "\tadd (HL)"),
+			Self::AddN(n) => write!(f, "\tadd {n}"),
+			Self::AddIX(n) => write!(f, "\tadd (IX+{n})"),
+			Self::AddIXSP => write!(f, "\tadd IX,SP"),
+			Self::AdC(rs) => write!(f, "\tadc {rs}"),
+			Self::AdCMem => write!(f, "\tadc (HL)"),
+			Self::AdCN(n) => write!(f, "\tadc {n}"),
+			Self::AdCIX(n) => write!(f, "\tadc (IX+{n})"),
+			Self::Sub(rs) => write!(f, "\tsub {rs}"),
+			Self::SubMem => write!(f, "\tsub (HL)"),
+			Self::SubN(n) => write!(f, "\tsub {n}"),
+			Self::SubIX(n) => write!(f, "\tsub (IX+{n})"),
+			Self::SbC(rs) => write!(f, "\tsbc {rs}"),
+			Self::SbCMem => write!(f, "\tsbc (HL)"),
+			Self::SbCN(n) => write!(f, "\tsbc {n}"),
+			Self::SbCIX(n) => write!(f, "\tsbc (IX+{n})"),
+			Self::Rlc(rd) => write!(f, "\trlc {rd}"),
+			Self::RlcHL => write!(f, "\trlc (HL)"),
+			Self::Rl(rd) => write!(f, "\trl {rd}"),
+			Self::RlHL => write!(f, "\trl (HL)"),
+			Self::Rrc(rd) => write!(f, "\trrc {rd}"),
+			Self::RrcHL => write!(f, "\trrc (HL)"),
+			Self::Rr(rd) => write!(f, "\trr {rd}"),
+			Self::RrHL => write!(f, "\trr (HL)"),
+			Self::Sla(rd) => write!(f, "\tsla {rd}"),
+			Self::SlaHL => write!(f, "\tsla (HL)"),
+			Self::Sra(rd) => write!(f, "\tsra {rd}"),
+			Self::SraHL => write!(f, "\tsra (HL)"),
+			Self::Sll(rd) => write!(f, "\tsll {rd}"),
+			Self::SllHL => write!(f, "\tsll (HL)"),
+			Self::Srl(rd) => write!(f, "\tsrl {rd}"),
+			Self::SrlHL => write!(f, "\tsrl (HL)"),
+			Self::DAA => write!(f, "\tdaa"),
+			Self::Cpl => write!(f, "\tcpl"),
+			Self::SCF => write!(f, "\tscf"),
+			Self::CCF => write!(f, "\tccf"),
+			Self::Exx => write!(f, "\texx"),
+			Self::ExAF => write!(f, "\tex AF,AF'"),
+			Self::ExSP => write!(f, "\tex (SP),HL"),
+			Self::ExDE => write!(f, "\tex DE,HL"),
+			Self::Halt => write!(f, "\thalt"),
+			Self::And(rs) => write!(f, "\tand {rs}"),
+			Self::AndMem => write!(f, "\tand (HL)"),
+			Self::AndN(n) => write!(f, "\tand {n}"),
+			Self::AndIX(n) => write!(f, "\tand (IX+{n})"),
+			Self::Xor(rs) => write!(f, "\txor {rs}"),
+			Self::XorMem => write!(f, "\txor (HL)"),
+			Self::XorN(n) => write!(f, "\txor {n}"),
+			Self::XorIX(n) => write!(f, "\txor (IX+{n})"),
+			Self::Or(rs) => write!(f, "\tor {rs}"),
+			Self::OrMem => write!(f, "\tor (HL)"),
+			Self::OrN(n) => write!(f, "\tor {n}"),
+			Self::OrIX(n) => write!(f, "\tor (IX+{n})"),
+			Self::Cp(rs) => write!(f, "\tcp {rs}"),
+			Self::CpMem => write!(f, "\tcp (HL)"),
+			Self::CpN(n) => write!(f, "\tcp {n}"),
+			Self::CpIX(n) => write!(f, "\tcp (IX+{n})"),
+			Self::Neg => write!(f, "\tneg"),
+			Self::Ret => write!(f, "\tret"),
+			Self::RetC(cc) => write!(f, "\tret {cc}"),
+			Self::Rst(tgt) => write!(f, "\trst {tgt}"),
+			Self::Pop(rs) => write!(f, "\tpop {rs}"),
+			Self::PopAF => write!(f, "\tpop AF"),
+			Self::Push(rs) => write!(f, "\tpush {rs}"),
+			Self::PushAF => write!(f, "\tpush AF"),
+			Self::IrqEn(false) => write!(f, "\tdi"),
+			Self::IrqEn(true) => write!(f, "\tei"),
+			Self::In(n) => write!(f, "\tin A,({n})"),
+			Self::Out(n) => write!(f, "\tout ({n}),A"),
+			Self::Call(nn) => write!(f, "\tcall {nn}"),
+			Self::CallC(cc, nn) => write!(f, "\tcall {cc},{nn}"),
+			Self::Bit(n,rs) => write!(f, "\tbit {n},{rs}"),
+			Self::BitHL(n) => write!(f, "\tbit {n},(HL)"),
+			Self::Res(n,rs) => write!(f, "\tres {n},{rs}"),
+			Self::ResHL(n) => write!(f, "\tres {n},(HL)"),
+			Self::Set(n,rs) => write!(f, "\tset {n},{rs}"),
+			Self::SetHL(n) => write!(f, "\tset {n},(HL)"),
 		}
 	}
 }

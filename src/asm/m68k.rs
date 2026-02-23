@@ -1,7 +1,7 @@
 
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result};
 
-use crate::asm::LabelGenerator;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::parser::Type;
 use crate::tac::{Data as TacData, Location, TAC};
@@ -16,82 +16,67 @@ fn get_arithmetic_size(typ: &Type) -> Sz {
 	}
 }
 
-pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
-	let mut reg_allocator = super::Allocator::new(&[
-		Data::D0, Data::D1, Data::D2, Data::D3, Data::D4, Data::D5, Data::D6,
-	]);
-	let intervals = reg_allocator.eval(&tac_data.instructions);
+// The base address for the variable stack
+const VAR_SP: Addr = Addr::A6;
+const TL: Data = Data::D6;
+const TR: Data = Data::D7;
 
-	let mut label_gen = LabelGenerator::new(tac_data.next_label);
+pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
+	let registers = super::allocate(
+		&[ Data::D0, Data::D1, Data::D2, Data::D3, Data::D4, Data::D5 ],
+		&tac_data.instructions,
+	);
+
 	let mut data = vec![
 		Asm::Label(proc_name.to_string()),
 	];
 
-	// The base address for the variable stack
-	const VAR_SP: Addr = Addr::A6;
-
 	if proc_name == "main" {
+		data.push(Asm::Comment("Setup stack pointer".into()));
 		data.push(Asm::Move(Sz::L, EA::Imm(stack_addr as i32), EA::Adr(VAR_SP)));
 	}
 
 	for tac in &tac_data.instructions {
 		match tac {
-			TAC::BinOp { op, typ, vr0, vr1, vr2 } => {
-				let sz = Sz::L; //get_arithmetic_size(typ);
-				// TODO - srenshaw - These can fail, so we'll need to check for memory locations as well
-				let r0_int = &intervals[vr0];
-				let r0 = reg_allocator.registers[r0_int];
-				let r1_int = &intervals[vr1];
-				let r1 = reg_allocator.registers[r1_int];
-				let r2_int = &intervals[vr2];
-				let r2 = reg_allocator.registers[r2_int];
+			TAC::BinOp { op, lhs, rhs, dst } => {
+				data.push(Asm::Comment(format!("{lhs:?} {op} {rhs:?} -> {dst:?}")));
 
 				match op {
 					BinaryOp::Add => {
-						if r0 == r1 && r0 == r2 {
-							// All equal
-							// r += r
-							data.push(Asm::add(sz, r2, r2));
-						} else if r0 == r1 {
-							// r2 varies
-							// r2 = r0 + r0
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(Asm::add(sz, r2, r2));
-						} else if r0 == r2 {
-							// r1 varies
-							// r2 += r1
-							data.push(Asm::add(sz, r1, r2));
-						} else if r1 == r2 {
-							// r0 varies
-							// r2 += r0
-							data.push(Asm::add(sz, r0, r2));
-						} else {
-							// All vary
-							// r2 = r0
-							// r2 += r1
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(Asm::add(sz, r1, r2));
-						}
+						let (ea_lhs, lsz, is_lneg) = get_src_from_location(&registers, lhs);
+						let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
+						let (ea_dst, dsz,_) = get_dst_from_location(&registers, dst);
+
+						let msz = lsz.max(rsz).max(dsz);
+
+						data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
+						extend_register(lsz, msz, is_lneg, TL, &mut data);
+
+						data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+						extend_register(rsz, msz, is_rneg, TR, &mut data);
+
+						data.push(Asm::Add1(msz, EA::Dat(TR), TL));
+						data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
 					}
 
 					BinaryOp::Sub => {
-						if r0 == r1 {
-							// r2 varies or all equal
-							data.push(Asm::Clr(sz, EA::Dat(r2)));
-						} else if r0 == r2 {
-							// r1 varies
-							data.push(Asm::sub(sz, r1, r2));
-						} else if r1 == r2 {
-							// TODO - srenshaw - If r0 dies here, we can optimize this
-							// r0 varies
-							data.push(Asm::Move(sz, EA::Dat(r1), EA::Dat(Data::D7)));
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(Asm::sub(sz, Data::D7, r2));
-						} else {
-							// All vary
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(Asm::sub(sz, r1, r2));
+						let (ea_lhs, szl,_) = get_src_from_location(&registers, lhs);
+						let (ea_rhs, szr,_) = get_src_from_location(&registers, rhs);
+						let (ea_dst, szd,_) = get_dst_from_location(&registers, dst);
+
+						debug_assert!(szd >= szl && szd >= szr);
+
+						data.push(Asm::Move(szd, EA::Imm(0), EA::Dat(TL)));
+						if szl <= szr {
+							data.push(Asm::Move(szl, ea_lhs, EA::Dat(TL)));
+							data.push(Asm::Sub1(szr, ea_rhs, TL));
+						} else /* szl > szr */ {
+							data.push(Asm::Move(szr, ea_rhs, EA::Dat(TL)));
+							data.push(Asm::Neg(szr, EA::Dat(TL)));
+							data.push(Asm::Add1(szl, ea_lhs, TL));
 						}
+
+						data.push(Asm::Move(szd, EA::Dat(TL), ea_dst));
 					}
 
 					// 15*23
@@ -103,80 +88,60 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 					// = (1*2)*100 + (1*3 + 5*2)*10 + 5*3
 					// -> (h1*h2)<<32 + (h1*l2 + l1*h2)<<16 + l1*l2
 					BinaryOp::Mul => {
-						let mul = if typ.is_signed_integer() { Asm::MulS } else { Asm::MulU };
+						let (ea_lhs, lsz, is_lneg) = get_src_from_location(&registers, lhs);
+						let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
+						let (ea_dst, dsz, is_dneg) = get_dst_from_location(&registers, dst);
 
-						if r0 == r1 && r0 == r2 {
-							// All equal
-							// r = r * r
-							data.push(mul(EA::Dat(r2), r2));
-						} else if r0 == r1 {
-							// r2 varies
-							// r2 = r0 * r0
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(mul(EA::Dat(r2), r2));
-						} else if r0 == r2 {
-							// r1 varies
-							// r2 *= r1
-							data.push(mul(EA::Dat(r1), r2));
-						} else if r1 == r2 {
-							// r0 varies
-							// r2 *= r0
-							data.push(mul(EA::Dat(r0), r2));
+						debug_assert!(lsz < Sz::L);
+						debug_assert!(rsz < Sz::L);
+
+						data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
+						extend_register(lsz, Sz::W, is_lneg, TL, &mut data);
+
+						data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+						extend_register(rsz, Sz::W, is_rneg, TR, &mut data);
+
+						if is_dneg {
+							data.push(Asm::MulS(EA::Dat(TR), TL));
 						} else {
-							// All vary
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(mul(EA::Dat(r1), r2));
+							data.push(Asm::MulU(EA::Dat(TR), TL));
 						}
+
+						data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
 					}
 
 					BinaryOp::Div | BinaryOp::Mod => {
-						let div = if typ.is_signed_integer() { Asm::DivS } else { Asm::DivU };
+						let (ea_lhs, szl, is_lneg) = get_src_from_location(&registers, lhs);
+						let (ea_rhs, szr,_) = get_src_from_location(&registers, rhs);
+						let (ea_dst, szd, is_dneg) = get_dst_from_location(&registers, dst);
 
-						if r0 == r1 && r0 == r2 {
-							// All equal
-							// r = r / r
-							let trap_label = label_gen.next(proc_name);
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Bcc(Cond::NE, trap_label.clone()));
-							// Force a div-by-zero
-							data.push(Asm::Clr(sz, EA::Dat(r2)));
-							data.push(Asm::DivS(EA::Dat(r2), r2));
-							data.push(Asm::Label(trap_label));
-							data.push(Asm::Move(sz, EA::Imm(1), EA::Dat(r2)));
-						} else if r0 == r1 {
-							// r2 varies
-							// r2 = r0 / r0
-							let trap_label = label_gen.next(proc_name);
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Bcc(Cond::NE, trap_label.clone()));
-							// Force a div-by-zero
-							data.push(Asm::Clr(sz, EA::Dat(r2)));
-							data.push(Asm::DivS(EA::Dat(r2), r2));
-							data.push(Asm::Label(trap_label));
-							data.push(Asm::Move(sz, EA::Imm(1), EA::Dat(r2)));
-						} else if r0 == r2 {
-							// r1 varies
-							// r2 /= r1
-							data.push(div(EA::Dat(r1), r2));
-						} else if r1 == r2 {
-							// r0 varies
-							// r2 = r0 / r2
-							data.push(Asm::Move(sz, EA::Dat(r2), EA::Dat(Data::D7)));
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(div(EA::Dat(Data::D7), r2));
+						debug_assert!(Sz::L > szr);
+						debug_assert!(szd >= szl && szd >= szr);
+
+						data.push(Asm::Move(szl, ea_lhs, EA::Dat(TL)));
+						extend_register(szl, Sz::L, is_lneg, TL, &mut data);
+						if is_dneg {
+							data.push(Asm::DivS(ea_rhs, TL));
 						} else {
-							// All vary
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(div(EA::Dat(r1), r2));
+							data.push(Asm::DivU(ea_rhs, TL));
 						}
 
 						// r2 = rem
 						if *op == BinaryOp::Mod {
-							data.push(Asm::Swap(r2));
+							data.push(Asm::Swap(TL));
 						}
+
+						data.push(Asm::Move(Sz::W, EA::Dat(TL), ea_dst));
 					}
 
 					BinaryOp::ShL => {
+						let sz = Sz::L;
+						let Location::VReg(vr0,_) = lhs else { panic!() };
+						let Location::VReg(vr1,_) = rhs else { panic!() };
+						let Location::VReg(vr2,typ) = dst else { panic!() };
+						let r0 = registers[vr0];
+						let r1 = registers[vr1];
+						let r2 = registers[vr2];
 						let shl = if typ.is_signed_integer() { Asm::Asl } else { Asm::Lsl };
 
 						// (A & B) | B
@@ -195,9 +160,9 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 						} else if r1 == r2 {
 							// r0 varies
 							// r2 = r0 << r2
-							data.push(Asm::Move(sz, EA::Dat(r2), EA::Dat(Data::D7)));
+							data.push(Asm::Move(sz, EA::Dat(r2), EA::Dat(TL)));
 							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(shl(Data::D7, r2));
+							data.push(shl(TL, r2));
 						} else {
 							// All varies
 							// r2 = r0
@@ -208,6 +173,13 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 					}
 
 					BinaryOp::ShR => {
+						let sz = Sz::L;
+						let Location::VReg(vr0,_) = lhs else { panic!() };
+						let Location::VReg(vr1,_) = rhs else { panic!() };
+						let Location::VReg(vr2,typ) = dst else { panic!() };
+						let r0 = registers[vr0];
+						let r1 = registers[vr1];
+						let r2 = registers[vr2];
 						// r2 >>= r1
 						let shr = if typ.is_signed_integer() { Asm::Asr } else { Asm::Lsr };
 
@@ -227,9 +199,9 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 						} else if r1 == r2 {
 							// r0 varies
 							// r2 = r0 >> r2
-							data.push(Asm::Move(sz, EA::Dat(r1), EA::Dat(Data::D7)));
+							data.push(Asm::Move(sz, EA::Dat(r1), EA::Dat(TL)));
 							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(shr(Data::D7, r2));
+							data.push(shr(TL, r2));
 						} else {
 							// All varies
 							// r2 = r0 >> r1
@@ -238,205 +210,27 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 						}
 					}
 
-					BinaryOp::BinAnd => {
-						if r0 == r1 && r0 == r2 {
-							// r = r & r
-							// do nothing
-						} else if r0 == r1 {
-							// r2 = r0 & r0
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-						} else if r0 == r2 {
-							// r2 = r2 & r1
-							data.push(Asm::and(sz, r1, r2));
-						} else if r1 == r2 {
-							// r2 = r0 & r2
-							data.push(Asm::and(sz, r0, r2));
-						} else {
-							// r2 = r0 & r1
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(Asm::and(sz, r1, r2));
-						}
-					}
-
-					BinaryOp::BinOr => {
-						if r0 == r1 && r0 == r2 {
-							// r = r | r
-							// do nothing
-						} else if r0 == r1 {
-							// r2 = r0 | r0
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-						} else if r0 == r2 {
-							// r2 = r0 | r1
-							data.push(Asm::or(sz, r1, r2));
-						} else if r1 == r2 {
-							// r2 = r0 | r2
-							data.push(Asm::or(sz, r0, r2));
-						} else {
-							// r2 = r0 | r1
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(Asm::or(sz, r1, r2));
-						}
-					}
-
-					BinaryOp::BinXor => {
-						if r0 == r1 && r0 == r2 {
-							// r = r ^ r
-							data.push(Asm::Clr(sz, EA::Dat(r2)));
-						} else if r0 == r1 {
-							// r2 = r0 ^ r0
-							data.push(Asm::Clr(sz, EA::Dat(r2)));
-						} else if r0 == r2 {
-							// r2 = r2 ^ r1
-							data.push(Asm::eor(sz, r1, r2));
-						} else if r1 == r2 {
-							// r2 = r0 ^ r2
-							data.push(Asm::eor(sz, r0, r2));
-						} else {
-							// r2 = r0 ^ r1
-							data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r2)));
-							data.push(Asm::eor(sz, r1, r2));
-						}
-					}
-
-					BinaryOp::LogAnd => {
-						if r0 == r1 && r0 == r2 {
-							// r2 = r2 && r2
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-						} else if r0 == r1 {
-							// r2 = r0 && r0
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-						} else if r0 == r2 {
-							// r2 = r2 && r1
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::Tst(sz, EA::Dat(r1)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::and(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						} else if r1 == r2 {
-							// r2 = r0 && r2
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::and(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						} else {
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::Tst(sz, EA::Dat(r1)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::and(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						}
-					}
-
-					BinaryOp::LogOr => {
-						if r0 == r1 && r0 == r2 {
-							// r2 = r2 || r2
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-						} else if r0 == r1 {
-							// r2 = r0 || r0
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-						} else if r0 == r2 {
-							// r2 = r2 || r1
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::Tst(sz, EA::Dat(r1)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::or(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						} else if r1 == r2 {
-							// r2 = r2 || r0
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::or(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						} else {
-							// r2 = r0 || r1
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::Tst(sz, EA::Dat(r1)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::or(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						}
-					}
-
-					BinaryOp::LogXor => {
-						if r0 == r1 && r0 == r2 {
-							// r2 = r2 ^^ r2
-							data.push(Asm::Clr(sz, EA::Dat(r2)));
-						} else if r0 == r1 {
-							// r2 = r0 ^^ r0
-							data.push(Asm::Clr(sz, EA::Dat(r2)));
-						} else if r0 == r2 {
-							// r2 = r2 ^^ r1
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::Tst(sz, EA::Dat(r1)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::eor(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						} else if r1 == r2 {
-							// r2 = r0 ^^ r2
-							data.push(Asm::Tst(sz, EA::Dat(r2)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::eor(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						} else {
-							// r2 = r0 ^^ r1
-							data.push(Asm::Tst(sz, EA::Dat(r0)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(r2)));
-							data.push(Asm::Tst(sz, EA::Dat(r1)));
-							data.push(Asm::Scc(Cond::NE, EA::Dat(Data::D7)));
-							data.push(Asm::eor(Sz::L, Data::D7, r2));
-							data.push(Asm::Neg(Sz::B, EA::Dat(r2)));
-						}
-					}
-
-					BinaryOp::CmpEQ => {
-						output_cmp(r0, r1, r2, sz, Cond::EQ, Cond::T, &mut data);
-					}
-
-					BinaryOp::CmpNE => {
-						output_cmp(r0, r1, r2, sz, Cond::NE, Cond::F, &mut data);
-					}
-
-					BinaryOp::CmpGE => {
-						let cc = if typ.is_signed_integer() { Cond::GE } else { Cond::CC };
-						output_cmp(r0, r1, r2, sz, cc, Cond::T, &mut data);
-					}
-
-					BinaryOp::CmpGT => {
-						let cc = if typ.is_signed_integer() { Cond::GT } else { Cond::HI };
-						output_cmp(r0, r1, r2, sz, cc, Cond::F, &mut data);
-					}
-
-					BinaryOp::CmpLE => {
-						let cc = if typ.is_signed_integer() { Cond::LE } else { Cond::LS };
-						output_cmp(r0, r1, r2, sz, cc, Cond::T, &mut data);
-					}
-
-					BinaryOp::CmpLT => {
-						let cc = if typ.is_signed_integer() { Cond::LT } else { Cond::CS };
-						output_cmp(r0, r1, r2, sz, cc, Cond::F, &mut data);
-					}
+					BinaryOp::BinAnd => output_binary_logic(&registers, lhs, rhs, dst, Asm::And2, &mut data),
+					BinaryOp::BinOr => output_binary_logic(&registers, lhs, rhs, dst, Asm::Or2, &mut data),
+					BinaryOp::BinXor => output_binary_logic(&registers, lhs, rhs, dst, Asm::Eor, &mut data),
+					BinaryOp::LogAnd => output_boolean_logic(&registers, lhs, rhs, dst, Asm::And2, &mut data),
+					BinaryOp::LogOr => output_boolean_logic(&registers, lhs, rhs, dst, Asm::Or2, &mut data),
+					BinaryOp::LogXor => output_boolean_logic(&registers, lhs, rhs, dst, Asm::Eor, &mut data),
+					BinaryOp::CmpEQ => output_cmp(&registers, lhs, rhs, dst, Cond::EQ, Cond::EQ, &mut data),
+					BinaryOp::CmpNE => output_cmp(&registers, lhs, rhs, dst, Cond::NE, Cond::NE, &mut data),
+					BinaryOp::CmpGE => output_cmp(&registers, lhs, rhs, dst, Cond::GE, Cond::CC, &mut data),
+					BinaryOp::CmpGT => output_cmp(&registers, lhs, rhs, dst, Cond::GT, Cond::HI, &mut data),
+					BinaryOp::CmpLE => output_cmp(&registers, lhs, rhs, dst, Cond::LE, Cond::LS, &mut data),
+					BinaryOp::CmpLT => output_cmp(&registers, lhs, rhs, dst, Cond::LT, Cond::CS, &mut data),
 				}
 			}
 
-			TAC::UnOp { op, typ, vr0, vr1 } => {
+			TAC::UnOp { op, typ: _, vr0, vr1 } => {
+				data.push(Asm::Comment(format!("{op}{vr0} -> {vr1}")));
+
 				let sz = Sz::L; //get_arithmetic_size(typ);
-				let r0 = reg_allocator.registers[&intervals[vr0]];
-				let r1 = reg_allocator.registers[&intervals[vr1]];
+				let r0 = registers[vr0];
+				let r1 = registers[vr1];
 
 				data.push(Asm::Move(sz, EA::Dat(r0), EA::Dat(r1)));
 				match op {
@@ -446,35 +240,11 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 			}
 
 			TAC::Move { src, dst } => {
-				let ea_src = match src {
-					Location::Addr(addr,_) => {
-						EA::AbL(*addr as i32)
-					}
-					Location::Const(val,_) => {
-						EA::Imm(*val as i32)
-					}
-					Location::Stack(idx,_) => {
-						EA::Dsp((idx * 4) as i16, VAR_SP)
-					}
-					Location::VReg(vr,_) => {
-						EA::Dat(reg_allocator.registers[&intervals[vr]])
-					}
-				};
+				data.push(Asm::Comment(format!("{src:?} -> {dst:?}")));
 
-				let ea_dst = match dst {
-					Location::Addr(addr,_) => {
-						EA::AbL(*addr as i32)
-					}
-					Location::Const(..) => panic!("Can't store into an immediate"),
-					Location::Stack(idx,_) => {
-						EA::Dsp((idx * 4) as i16, VAR_SP)
-					}
-					Location::VReg(vr,_) => {
-						EA::Dat(reg_allocator.registers[&intervals[vr]])
-					}
-				};
-
-				let sz = Sz::L;//get_arithmetic_size(typ);
+				let (ea_src,ssz,_) = get_src_from_location(&registers, src);
+				let (ea_dst,dsz,_) = get_dst_from_location(&registers, dst);
+				let sz = ssz.min(dsz);
 				data.push(Asm::Move(sz, ea_src, ea_dst));
 			}
 
@@ -487,14 +257,13 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 			}
 
 			TAC::JumpIf { lbl, vr } => {
-				let r = reg_allocator.registers[&intervals[vr]];
-				data.push(Asm::Tst(Sz::L, EA::Dat(r)));
-				data.push(Asm::Bcc(Cond::EQ, format!("{proc_name}_{lbl}")));
+				data.push(Asm::Tst(Sz::L, EA::Dat(registers[vr])));
+				data.push(Asm::Bcc(Cond::NE, format!("{proc_name}_{lbl}")));
 			}
 
 			TAC::Return(with_value) => {
 				if let Some(vr) = with_value {
-					let r = reg_allocator.registers[&intervals[vr]];
+					let r = registers[vr];
 					if r != Data::D0 {
 						data.push(Asm::Move(Sz::W, EA::Dat(r), EA::Dat(Data::D0)));
 					}
@@ -507,33 +276,150 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 	data
 }
 
-fn output_cmp(
-	r0: Data, r1: Data, r2: Data,
-	sz: Sz, cc: Cond, def: Cond,
-	data: &mut Vec<Asm>,
-) {
-	if r0 == r1 && r0 == r2 {
-		// r2 = r2 > r2
-		data.push(Asm::Scc(def, EA::Dat(r2)));
-	} else if r0 == r1 {
-		// r2 = r0 > r0
-		data.push(Asm::Scc(def, EA::Dat(r2)));
-	} else if r0 == r2 {
-		// r2 = r2 > r1
-		data.push(Asm::Cmp(sz, EA::Dat(r1), r2));
-		data.push(Asm::Scc(cc, EA::Dat(r2)));
-	} else if r1 == r2 {
-		// r2 = r0 > r2
-		data.push(Asm::Cmp(sz, EA::Dat(r2), r0));
-		data.push(Asm::Scc(cc, EA::Dat(r2)));
-	} else {
-		// r2 = r0 > r1
-		data.push(Asm::Cmp(sz, EA::Dat(r1), r0));
-		data.push(Asm::Scc(cc, EA::Dat(r2)));
+fn get_src_from_location(regs: &HashMap<u32, Data>, loc: &Location) -> (EA, Sz, bool) {
+	match loc {
+		Location::Addr(adr,typ) => {
+			let ea = if *adr < i16::MAX as u32 {
+				EA::AbW(*adr as i16)
+			} else {
+				EA::AbL(*adr as i32)
+			};
+			(ea, get_arithmetic_size(typ), typ.is_signed_integer())
+		}
+		Location::Const(val,typ) => {
+			(EA::Imm(*val as i32), get_arithmetic_size(typ), typ.is_signed_integer())
+		}
+		Location::Stack(idx,typ) => {
+			(EA::Dsp(*idx as i16 * 4, VAR_SP), get_arithmetic_size(typ), typ.is_signed_integer())
+		}
+		Location::VReg(vr,typ) => {
+			(EA::Dat(regs[vr]), get_arithmetic_size(typ), typ.is_signed_integer())
+		}
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+fn get_dst_from_location(regs: &HashMap<u32, Data>, loc: &Location) -> (EA, Sz, bool) {
+	match loc {
+		Location::Addr(adr,typ) => {
+			let ea = if *adr < i16::MAX as u32 {
+				EA::AbW(*adr as i16)
+			} else {
+				EA::AbL(*adr as i32)
+			};
+			(ea, get_arithmetic_size(typ), typ.is_signed_integer())
+		}
+		Location::Const(..) => panic!("cannot have a constant as a destination"),
+		Location::Stack(idx,typ) => {
+			(EA::Dsp(*idx as i16 * 4, VAR_SP), get_arithmetic_size(typ), typ.is_signed_integer())
+		}
+		Location::VReg(vr,typ) => {
+			(EA::Dat(regs[vr]), get_arithmetic_size(typ), typ.is_signed_integer())
+		}
+	}
+}
+
+fn extend_register(from: Sz, to: Sz, is_signed: bool, reg: Data, data: &mut Vec<Asm>) {
+	if is_signed {
+		match (from,to) {
+			(Sz::B, Sz::W) => {
+				data.push(Asm::Ext(Sz::W, reg));
+			}
+			(Sz::B, Sz::L) => {
+				data.push(Asm::Ext(Sz::W, reg));
+				data.push(Asm::Ext(Sz::L, reg));
+			}
+			(Sz::W, Sz::L) => {
+				data.push(Asm::Ext(Sz::L, reg));
+			}
+			_ => {}
+		}
+	} else {
+		match (from,to) {
+			(Sz::B, Sz::W) => {
+				data.push(Asm::And1(Sz::W, EA::Imm(0xFF), reg));
+			}
+			(Sz::B, Sz::L) => {
+				data.push(Asm::And1(Sz::L, EA::Imm(0xFF), reg));
+			}
+			(Sz::W, Sz::L) => {
+				data.push(Asm::And1(Sz::L, EA::Imm(0xFFFF), reg));
+			}
+			_ => {}
+		}
+	}
+}
+
+fn output_binary_logic(
+	registers: &HashMap<u32, Data>,
+	lhs: &Location, rhs: &Location, dst: &Location,
+	logic_fn: fn(Sz,Data,EA) -> Asm,
+	data: &mut Vec<Asm>,
+) {
+	let (ea_lhs, lsz, is_lneg) = get_src_from_location(&registers, lhs);
+	let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
+	let (ea_dst, dsz,_) = get_dst_from_location(&registers, dst);
+
+	debug_assert!(dsz >= lsz && dsz >= rsz);
+
+	data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
+	extend_register(lsz, dsz, is_lneg, TL, data);
+
+	data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+	extend_register(rsz, dsz, is_rneg, TR, data);
+
+	data.push(logic_fn(dsz, TR, EA::Dat(TL)));
+	data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
+}
+
+fn output_boolean_logic(
+	registers: &HashMap<u32, Data>,
+	lhs: &Location, rhs: &Location, dst: &Location,
+	logic_fn: fn(Sz,Data,EA) -> Asm,
+	data: &mut Vec<Asm>,
+) {
+	let (ea_lhs, lsz,_) = get_src_from_location(&registers, lhs);
+	let (ea_rhs, rsz,_) = get_src_from_location(&registers, rhs);
+	let (ea_dst, dsz, is_dneg) = get_dst_from_location(&registers, dst);
+
+	data.push(Asm::Tst(lsz, ea_lhs));
+	data.push(Asm::Scc(Cond::NE, EA::Dat(TL)));
+
+	data.push(Asm::Tst(rsz, ea_rhs));
+	data.push(Asm::Scc(Cond::NE, EA::Dat(TR)));
+
+	data.push(logic_fn(Sz::B, TR, EA::Dat(TL)));
+	extend_register(Sz::B, dsz, is_dneg, TL, data);
+
+	data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
+}
+
+fn output_cmp(
+	registers: &HashMap<u32, Data>,
+	lhs: &Location, rhs: &Location, dst: &Location,
+	signed_cc: Cond, unsigned_cc: Cond,
+	data: &mut Vec<Asm>,
+) {
+	let (ea_lhs, lsz, is_lneg) = get_src_from_location(&registers, lhs);
+	let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
+	let (ea_dst, dsz, is_signed) = get_dst_from_location(&registers, dst);
+
+	let cc = if is_signed { signed_cc } else { unsigned_cc };
+	let sz = lsz.max(rsz).max(dsz);
+
+	data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
+	extend_register(lsz, sz, is_lneg, TL, data);
+
+	data.push(Asm::Move(rsz, ea_rhs, EA::Dat(TR)));
+	extend_register(rsz, sz, is_rneg, TR, data);
+
+	data.push(Asm::Cmp(sz, EA::Dat(TR), TL));
+	data.push(Asm::Scc(cc, EA::Dat(TL)));
+	extend_register(Sz::B, dsz, is_signed, TL, data);
+
+	data.push(Asm::Move(dsz, EA::Dat(TL), ea_dst));
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Sz { B, W, L }
 impl Display for Sz {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -641,14 +527,13 @@ impl Display for EA {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Cond { CC, CS, EQ, F, GE, GT, HI, LE, LS, LT, NE, T }
+pub enum Cond { CC, CS, EQ, GE, GT, HI, LE, LS, LT, NE }
 impl Display for Cond {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		match self {
 			Self::CC => write!(f, "cc"),
 			Self::CS => write!(f, "cs"),
 			Self::EQ => write!(f, "eq"),
-			Self::F => write!(f, "f"),
 			Self::GE => write!(f, "ge"),
 			Self::GT => write!(f, "gt"),
 			Self::HI => write!(f, "hi"),
@@ -656,7 +541,6 @@ impl Display for Cond {
 			Self::LS => write!(f, "ls"),
 			Self::LT => write!(f, "lt"),
 			Self::NE => write!(f, "ne"),
-			Self::T => write!(f, "t"),
 		}
 	}
 }
@@ -664,6 +548,8 @@ impl Display for Cond {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Asm {
+	Comment(String),
+
 	Label(String),
 
 	Add1(Sz,EA,Data),
@@ -688,8 +574,8 @@ pub enum Asm {
 	CmpI(Sz,i32,EA),
 	DivS(EA,Data),
 	DivU(EA,Data),
-	Eor1(Sz,EA,Data),
-	Eor2(Sz,Data,EA),
+	Eor(Sz,Data,EA),
+	Ext(Sz,Data),
 	Lsl(Data,Data),
 	Lsr(Data,Data),
 	Move(Sz,EA,EA),
@@ -712,30 +598,11 @@ pub enum Asm {
 	Tst(Sz,EA),
 }
 
-impl Asm {
-	fn add(sz: Sz, dx: Data, dy: Data) -> Self {
-		Self::Add1(sz, EA::Dat(dx), dy)
-	}
-	fn and(sz: Sz, dx: Data, dy: Data) -> Self {
-		Self::And1(sz, EA::Dat(dx), dy)
-	}
-
-	fn or(sz: Sz, dx: Data, dy: Data) -> Self {
-		Self::Or1(sz, EA::Dat(dx), dy)
-	}
-
-	fn eor(sz: Sz, dx: Data, dy: Data) -> Self {
-		Self::Eor1(sz, EA::Dat(dx), dy)
-	}
-
-	fn sub(sz: Sz, dx: Data, dy: Data) -> Self {
-		Self::Sub1(sz, EA::Dat(dx), dy)
-	}
-}
-
 impl Display for Asm {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		match self {
+			Self::Comment(msg) => write!(f, "\t\t\t; {msg}"),
+
 			Self::Label(label) => write!(f, "{label}:"),
 
 			Self::Add1(sz,ea,d) => write!(f, "\tadd.{sz} {ea},{d}"),
@@ -751,8 +618,8 @@ impl Display for Asm {
 			Self::CmpI(sz,i,ea) => write!(f, "\tcmpi.{sz} #{i},{ea}"),
 			Self::DivS(ea,d) => write!(f, "\tdivs {ea},{d}"),
 			Self::DivU(ea,d) => write!(f, "\tdivu {ea},{d}"),
-			Self::Eor1(sz,ea,d) => write!(f, "\teor.{sz} {ea},{d}"),
-			Self::Eor2(sz,d,ea) => write!(f, "\teor.{sz} {d},{ea}"),
+			Self::Eor(sz,d,ea) => write!(f, "\teor.{sz} {d},{ea}"),
+			Self::Ext(sz,d) => write!(f, "\text.{sz} {d}"),
 			Self::Lsl(dx,dy) => write!(f, "\tlsl {dx},{dy}"),
 			Self::Lsr(dx,dy) => write!(f, "\tlsr {dx},{dy}"),
 			Self::Move(sz,src,dst) => write!(f, "\tmove.{sz} {src},{dst}"),
@@ -802,7 +669,6 @@ mod tests {
 				Cond::CC => !self.c,
 				Cond::CS => self.c,
 				Cond::EQ => self.z,
-				Cond::F => false,
 				Cond::GE => self.n && self.v || !self.n && !self.v,
 				Cond::GT => self.n && self.v && !self.z || !self.v && !self.v && !self.z,
 				Cond::HI => !self.c && !self.z,
@@ -810,7 +676,6 @@ mod tests {
 				Cond::LS => self.c || self.z,
 				Cond::LT => self.n && !self.v || !self.n && self.v,
 				Cond::NE => !self.z,
-				Cond::T => true,
 			}
 		}
 
@@ -822,205 +687,176 @@ mod tests {
 			} != 0;
 		}
 
-		fn get_src(&mut self, sz: &Sz, ea: &EA) -> u32 {
+		fn get_src(&mut self, sz: &Sz, ea: &EA, mask: u16) -> u32 {
 			match ea {
-				EA::Dat(d) => self.d[*d as usize],
-				EA::Adr(_) => unreachable!(),
+				EA::Dat(d) => {
+					if mask & 0x800 > 0 {
+						self.d[*d as usize]
+					} else {
+						panic!("direct data source is invalid")
+					}
+				}
+				EA::Adr(a) => {
+					if mask & 0x400 > 0 {
+						self.a[*a as usize]
+					} else {
+						panic!("direct address source is invalid")
+					}
+				}
 				EA::Ind(a) => {
-					let adr = self.a[*a as usize];
-					self.mem[&adr]
+					if mask & 0x200 > 0 {
+						let adr = self.a[*a as usize];
+						self.mem[&adr]
+					} else {
+						panic!("indirect address source is invalid")
+					}
 				}
 				EA::Pst(a) => {
-					let offset: u32 = sz.into();
-					let adr = &mut self.a[*a as usize];
-					let src = self.mem[adr];
-					*adr += offset;
-					src
+					if mask & 0x100 > 0 {
+						let offset: u32 = sz.into();
+						let adr = &mut self.a[*a as usize];
+						let src = self.mem[adr];
+						*adr += offset;
+						src
+					} else {
+						panic!("post-increment address source is invalid")
+					}
 				}
 				EA::Pre(a) => {
-					let offset: u32 = sz.into();
-					let adr = &mut self.a[*a as usize];
-					*adr -= offset;
-					self.mem[adr]
+					if mask & 0x080 > 0 {
+						let offset: u32 = sz.into();
+						let adr = &mut self.a[*a as usize];
+						*adr -= offset;
+						self.mem[adr]
+					} else {
+						panic!("pre-decrement address source is invalid")
+					}
 				}
 				EA::Dsp(dsp,a) => {
-					let adr = self.a[*a as usize];
-					self.mem[&adr.wrapping_add_signed(*dsp as i32)]
+					if mask & 0x040 > 0 {
+						let adr = self.a[*a as usize];
+						self.mem[&adr.wrapping_add_signed(*dsp as i32)]
+					} else {
+						panic!("indirect address w/ displacement source is invalid")
+					}
 				}
 				EA::Idx(dsp,a,x) => {
-					let adr = self.a[*a as usize];
-					let loc = adr.wrapping_add_signed(*dsp as i32)
-							.wrapping_add(self.a[*x as usize]);
-					self.mem[&loc]
+					if mask & 0x020 > 0 {
+						let adr = self.a[*a as usize];
+						let loc = adr.wrapping_add_signed(*dsp as i32)
+								.wrapping_add(self.a[*x as usize]);
+						self.mem[&loc]
+					} else {
+						panic!("indirect address w/ indexed displacement source is invalid")
+					}
 				}
-				EA::AbL(imm) => self.mem[&(*imm as u32)],
-				EA::AbW(imm) => self.mem[&(*imm as u32)],
-				EA::Imm(imm) => *imm as u32,
+				EA::AbL(imm) => {
+					if mask & 0x010 > 0 {
+						self.mem[&(*imm as u32)]
+					} else {
+						panic!("indirect long absolute source is invalid")
+					}
+				}
+				EA::AbW(imm) => {
+					if mask & 0x008 > 0 {
+						self.mem[&(*imm as u32)]
+					} else {
+						panic!("indirect word absolute source is invalid")
+					}
+				}
+				EA::Imm(imm) => {
+					if mask & 0x004 > 0 {
+						*imm as u32
+					} else {
+						panic!("immediate source is invalid")
+					}
+				}
 			}
 		}
 
-		fn get_dst(&mut self, sz: &Sz, ea: &EA) -> &mut u32 {
+		fn get_dst(&mut self, sz: &Sz, ea: &EA, mask: u16) -> &mut u32 {
 			match ea {
-				EA::Dat(_) => unreachable!(),
-				EA::Adr(_) => unreachable!(),
+				EA::Dat(d) => {
+					if mask & 0x800 > 0 {
+						&mut self.d[*d as usize]
+					} else {
+						panic!("direct data destination is invalid")
+					}
+				}
+				EA::Adr(a) => {
+					if mask & 0x400 > 0 {
+						&mut self.a[*a as usize]
+					} else {
+						panic!("direct address destination is invalid")
+					}
+				}
 				EA::Ind(a) => {
-				let adr = self.a[*a as usize];
-				self.mem.entry(adr).or_default()
-			}
-				EA::Pst(a) => {
-				let offset: u32 = sz.into();
-				let adr = &mut self.a[*a as usize];
-				let dst = self.mem.entry(*adr)
-						.or_default();
-				*adr += offset;
-				dst
-			}
-				EA::Pre(a) => {
-				let offset: u32 = sz.into();
-				let adr = &mut self.a[*a as usize];
-				*adr -= offset;
-				self.mem.entry(*adr).or_default()
-			}
-				EA::Dsp(dsp,a) => {
-				let adr = self.a[*a as usize];
-				self.mem.entry(adr.wrapping_add_signed(*dsp as i32))
-						.or_default()
-			}
-				EA::Idx(dsp,a,x) => {
-				let adr = self.a[*a as usize];
-				let loc = adr.wrapping_add_signed(*dsp as i32)
-						.wrapping_add(self.a[*x as usize]);
-				self.mem.entry(loc).or_default()
-			}
-				EA::AbL(imm) => self.mem
-					.entry(*imm as u32)
-					.or_default(),
-				EA::AbW(imm) => self.mem
-					.entry(*imm as u32)
-					.or_default(),
-				EA::Imm(_) => unreachable!(),
-			}
-		}
-
-		fn get_mv_src(&mut self, sz: &Sz, ea: &EA) -> u32 {
-			match ea {
-				EA::Dat(d) => self.d[*d as usize],
-				EA::Adr(a) => self.a[*a as usize],
-				EA::Ind(a) => {
-					let adr = self.a[*a as usize];
-					self.mem[&adr]
+					if mask & 0x200 > 0 {
+						let adr = self.a[*a as usize];
+						self.mem.entry(adr).or_default()
+					} else {
+						panic!("indirect address destination is invalid")
+					}
 				}
 				EA::Pst(a) => {
-					let offset: u32 = sz.into();
-					let adr = &mut self.a[*a as usize];
-					let src = self.mem[adr];
-					*adr += offset;
-					src
+					if mask & 0x100 > 0 {
+						let offset: u32 = sz.into();
+						let adr = &mut self.a[*a as usize];
+						let dst = self.mem.entry(*adr)
+								.or_default();
+						*adr += offset;
+						dst
+					} else {
+						panic!("post-increment address destination is invalid")
+					}
 				}
 				EA::Pre(a) => {
-					let offset: u32 = sz.into();
-					let adr = &mut self.a[*a as usize];
-					*adr -= offset;
-					self.mem[adr]
+					if mask & 0x080 > 0 {
+						let offset: u32 = sz.into();
+						let adr = &mut self.a[*a as usize];
+						*adr -= offset;
+						self.mem.entry(*adr).or_default()
+					} else {
+						panic!("pre-increment address destination is invalid")
+					}
 				}
 				EA::Dsp(dsp,a) => {
-					let adr = self.a[*a as usize];
-					self.mem[&adr.wrapping_add_signed(*dsp as i32)]
+					if mask & 0x040 > 0 {
+						let adr = self.a[*a as usize];
+						self.mem.entry(adr.wrapping_add_signed(*dsp as i32))
+								.or_default()
+					} else {
+						panic!("indirect address w/ displacement destination is invalid")
+					}
 				}
 				EA::Idx(dsp,a,x) => {
-					let adr = self.a[*a as usize];
-					let loc = adr.wrapping_add_signed(*dsp as i32)
-							.wrapping_add(self.a[*x as usize]);
-					self.mem[&loc]
+					if mask & 0x020 > 0 {
+						let adr = self.a[*a as usize];
+						let loc = adr.wrapping_add_signed(*dsp as i32)
+								.wrapping_add(self.a[*x as usize]);
+						self.mem.entry(loc).or_default()
+					} else {
+						panic!("indirect address w/ indexed displacement destination is invalid")
+					}
 				}
-				EA::AbL(imm) => self.mem[&(*imm as u32)],
-				EA::AbW(imm) => self.mem[&(*imm as u32)],
-				EA::Imm(imm) => *imm as u32,
-			}
-		}
-
-		fn get_mv_dst(&mut self, sz: &Sz, ea: &EA) -> &mut u32 {
-			match ea {
-				EA::Dat(d) => &mut self.d[*d as usize],
-				EA::Adr(a) => &mut self.a[*a as usize],
-				EA::Ind(a) => {
-					let adr = self.a[*a as usize];
-					self.mem.entry(adr).or_default()
+				EA::AbL(imm) => {
+					if mask & 0x010 > 0 {
+						self.mem
+								.entry(*imm as u32)
+								.or_default()
+					} else {
+						panic!("indirect long absolute destination is invalid")
+					}
 				}
-				EA::Pst(a) => {
-					let offset: u32 = sz.into();
-					let adr = &mut self.a[*a as usize];
-					let dst = self.mem.entry(*adr)
-							.or_default();
-					*adr += offset;
-					dst
+				EA::AbW(imm) => {
+					if mask & 0x008 > 0 {
+						self.mem
+								.entry(*imm as u32)
+								.or_default()
+					} else {
+						panic!("indirect word absolute destination is invalid")
+					}
 				}
-				EA::Pre(a) => {
-					let offset: u32 = sz.into();
-					let adr = &mut self.a[*a as usize];
-					*adr -= offset;
-					self.mem.entry(*adr).or_default()
-				}
-				EA::Dsp(dsp,a) => {
-					let adr = self.a[*a as usize];
-					self.mem.entry(adr.wrapping_add_signed(*dsp as i32))
-							.or_default()
-				}
-				EA::Idx(dsp,a,x) => {
-					let adr = self.a[*a as usize];
-					let loc = adr.wrapping_add_signed(*dsp as i32)
-							.wrapping_add(self.a[*x as usize]);
-					self.mem.entry(loc).or_default()
-				}
-				EA::AbL(imm) => self.mem
-						.entry(*imm as u32)
-						.or_default(),
-				EA::AbW(imm) => self.mem
-						.entry(*imm as u32)
-						.or_default(),
-				EA::Imm(_) => unreachable!(),
-			}
-		}
-
-		fn get_scc_dst(&mut self, sz: &Sz, ea: &EA) -> &mut u32 {
-			match ea {
-				EA::Dat(d) => &mut self.d[*d as usize],
-				EA::Adr(_) => unreachable!(),
-				EA::Ind(a) => {
-					let adr = self.a[*a as usize];
-					self.mem.entry(adr).or_default()
-				}
-				EA::Pst(a) => {
-					let offset: u32 = sz.into();
-					let adr = &mut self.a[*a as usize];
-					let dst = self.mem.entry(*adr)
-							.or_default();
-					*adr += offset;
-					dst
-				}
-				EA::Pre(a) => {
-					let offset: u32 = sz.into();
-					let adr = &mut self.a[*a as usize];
-					*adr -= offset;
-					self.mem.entry(*adr).or_default()
-				}
-				EA::Dsp(dsp,a) => {
-					let adr = self.a[*a as usize];
-					self.mem.entry(adr.wrapping_add_signed(*dsp as i32))
-							.or_default()
-				}
-				EA::Idx(dsp,a,x) => {
-					let adr = self.a[*a as usize];
-					let loc = adr.wrapping_add_signed(*dsp as i32)
-							.wrapping_add(self.a[*x as usize]);
-					self.mem.entry(loc).or_default()
-				}
-				EA::AbL(imm) => self.mem
-						.entry(*imm as u32)
-						.or_default(),
-				EA::AbW(imm) => self.mem
-						.entry(*imm as u32)
-						.or_default(),
 				EA::Imm(_) => unreachable!(),
 			}
 		}
@@ -1040,9 +876,10 @@ mod tests {
 			print!("\t{asm}\t");
 			emu.pc += 1;
 			match asm {
+				Asm::Comment(_) => {}
 				Asm::Label(_) => {}
 				Asm::Add1(sz,ea,d) => {
-					let src = emu.get_src(sz, ea);
+					let src = emu.get_src(sz, ea, 0xFFF);
 					let dst = &mut emu.d[*d as usize];
 					let (res,c) = dst.overflowing_add(src);
 					*dst = res;
@@ -1055,7 +892,7 @@ mod tests {
 				}
 				Asm::Add2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
-					let dst = emu.get_dst(sz, ea);
+					let dst = emu.get_dst(sz, ea, 0x3F8);
 					let (res,c) = dst.overflowing_add(src);
 					*dst = res;
 					emu.x = c;
@@ -1066,7 +903,7 @@ mod tests {
 					print!("; {ea} = {res}");
 				}
 				Asm::And1(sz,ea,d) => {
-					let src = emu.get_src(sz, ea);
+					let src = emu.get_src(sz, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
 					let res = *dst & src;
 					*dst = res;
@@ -1078,7 +915,7 @@ mod tests {
 				}
 				Asm::And2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
-					let dst = emu.get_dst(sz, ea);
+					let dst = emu.get_dst(sz, ea, 0x3F8);
 					let res = *dst & src;
 					*dst = res;
 					emu.set_n(sz, res);
@@ -1129,7 +966,7 @@ mod tests {
 					emu.pc = emu.labels[label];
 				}
 				Asm::Clr(sz,ea) => {
-					*emu.get_dst(sz, ea) = 0;
+					*emu.get_dst(sz, ea, 0xBF8) = 0;
 					emu.n = false;
 					emu.z = true;
 					emu.v = false;
@@ -1137,7 +974,7 @@ mod tests {
 					print!("; {ea} = 0");
 				}
 				Asm::Cmp(sz,ea,d) => {
-					let src = emu.get_src(sz, ea);
+					let src = emu.get_src(sz, ea, 0xFFF);
 					let dst = emu.d[*d as usize];
 					let (res,c) = dst.overflowing_sub(src);
 					emu.set_n(sz, res);
@@ -1147,7 +984,7 @@ mod tests {
 				}
 				Asm::CmpI(sz,imm,ea) => {
 					let src = *imm;
-					let dst = *emu.get_dst(sz, ea);
+					let dst = *emu.get_dst(sz, ea, 0xBFB);
 					let (res,c) = dst.overflowing_sub_signed(src);
 					emu.set_n(sz, res);
 					emu.z = res == 0;
@@ -1155,7 +992,7 @@ mod tests {
 					emu.c = c;
 				}
 				Asm::DivS(ea,d) => {
-					let src = emu.get_src(&Sz::L, ea);
+					let src = emu.get_src(&Sz::L, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
 					let (res, c) = dst.overflowing_div(src);
 					*dst = res;
@@ -1166,7 +1003,7 @@ mod tests {
 					print!("; {d} = {res}");
 				}
 				Asm::DivU(ea,d) => {
-					let src = emu.get_src(&Sz::L, ea);
+					let src = emu.get_src(&Sz::L, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
 					let (res, c) = dst.overflowing_div(src);
 					*dst = res;
@@ -1176,20 +1013,9 @@ mod tests {
 					emu.c = false;
 					print!("; {d} = {res}");
 				}
-				Asm::Eor1(sz,ea,d) => {
-					let src = emu.get_src(sz, ea);
-					let dst = &mut emu.d[*d as usize];
-					let res = *dst ^ src;
-					*dst = res;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
-					print!("; {d} = {res}");
-				}
-				Asm::Eor2(sz,d,ea) => {
+				Asm::Eor(sz,d,ea) => {
 					let src = emu.d[*d as usize];
-					let dst = emu.get_dst(sz, ea);
+					let dst = emu.get_dst(sz, ea, 0xBF8);
 					let res = *dst ^ src;
 					*dst = res;
 					emu.set_n(sz, res);
@@ -1197,6 +1023,26 @@ mod tests {
 					emu.v = false;
 					emu.c = false;
 					print!("; {ea} = {res}");
+				}
+				Asm::Ext(sz,d) => {
+					let dst = &mut emu.d[*d as usize];
+					let mut res = *dst;
+					match sz {
+						Sz::B => unreachable!("cannot extend to Byte size"),
+						Sz::W => {
+							res &= 0xFFFF0000;
+							res |= *dst as i8 as i16 as u32;
+						}
+						Sz::L => {
+							res = *dst as i16 as i32 as u32;
+						}
+					}
+					*dst = res;
+					emu.set_n(sz, res);
+					emu.z = res == 0;
+					emu.v = false;
+					emu.c = false;
+					print!("; {d} = {res}");
 				}
 				Asm::Lsl(s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
@@ -1225,9 +1071,8 @@ mod tests {
 					print!("; {d} = {res}");
 				}
 				Asm::Move(sz,eas,ead) => {
-					// TODO - srenshaw - `get_mv_src` doesn't fully match MOVE addressing modes
-					let src = emu.get_mv_src(sz, eas);
-					let dst = emu.get_mv_dst(sz, ead);
+					let src = emu.get_src(sz, eas, 0xFFF);
+					let dst = emu.get_dst(sz, ead, 0xFF8);
 					*dst = src;
 					emu.set_n(sz, src);
 					emu.z = src == 0;
@@ -1236,7 +1081,7 @@ mod tests {
 					print!("; {ead} = {src}");
 				}
 				Asm::MulS(ea,d) => {
-					let src = emu.get_src(&Sz::L, ea);
+					let src = emu.get_src(&Sz::L, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
 					let res = *dst * src;
 					*dst = res;
@@ -1247,7 +1092,7 @@ mod tests {
 					print!("; {d} = {res}");
 				}
 				Asm::MulU(ea,d) => {
-					let src = emu.get_src(&Sz::L, ea);
+					let src = emu.get_src(&Sz::L, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
 					let res = *dst * src;
 					*dst = res;
@@ -1258,7 +1103,7 @@ mod tests {
 					print!("; {d} = {res}");
 				}
 				Asm::Neg(sz,ea) => {
-					let dst = emu.get_dst(sz, ea);
+					let dst = emu.get_dst(sz, ea, 0xBF8);
 					let (res, c) = 0u32.overflowing_sub(*dst);
 					*dst = res;
 					emu.x = res != 0;
@@ -1269,7 +1114,7 @@ mod tests {
 					print!("; {ea} = {res}");
 				}
 				Asm::Not(sz,ea) => {
-					let dst = emu.get_dst(sz, ea);
+					let dst = emu.get_dst(sz, ea, 0xBF8);
 					*dst = !*dst;
 					let res = *dst;
 					emu.set_n(sz, res);
@@ -1280,7 +1125,7 @@ mod tests {
 				}
 				Asm::Nop => {}
 				Asm::Or1(sz,ea,d) => {
-					let src = emu.get_src(sz, ea);
+					let src = emu.get_src(sz, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
 					let res = *dst | src;
 					*dst = res;
@@ -1292,7 +1137,7 @@ mod tests {
 				}
 				Asm::Or2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
-					let dst = emu.get_dst(sz, ea);
+					let dst = emu.get_dst(sz, ea, 0x3F8);
 					let res = *dst | src;
 					*dst = res;
 					emu.set_n(sz, res);
@@ -1307,12 +1152,12 @@ mod tests {
 				}
 				Asm::Scc(cc,ea) => {
 					let c = emu.flags(*cc);
-					let dst = emu.get_scc_dst(&Sz::B, ea);
+					let dst = emu.get_dst(&Sz::B, ea, 0xBF8);
 					*dst = if c { 0xFF } else { 0x00 };
 					print!("; {ea} = {dst}");
 				}
 				Asm::Sub1(sz,ea,d) => {
-					let src = emu.get_src(sz, ea);
+					let src = emu.get_src(sz, ea, 0xFFF);
 					let dst = &mut emu.d[*d as usize];
 					let (res, c) = dst.overflowing_sub(src);
 					*dst = res;
@@ -1325,7 +1170,7 @@ mod tests {
 				}
 				Asm::Sub2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
-					let dst = emu.get_dst(sz, ea);
+					let dst = emu.get_dst(sz, ea, 0x3F8);
 					let (res,c) = dst.overflowing_sub(src);
 					*dst = res;
 					emu.x = c;
@@ -1335,9 +1180,24 @@ mod tests {
 					emu.c = c;
 					print!("; {ea} = {res}");
 				}
-				Asm::Swap(d) => {}
-				Asm::Tst(sz,ea) => {}
-				Asm::Trap(v) => {}
+				Asm::Swap(d) => {
+					let dst = &mut emu.d[*d as usize];
+					let res = (*dst << 16) | (*dst >> 16);
+					*dst = res;
+					emu.set_n(&Sz::L, res);
+					emu.z = res == 0;
+					emu.v = false;
+					emu.c = false;
+					print!("; {d} = {res}");
+				}
+				Asm::Trap(v) => todo!("Trap({v})"),
+				Asm::Tst(sz,ea) => {
+					let dst = emu.get_src(sz, ea, 0xFFF);
+					emu.set_n(sz, dst);
+					emu.z = dst == 0;
+					emu.v = false;
+					emu.c = false;
+				}
 			}
 			println!();
 		}
@@ -1369,6 +1229,7 @@ mod tests {
 		let tac_data = tac::eval(&prs_data, &typ_data, &pak_data, &loc_data)
 				.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
 				.unwrap_or_else(|e| panic!("{}", e.display(&input)));
+		//eprintln!("{tac_data:?}");
 		
 		let stack_addr = prs_data.regions.get(&"Stack".id())
 				.or(prs_data.regions.get(&"DataStack".id()))
@@ -1397,15 +1258,35 @@ mod tests {
 	}
 
 	#[test]
+	fn branch() {
+		let data = setup("main {}
+		m68k proc branch() {
+			let b: s8 = 5;
+			let c: s8 = 8;
+			if (b + c) > 10 {
+				b += 2;
+			} else {
+				c += 1;
+			}
+		}");
+		let main_proc = &data[&"branch".id()];
+		let emu = interpret(main_proc);
+		assert_eq!(emu.mem.len(), 2);
+		assert_eq!(emu.mem[&0], 7);
+		assert_eq!(emu.mem[&4], 8);
+	}
+
+	#[test]
 	fn for_loop() {
-		let data = setup("main {
+		let data = setup("main {}
+		m68k proc for_loop() {
 			let b: s8 = 4;
 			let c: s8 = 0;
 			for i in [0..10] {
 				c += b * 2;
 			}
 		}");
-		let main_proc = &data[&"main".id()];
+		let main_proc = &data[&"for_loop".id()];
 		let emu = interpret(main_proc);
 		assert_eq!(emu.mem.len(), 2);
 		assert_eq!(emu.mem[&0], 4);

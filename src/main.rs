@@ -105,14 +105,7 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	let asm_db = asm::eval(&input, &lex_data, &prs_data, tac_data, stack_addr);
 	println!("ASM:");
 	for (_, data) in &asm_db {
-		match data {
-			asm::Data::M68k(list) => for asm in list {
-				println!("{asm}");
-			}
-			asm::Data::Z80(list) => for asm in list {
-				println!("{asm}");
-			}
-		}
+		println!("{data}");
 	}
 
 	/*

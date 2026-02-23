@@ -43,7 +43,7 @@ value VSRamSize = 80;
 
 m68k main {
 	-- Read from control port to reset VDP status
-	let unused: s16 = VdpRegs.ctrl;
+	let unused: s32 = VdpRegs.ctrl;
 
 	-- Initialize VDP state
 	VdpRegs.ctrl = VdpRegMode1 | 0x04;
