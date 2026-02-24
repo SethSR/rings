@@ -419,7 +419,7 @@ impl Display for Data {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Addr { A0, A1, A2, A3, A4, A5, A6, A7 }
 impl Display for Addr {
 	fn fmt(&self, f: &mut Formatter) -> Result {
@@ -648,14 +648,6 @@ mod tests {
 			self.c = c;
 		}
 
-		fn set_n(&mut self, sz: &Sz, res: u32) {
-			self.n = match sz {
-				Sz::B => res & 0x80,
-				Sz::W => res & 0x8000,
-				Sz::L => res & 0x80000000,
-			} != 0;
-		}
-
 		fn get_src(&mut self, sz: &Sz, ea: &EA, mask: u16) -> u32 {
 			match ea {
 				EA::Dat(d) => {
@@ -685,7 +677,7 @@ mod tests {
 						let offset: u32 = sz.into();
 						let adr = &mut self.a[*a as usize];
 						let src = self.mem[adr];
-						*adr += offset;
+						*adr += offset.max(2 * (*a == Addr::A7) as u32);
 						src
 					} else {
 						panic!("post-increment address source is invalid")
@@ -695,7 +687,7 @@ mod tests {
 					if mask & 0x080 > 0 {
 						let offset: u32 = sz.into();
 						let adr = &mut self.a[*a as usize];
-						*adr -= offset;
+						*adr -= offset.max(2 * (*a == Addr::A7) as u32);
 						self.mem[adr]
 					} else {
 						panic!("pre-decrement address source is invalid")
@@ -773,7 +765,7 @@ mod tests {
 						let adr = &mut self.a[*a as usize];
 						let dst = self.mem.entry(*adr)
 								.or_default();
-						*adr += offset;
+						*adr += offset.max(2 * (*a == Addr::A7) as u32);
 						dst
 					} else {
 						panic!("post-increment address destination is invalid")
@@ -783,7 +775,7 @@ mod tests {
 					if mask & 0x080 > 0 {
 						let offset: u32 = sz.into();
 						let adr = &mut self.a[*a as usize];
-						*adr -= offset;
+						*adr -= offset.max(2 * (*a == Addr::A7) as u32);
 						self.mem.entry(*adr).or_default()
 					} else {
 						panic!("pre-increment address destination is invalid")
@@ -831,6 +823,66 @@ mod tests {
 		}
 	}
 
+	fn is_neg(sz: Sz, res: u32) -> bool {
+		(res & match sz {
+			Sz::B => 0x00000080,
+			Sz::W => 0x00008000,
+			Sz::L => 0x80000000,
+		}) > 0
+	}
+
+	fn calc_result(sz: Sz, res: u32, dst: u32) -> u32 {
+		res | (dst & match sz {
+			Sz::B => 0xFFFFFF00,
+			Sz::W => 0xFFFF0000,
+			Sz::L => 0x00000000,
+		})
+	}
+
+	fn add(sz: Sz, src: u32, dst: u32) -> (u32,bool) {
+		match sz {
+			Sz::B => {
+				let (res,c) = (dst as u8).overflowing_add(src as u8);
+				(res as u32, c)
+			}
+			Sz::W => {
+				let (res,c) = (dst as u16).overflowing_add(src as u16);
+				(res as u32, c)
+			}
+			Sz::L => dst.overflowing_add(src),
+		}
+	}
+
+	fn sub(sz: Sz, src: u32, dst: u32) -> (u32,bool) {
+		match sz {
+			Sz::B => {
+				let (res, c) = (dst as u8).overflowing_sub(src as u8);
+				(res as u32, c)
+			}
+			Sz::W => {
+				let (res, c) = (dst as u16).overflowing_sub(src as u16);
+				(res as u32, c)
+			}
+			Sz::L => dst.overflowing_sub(src),
+		}
+	}
+
+	fn and(sz: Sz, src: u32, dst: u32) -> u32 {
+		match sz {
+			Sz::B => (dst as u8 & src as u8) as u32,
+			Sz::W => (dst as u16 & src as u16) as u32,
+			Sz::L => dst & src,
+		}
+	}
+
+	fn or(sz: Sz, src: u32, dst: u32) -> u32 {
+		match sz {
+			Sz::B => (dst as u8 | src as u8) as u32,
+			Sz::W => (dst as u16 | src as u16) as u32,
+			Sz::L => dst | src,
+		}
+	}
+
 	fn interpret(data: &[Asm]) -> M68kEmu {
 		let mut emu = M68kEmu::default();
 		emu.labels.extend(data.iter()
@@ -850,123 +902,75 @@ mod tests {
 				Asm::Add1(sz,ea,d) => {
 					let src = emu.get_src(sz, ea, 0xFFF);
 					let dst = &mut emu.d[*d as usize];
-					match sz {
-						Sz::B => {
-							let (res,c) = (*dst as u8).overflowing_add(src as u8);
-							*dst &= 0xFFFFFF00;
-							*dst |= res as u32;
-							emu.set_flags(c, res & 0x80 > 0, res == 0, c, c);
-							print!("; {d} = {res}");
-						}
-						Sz::W => {
-							let (res,c) = (*dst as u16).overflowing_add(src as u16);
-							*dst &= 0xFFFF0000;
-							*dst |= res as u32;
-							emu.set_flags(c, res & 0x8000 > 0, res == 0, c, c);
-							print!("; {d} = {res}");
-						}
-						Sz::L => {
-							let (res,c) = dst.overflowing_add(src);
-							*dst = res;
-							emu.set_flags(c, res & 0x80000000 > 0, res == 0, c, c);
-							print!("; {d} = {res}");
-						}
-					}
+					let (res, c) = add(*sz, src, *dst);
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(c, is_neg(*sz, res), res == 0, c, c);
+					print!("; {d} = {res}");
 				}
 				Asm::Add2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
 					let dst = emu.get_dst(sz, ea, 0x3F8);
-					match sz {
-						Sz::B => {
-							let (res,c) = (*dst as u8).overflowing_add(src as u8);
-							*dst &= 0xFFFFFF00;
-							*dst |= res as u32;
-							emu.set_flags(c, res & 0x80 > 0, res == 0, c, c);
-							print!("; {ea} = {res}");
-						}
-						Sz::W => {
-							let (res,c) = (*dst as u16).overflowing_add(src as u16);
-							*dst &= 0xFFFF0000;
-							*dst |= res as u32;
-							emu.set_flags(c, res & 0x8000 > 0, res == 0, c, c);
-							print!("; {ea} = {res}");
-						}
-						Sz::L => {
-							let (res,c) = dst.overflowing_add(src);
-							*dst = res;
-							emu.set_flags(c, res & 0x80000000 > 0, res == 0, c, c);
-							print!("; {ea} = {res}");
-						}
-					}
+					let (res, c) = add(*sz, src, *dst);
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(c, is_neg(*sz, res), res == 0, c, c);
+					print!("; {ea} = {res}");
 				}
 				Asm::And1(sz,ea,d) => {
 					let src = emu.get_src(sz, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
-					match sz {
-						Sz::B => {
-							let res = *dst as u8 & src as u8;
-							*dst &= 0xFFFFFF00;
-							*dst |= res as u32;
-							emu.set_flags(emu.x, res & 0x80 > 0, res == 0, false, false);
-							print!("; {d} = {res}");
-						}
-						Sz::W => {
-							let res = *dst as u16 & src as u16;
-							*dst &= 0xFFFF0000;
-							*dst |= res as u32;
-							emu.set_flags(emu.x, res & 0x8000 > 0, res == 0, false, false);
-							print!("; {d} = {res}");
-						}
-						Sz::L => {
-							let res = *dst & src;
-							*dst = res;
-							emu.set_flags(emu.x, res & 0x80000000 > 0, res == 0, false, false);
-							print!("; {d} = {res}");
-						}
-					}
+					let res = and(*sz, src, *dst);
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
+					print!("; {d} = {res}");
 				}
 				Asm::And2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
 					let dst = emu.get_dst(sz, ea, 0x3F8);
-					let res = *dst & src;
-					*dst = res;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					let res = and(*sz, src, *dst);
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
 					print!("; {ea} = {res}");
 				}
 				Asm::Asl(sz,s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
 					let dst = &mut emu.d[*d as usize];
-					let res = *dst << src;
-					emu.x = if src != 0 {
-						(*dst & 0x80000000) != 0
-					} else {
-						emu.x
+					let dneg = is_neg(*sz, *dst);
+					let x = if src != 0 { dneg } else { emu.x };
+					let (res, v) = match sz {
+						Sz::B => {
+							let dst = *dst as u8;
+							let res = (dst << src) as u32;
+							let v = if dneg { dst.leading_ones() } else { dst.leading_zeros() } < src + 1;
+							(res, v)
+						}
+						Sz::W => {
+							let dst = *dst as u16;
+							let res = (dst << src) as u32;
+							let v = if dneg { dst.leading_ones() } else { dst.leading_zeros() } < src + 1;
+							(res, v)
+						}
+						Sz::L => {
+							let res = *dst << src;
+							let v = if dneg { dst.leading_ones() } else { dst.leading_zeros() } < src + 1;
+							(res, v)
+						}
 					};
-					emu.n = (res & 0x80000000) != 0;
-					emu.z = res == 0;
-					// overflow bit: set if the MSB is changed at any time during the shift, cleared otherwise
-					emu.v = (*dst & !(0xFFFFFFFFu32 >> src)) != 0;
-					emu.c = src != 0 && (*dst & 0x80000000) != 0;
-					*dst = res;
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(x, is_neg(*sz, res), res == 0, v, src != 0 && dneg);
 					print!("; {d} = {res}");
 				}
 				Asm::Asr(sz,s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
 					let dst = &mut emu.d[*d as usize];
-					let res = *dst >> src;
-					emu.x = if src != 0 {
-						(*dst & 0x80000000) != 0
-					} else {
-						emu.x
+					let dneg  = is_neg(*sz, *dst);
+					let x = if src != 0 { dneg } else { emu.x };
+					let res = match sz {
+						Sz::B => ((*dst as u8) >> src) as u32,
+						Sz::W => ((*dst as u16) >> src) as u32,
+						Sz::L => *dst >> src,
 					};
-					emu.n = (res & 0x80000000) != 0;
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = src != 0 && (*dst & 0x80000000) != 0;
-					*dst = res;
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(x, is_neg(*sz, res), res == 0, false, src != 0 && dneg);
 					print!("; {d} = {res}");
 				}
 				Asm::Bcc(cc,label) => {
@@ -978,62 +982,50 @@ mod tests {
 					emu.pc = emu.labels[label];
 				}
 				Asm::Clr(sz,ea) => {
-					*emu.get_dst(sz, ea, 0xBF8) = 0;
-					emu.n = false;
-					emu.z = true;
-					emu.v = false;
-					emu.c = false;
+					let dst = emu.get_dst(sz, ea, 0xBF8);
+					*dst = calc_result(*sz, 0, *dst);
+					emu.set_flags(emu.x, false, true, false, false);
 					print!("; {ea} = 0");
 				}
 				Asm::Cmp(sz,ea,d) => {
 					let src = emu.get_src(sz, ea, 0xFFF);
 					let dst = emu.d[*d as usize];
-					let (res,c) = dst.overflowing_sub(src);
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = c;
+					let (res, c) = sub(*sz, src, dst);
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, c, c);
 				}
 				Asm::CmpI(sz,imm,ea) => {
-					let src = *imm;
 					let dst = *emu.get_dst(sz, ea, 0xBFB);
-					let (res,c) = dst.overflowing_sub_signed(src);
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = c;
+					let (res, c) = sub(*sz, *imm as u32, dst);
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, c, c);
 				}
 				Asm::DivS(ea,d) => {
 					let src = emu.get_src(&Sz::L, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
-					let (res, c) = dst.overflowing_div(src);
-					*dst = res;
-					emu.set_n(&Sz::L, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = false;
-					print!("; {d} = {res}");
+					let (res_div, c) =  (*dst as i32).overflowing_div(src as i16 as i32);
+					let res_mod = (*dst as i32) % (src as i16 as i32);
+					*dst = ((res_mod << 16) | res_div) as u32;
+					emu.set_flags(emu.x, is_neg(Sz::W, res_div as u32), res_div == 0, c, false);
+					print!("; {d} = {res_mod}:{res_div}");
 				}
 				Asm::DivU(ea,d) => {
 					let src = emu.get_src(&Sz::L, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
-					let (res, c) = dst.overflowing_div(src);
-					*dst = res;
-					emu.set_n(&Sz::L, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = false;
-					print!("; {d} = {res}");
+					let (res_div, c) = dst.overflowing_div(src as u16 as u32);
+					let res_mod = *dst % (src as u16 as u32);
+					*dst = (res_mod << 16) | res_div;
+					emu.set_flags(emu.x, is_neg(Sz::W, res_div), res_div == 0, c, false);
+					print!("; {d} = {res_mod}:{res_div}");
 				}
 				Asm::Eor(sz,d,ea) => {
 					let src = emu.d[*d as usize];
 					let dst = emu.get_dst(sz, ea, 0xBF8);
-					let res = *dst ^ src;
-					*dst = res;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					let res = match sz {
+						Sz::B => ((*dst as u8) ^ (src as u8)) as u32,
+						Sz::W => ((*dst as u16) ^ (src as u16)) as u32,
+						Sz::L => *dst ^ src,
+					};
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
 					print!("; {ea} = {res}");
 				}
 				Asm::Ext(sz,d) => {
@@ -1050,112 +1042,115 @@ mod tests {
 						}
 					}
 					*dst = res;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
 					print!("; {d} = {res}");
 				}
 				Asm::Lsl(sz,s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
 					let dst = &mut emu.d[*d as usize];
-					let res = *dst << src;
-					*dst = res;
-					let bit = *dst >> (32 - src);
-					emu.x = if src != 0 { bit != 0 } else { emu.x };
-					emu.set_n(&Sz::L, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = src != 0 && bit != 0;
+					let (res, bit) = match sz {
+						Sz::B => {
+							let res = (*dst as u8) << src;
+							let bit = (*dst as u8).rotate_left(src) & 1 > 0;
+							(res as u32, bit)
+						}
+						Sz::W => {
+							let res = (*dst as u16) << src;
+							let bit = (*dst as u16).rotate_left(src) & 1 > 0;
+							(res as u32, bit)
+						}
+						Sz::L => {
+							let res = *dst << src;
+							let bit = dst.rotate_left(src) & 1 > 0;
+							(res, bit)
+						}
+					};
+					*dst = calc_result(*sz, res, *dst);
+					let x = if src != 0 { bit } else { emu.x };
+					emu.set_flags(x, is_neg(Sz::L, res), res == 0, false, src != 0 && bit);
 					print!("; {d} = {res}");
 				}
 				Asm::Lsr(sz,s,d) => {
 					let src = emu.d[*s as usize] & 0x3F;
 					let dst = &mut emu.d[*d as usize];
-					let res = *dst >> src;
-					*dst = res;
-					let bit = *dst << (32 - src);
-					emu.x = if src != 0 { bit != 0 } else { emu.x };
-					emu.set_n(&Sz::L, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = src != 0 && bit != 0;
+					let (res, bit) = match sz {
+						Sz::B => {
+							let res = (*dst as u8) >> src;
+							let bit = (*dst as u8).rotate_right(src) & 0x80 > 0;
+							(res as u32, bit)
+						}
+						Sz::W => {
+							let res = (*dst as u16) >> src;
+							let bit = (*dst as u16).rotate_right(src) & 0x8000 > 0;
+							(res as u32, bit)
+						}
+						Sz::L => {
+							let res = *dst >> src;
+							let bit = dst.rotate_right(src) & 0x80000000 > 0;
+							(res, bit)
+						}
+					};
+					*dst = calc_result(*sz, res, *dst);
+					let x = if src != 0 { bit } else { emu.x };
+					emu.set_flags(x, is_neg(Sz::L, res), res == 0, false, src != 0 && bit);
 					print!("; {d} = {res}");
 				}
 				Asm::Move(sz,eas,ead) => {
 					let src = emu.get_src(sz, eas, 0xFFF);
 					let dst = emu.get_dst(sz, ead, 0xFF8);
-					*dst = src;
-					emu.set_n(sz, src);
-					emu.z = src == 0;
-					emu.v = false;
-					emu.c = false;
+					*dst = calc_result(*sz, src, *dst);
+					emu.set_flags(emu.x, is_neg(*sz, src), src == 0, false, false);
 					print!("; {ead} = {src}");
 				}
 				Asm::MulS(ea,d) => {
-					let src = emu.get_src(&Sz::L, ea, 0xBFF);
+					let src = emu.get_src(&Sz::W, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
-					let res = *dst * src;
-					*dst = res;
-					emu.set_n(&Sz::L, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					let res = (*dst as i16 as i32) * src as i16 as i32;
+					*dst = res as u32;
+					emu.set_flags(emu.x, is_neg(Sz::L, res as u32), res == 0, false, false);
 					print!("; {d} = {res}");
 				}
 				Asm::MulU(ea,d) => {
-					let src = emu.get_src(&Sz::L, ea, 0xBFF);
+					let src = emu.get_src(&Sz::W, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
-					let res = *dst * src;
+					let res = (*dst as u16 as u32) * src as u16 as u32;
 					*dst = res;
-					emu.set_n(&Sz::L, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					emu.set_flags(emu.x, is_neg(Sz::L, res), res == 0, false, false);
 					print!("; {d} = {res}");
 				}
 				Asm::Neg(sz,ea) => {
 					let dst = emu.get_dst(sz, ea, 0xBF8);
 					let (res, c) = 0u32.overflowing_sub(*dst);
-					*dst = res;
-					emu.x = res != 0;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = res != 0;
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(res != 0, is_neg(*sz, res), res == 0, c, res != 0);
 					print!("; {ea} = {res}");
 				}
 				Asm::Not(sz,ea) => {
 					let dst = emu.get_dst(sz, ea, 0xBF8);
-					*dst = !*dst;
-					let res = *dst;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					let res = match sz {
+						Sz::B => !(*dst as u8) as u32,
+						Sz::W => !(*dst as u16) as u32,
+						Sz::L => !*dst,
+					};
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
 					print!("; {ea} = {res}");
 				}
 				Asm::Nop => {}
 				Asm::Or1(sz,ea,d) => {
 					let src = emu.get_src(sz, ea, 0xBFF);
 					let dst = &mut emu.d[*d as usize];
-					let res = *dst | src;
-					*dst = res;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					let res = or(*sz, src, *dst);
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
 					print!("; {d} = {res}");
 				}
 				Asm::Or2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
 					let dst = emu.get_dst(sz, ea, 0x3F8);
-					let res = *dst | src;
-					*dst = res;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					let res = or(*sz, src, *dst);
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
 					print!("; {ea} = {res}");
 				}
 				Asm::Rts => {
@@ -1165,50 +1160,36 @@ mod tests {
 				Asm::Scc(cc,ea) => {
 					let c = emu.get_cond(*cc);
 					let dst = emu.get_dst(&Sz::B, ea, 0xBF8);
-					*dst = if c { 0xFF } else { 0x00 };
+					*dst = calc_result(Sz::B, if c { 0xFF } else { 0x00 }, *dst);
 					print!("; {ea} = {dst}");
 				}
 				Asm::Sub1(sz,ea,d) => {
 					let src = emu.get_src(sz, ea, 0xFFF);
 					let dst = &mut emu.d[*d as usize];
-					let (res, c) = dst.overflowing_sub(src);
-					*dst = res;
-					emu.x = c;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = c;
+					let (res, c) = sub(*sz, src, *dst);
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(c, is_neg(*sz, res), res == 0, c, c);
 					print!("; {d} = {res}");
 				}
 				Asm::Sub2(sz,d,ea) => {
 					let src = emu.d[*d as usize];
 					let dst = emu.get_dst(sz, ea, 0x3F8);
-					let (res,c) = dst.overflowing_sub(src);
-					*dst = res;
-					emu.x = c;
-					emu.set_n(sz, res);
-					emu.z = res == 0;
-					emu.v = c;
-					emu.c = c;
+					let (res,c) = sub(*sz, src, *dst);
+					*dst = calc_result(*sz, res, *dst);
+					emu.set_flags(c, is_neg(*sz, res), res == 0, c, c);
 					print!("; {ea} = {res}");
 				}
 				Asm::Swap(d) => {
 					let dst = &mut emu.d[*d as usize];
 					let res = (*dst << 16) | (*dst >> 16);
 					*dst = res;
-					emu.set_n(&Sz::L, res);
-					emu.z = res == 0;
-					emu.v = false;
-					emu.c = false;
+					emu.set_flags(emu.x, is_neg(Sz::L, res), res == 0, false, false);
 					print!("; {d} = {res}");
 				}
 				Asm::Trap(v) => todo!("Trap({v})"),
 				Asm::Tst(sz,ea) => {
 					let dst = emu.get_src(sz, ea, 0xFFF);
-					emu.set_n(sz, dst);
-					emu.z = dst == 0;
-					emu.v = false;
-					emu.c = false;
+					emu.set_flags(emu.x, is_neg(*sz, dst), dst == 0, false, false);
 				}
 			}
 			println!();
