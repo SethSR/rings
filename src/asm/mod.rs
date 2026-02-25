@@ -11,7 +11,7 @@ use crate::tac::{LabelId, Data as TacData, VRegId, TAC, Location};
 use crate::{Span, SrcPos, Target};
 
 mod m68k;
-//mod sh2;
+mod sh2;
 //mod x86_64;
 //mod z80;
 
@@ -30,7 +30,7 @@ pub fn eval(
 
 		let data = match section.target {
 			Target::M68k => Data::M68k(m68k::lower(&proc_name, section, stack_addr)),
-			//Target::SH2 => Data::SH2(sh2::lower(&proc_name, section)),
+			Target::SH2 => Data::SH2(sh2::lower(&proc_name, section, stack_addr, ret_type)),
 			//Target::X86_64 => Data::X86(x86_64::lower(&proc_name, section)),
 			//Target::Z80 => Data::Z80(z80::lower(&proc_name, section, ret_type)),
 			_ => unreachable!(),
@@ -52,7 +52,7 @@ pub fn eval(
 #[derive(Debug)]
 pub enum Data {
 	M68k(Vec<m68k::Asm>),
-	//SH2(Vec<sh2::Asm>),
+	SH2(Vec<sh2::Asm>),
 	//X86(Vec<x86_64::Asm>),
 	//Z80(Vec<z80::Asm>),
 }
@@ -64,11 +64,11 @@ impl Display for Data {
 			Self::M68k(data) => out.extend(
 				data.iter().map(|asm| asm.to_string())
 			),
-			//Self::SH2(data) => {
-				//for asm in data {
-					//out.push(asm.to_string());
-				//}
-			//}
+			Self::SH2(data) => {
+				for asm in data {
+					out.push(asm.to_string());
+				}
+			}
 			//Self::X86(data) => {
 				//for asm in data {
 					//out.push(asm.to_string());
@@ -84,10 +84,6 @@ impl Display for Data {
 
 struct LabelGenerator(LabelId);
 impl LabelGenerator {
-	fn new(lbl: LabelId) -> Self {
-		Self(lbl)
-	}
-
 	fn next(&mut self, name: &str) -> String {
 		self.0 += 1;
 		format!("{name}_{}", self.0 - 1)

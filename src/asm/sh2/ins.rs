@@ -6,232 +6,234 @@ pub type Reg = u8;
 #[allow(dead_code)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum Asm {
+	Comment(String),
+
 	Label(String),
 	/* Data Transfer */
 
 	/* Move Immediate Data */
 
-	// mov #S,Rn
+	/// mov #S,Rn
 	MovI(i8, Reg),
-	// mov.w @(disp,PC),Rn
+	/// mov.w @(disp,PC),Rn
 	MovWI(u8, Reg),
-	// mov.l @(disp,PC),Rn
+	/// mov.l @(disp,PC),Rn
 	MovLI(u8, Reg),
 
 	/* Move Data */
 
-	// mov Rm,Rn
+	/// mov Rm,Rn
 	Mov(Reg, Reg),
-	// mov.b Rm,@Rn
+	/// mov.b Rm,@Rn
 	MovBS(Reg, Reg),
-	// mov.w Rm,@Rn
+	/// mov.w Rm,@Rn
 	MovWS(Reg, Reg),
-	// mov.l Rm,@Rn
+	/// mov.l Rm,@Rn
 	MovLS(Reg, Reg),
-	// mov.b @Rm,Rn
+	/// mov.b @Rm,Rn
 	MovBL(Reg, Reg),
-	// mov.w @Rm,Rn
+	/// mov.w @Rm,Rn
 	MovWL(Reg, Reg),
-	// mov.l @Rm,Rn
+	/// mov.l @Rm,Rn
 	MovLL(Reg, Reg),
-	// mov.b Rm,@-Rn
+	/// mov.b Rm,@-Rn
 	MovBM(Reg, Reg),
-	// mov.w Rm,@-Rn
+	/// mov.w Rm,@-Rn
 	MovWM(Reg, Reg),
-	// mov.l Rm,@-Rn
+	/// mov.l Rm,@-Rn
 	MovLM(Reg, Reg),
-	// mov.b @Rm+,Rn
+	/// mov.b @Rm+,Rn
 	MovBP(Reg, Reg),
-	// mov.w @Rm+,Rn
+	/// mov.w @Rm+,Rn
 	MovWP(Reg, Reg),
-	// mov.l @Rm+,Rn
+	/// mov.l @Rm+,Rn
 	MovLP(Reg, Reg),
-	// mov.b Rm,@(R0,Rn)
+	/// mov.b Rm,@(R0,Rn)
 	MovBS0(Reg, Reg),
-	// mov.w Rm,@(R0,Rn)
+	/// mov.w Rm,@(R0,Rn)
 	MovWS0(Reg, Reg),
-	// mov.l Rm,@(R0,Rn)
+	/// mov.l Rm,@(R0,Rn)
 	MovLS0(Reg, Reg),
-	// mov.b @(R0,Rm),Rn
+	/// mov.b @(R0,Rm),Rn
 	MovBL0(Reg, Reg),
-	// mov.w @(R0,Rm),Rn
+	/// mov.w @(R0,Rm),Rn
 	MovWL0(Reg, Reg),
-	// mov.l @(R0,Rm),Rn
+	/// mov.l @(R0,Rm),Rn
 	MovLL0(Reg, Reg),
 
 	/* Move Peripheral Data */
 
-	// mov.b @(disp,GBR),R0
+	/// mov.b @(disp,GBR),R0
 	MovBLG(u8),
-	// mov.w @(disp,GBR),R0
+	/// mov.w @(disp,GBR),R0
 	MovWLG(u8),
-	// mov.l @(disp,GBR),R0
+	/// mov.l @(disp,GBR),R0
 	MovLLG(u8),
-	// mov.b R0,@(disp,GBR)
+	/// mov.b R0,@(disp,GBR)
 	MovBSG(u8),
-	// mov.w R0,@(disp,GBR)
+	/// mov.w R0,@(disp,GBR)
 	MovWSG(u8),
-	// mov.l R0,@(disp,GBR)
+	/// mov.l R0,@(disp,GBR)
 	MovLSG(u8),
 
 	/* Move Structure Data */
 
-	// mov.b R0,@(disp,Rn)
+	/// mov.b R0,@(disp,Rn)
 	MovBS4(u8, Reg),
-	// mov.w R0,@(disp,Rn)
+	/// mov.w R0,@(disp,Rn)
 	MovWS4(u8, Reg),
-	// mov.l Rm,@(disp,Rn)
+	/// mov.l Rm,@(disp,Rn)
 	MovLS4(Reg, u8, Reg),
-	// mov.b @(disp,Rm),R0
+	/// mov.b @(disp,Rm),R0
 	MovBL4(u8, Reg),
-	// mov.w @(disp,Rm),R0
+	/// mov.w @(disp,Rm),R0
 	MovWL4(u8, Reg),
-	// mov.l @(disp,Rm),Rn
+	/// mov.l @(disp,Rm),Rn
 	MovLL4(u8, Reg, Reg),
 
 	/* Move Effective Address */
 
-	// mova @(disp,PC),R0
+	/// mova @(disp,PC),R0
 	MovA(u8),
 
-	// movt Rn
+	/// movt Rn
 	MovT(Reg),
-	// swap.b Rm,Rn
+	/// swap.b Rm,Rn
 	SwapB(Reg, Reg),
-	// swap.w Rm,Rn
+	/// swap.w Rm,Rn
 	SwapW(Reg, Reg),
-	// Xtrct Rm,Rn
+	/// Xtrct Rm,Rn
 	Xtrct(Reg, Reg),
 
 	/* Arithmetic Instructions */
 
-	// add Rm,Rn
+	/// add Rm,Rn
 	Add(Reg, Reg),
-	// add #S,Rn
+	/// add #S,Rn
 	AddI(i8, Reg),
-	// addc Rm,Rn
+	/// addc Rm,Rn
 	AddC(Reg, Reg),
-	// addv Rm,Rn
+	/// addv Rm,Rn
 	AddV(Reg, Reg),
-	// cmp/eq #S,R0
+	/// cmp/eq #S,R0
 	CmpIM(i8),
-	// cmp/eq Rm,Rn
+	/// cmp/eq Rm,Rn
 	CmpEQ(Reg, Reg),
-	// cmp/hs Rm,Rn
+	/// cmp/hs Rm,Rn
 	CmpHS(Reg, Reg),
-	// cmp/ge Rm,Rn
+	/// cmp/ge Rm,Rn
 	CmpGE(Reg, Reg),
-	// cmp/hi Rm,Rn
+	/// cmp/hi Rm,Rn
 	CmpHI(Reg, Reg),
-	// cmp/gt Rm,Rn
+	/// cmp/gt Rm,Rn
 	CmpGT(Reg, Reg),
-	// cmp/pl Rn
+	/// cmp/pl Rn
 	CmpPL(Reg),
-	// cmp/pz Rn
+	/// cmp/pz Rn
 	CmpPZ(Reg),
-	// cmp/str Rm,Rn
+	/// cmp/str Rm,Rn
 	CmpStr(Reg, Reg),
-	// div1 Rm,Rn
+	/// div1 Rm,Rn
 	Div1(Reg, Reg),
-	// div0s Rm,Rn
+	/// div0s Rm,Rn
 	Div0S(Reg, Reg),
-	// div0u
+	/// div0u
 	Div0U,
-	// dmuls.l Rm,Rn
+	/// dmuls.l Rm,Rn
 	DMulS(Reg, Reg),
-	// dmulu.l Rm,Rn
+	/// dmulu.l Rm,Rn
 	DMulU(Reg, Reg),
-	// dt Rn
+	/// dt Rn
 	DT(Reg),
-	// exts.b Rm,Rn
+	/// exts.b Rm,Rn
 	ExtSB(Reg, Reg),
-	// exts.w Rm,Rn
+	/// exts.w Rm,Rn
 	ExtSW(Reg, Reg),
-	// extu.b Rm,Rn
+	/// extu.b Rm,Rn
 	ExtUB(Reg, Reg),
-	// extu.w Rm,Rn
+	/// extu.w Rm,Rn
 	ExtUW(Reg, Reg),
-	// mac.l @Rm+,@Rn+
+	/// mac.l @Rm+,@Rn+
 	MacL(Reg, Reg),
-	// mac.w @Rm+,@Rn+
+	/// mac.w @Rm+,@Rn+
 	MacW(Reg, Reg),
-	// mul.l Rm,Rn
+	/// mul.l Rm,Rn
 	MulL(Reg, Reg),
-	// muls.w Rm,Rn
+	/// muls.w Rm,Rn
 	MulS(Reg, Reg),
-	// mulu.w Rm,Rn
+	/// mulu.w Rm,Rn
 	MulU(Reg, Reg),
-	// neg Rm,Rn
+	/// neg Rm,Rn
 	Neg(Reg, Reg),
-	// negc Rm,Rn
+	/// negc Rm,Rn
 	NegC(Reg, Reg),
-	// sub Rm,Rn
+	/// sub Rm,Rn
 	Sub(Reg, Reg),
-	// subc Rm,Rn
+	/// subc Rm,Rn
 	SubC(Reg, Reg),
-	// subv Rm,Rn
+	/// subv Rm,Rn
 	SubV(Reg, Reg),
 
 	/* Logic Operation Instructions */
 
-	// and Rm,Rn
+	/// and Rm,Rn
 	And(Reg, Reg),
-	// and #U,R0
+	/// and #U,R0
 	AndI(u8),
-	// and.b #U,@(R0,GBR)
+	/// and.b #U,@(R0,GBR)
 	AndM(u8),
-	// not Rm,Rn
+	/// not Rm,Rn
 	Not(Reg, Reg),
-	// or Rm,Rn
+	/// or Rm,Rn
 	Or(Reg, Reg),
-	// or #U,R0
+	/// or #U,R0
 	OrI(u8),
-	// or.b #U,@(R0,GBR)
+	/// or.b #U,@(R0,GBR)
 	OrM(u8),
-	// tas.b @Rn
+	/// tas.b @Rn
 	Tas(Reg),
-	// tst Rm,Rn
+	/// tst Rm,Rn
 	Tst(Reg, Reg),
-	// tst #U,R0
+	/// tst #U,R0
 	TstI(u8),
-	// tst.b #U,@(R0,GBR)
+	/// tst.b #U,@(R0,GBR)
 	TstM(u8),
-	// xor Rm,Rn
+	/// xor Rm,Rn
 	Xor(Reg, Reg),
-	// xor #U,R0
+	/// xor #U,R0
 	XorI(u8),
-	// xor.b #U,@(R0,GBR)
+	/// xor.b #U,@(R0,GBR)
 	XorM(u8),
 
 	/* Shift Instructions */
 
-	// rotl Rn
+	/// rotl Rn
 	RotL(Reg),
-	// rotr Rn
+	/// rotr Rn
 	RotR(Reg),
-	// rotcl Rn
+	/// rotcl Rn
 	RotCL(Reg),
-	// rotcr Rn
+	/// rotcr Rn
 	RotCR(Reg),
-	// shal Rn
+	/// shal Rn
 	ShAL(Reg),
-	// shar Rn
+	/// shar Rn
 	ShAR(Reg),
-	// shll Rn
+	/// shll Rn
 	ShLL(Reg),
-	// shlr Rn
+	/// shlr Rn
 	ShLR(Reg),
-	// shll2 Rn
+	/// shll2 Rn
 	ShLL2(Reg),
-	// shlr2 Rn
+	/// shlr2 Rn
 	ShLR2(Reg),
-	// shll8 Rn
+	/// shll8 Rn
 	ShLL8(Reg),
-	// shlr8 Rn
+	/// shlr8 Rn
 	ShLR8(Reg),
-	// shll16 Rn
+	/// shll16 Rn
 	ShLL16(Reg),
-	// shlr16 Rn
+	/// shlr16 Rn
 	ShLR16(Reg),
 
 	/* Branch Instructions */
@@ -251,13 +253,13 @@ pub enum Asm {
 	/// destination, use BF with the BRA instruction or the like.
 	BF(String),
 
-	// BF/S label
+	/// bf/s label
 	BFS(String),
 
-	// bt label
+	/// bt label
 	BT(String),
 
-	// bt/s label
+	/// bt/s label
 	BTS(String),
 
 	/// Instruction | Code   | State
@@ -275,89 +277,90 @@ pub enum Asm {
 	/// transfer the destination address to a register.
 	Bra(String),
 
-	// braf Rm
+	/// braf Rm
 	BraF(Reg),
-	// bsr label
+	/// bsr label
 	Bsr(String),
-	// bsrf Rm
+	/// bsrf Rm
 	BsrF(Reg),
-	// jmp @Rm
+	/// jmp @Rm
 	Jmp(Reg),
-	// jsr @Rm
+	/// jsr @Rm
 	Jsr(Reg),
-	// rts
+	/// rts
 	Rts,
 
 	/* System Control Instructions */
 
-	// clrt
+	/// clrt
 	ClrT,
-	// clrmac
+	/// clrmac
 	ClrMac,
-	// ldc Rm,SR
+	/// ldc Rm,SR
 	LdSr(Reg),
-	// ldc Rm,GBR
+	/// ldc Rm,GBR
 	LdGbr(Reg),
-	// ldc Rm,VBR
+	/// ldc Rm,VBR
 	LdVbr(Reg),
-	// ldc.l @Rm+,SR
+	/// ldc.l @Rm+,SR
 	LdMSr(Reg),
-	// ldc.l @Rm+,GBR
+	/// ldc.l @Rm+,GBR
 	LdMGbr(Reg),
-	// ldc.l @Rm+,VBR
+	/// ldc.l @Rm+,VBR
 	LdMVbr(Reg),
-	// lds Rm,MACH
+	/// lds Rm,MACH
 	LdMach(Reg),
-	// lds Rm,MACL
+	/// lds Rm,MACL
 	LdMacl(Reg),
-	// lds Rm,PR
+	/// lds Rm,PR
 	LdPr(Reg),
-	// lds.l @Rm+,MACH
+	/// lds.l @Rm+,MACH
 	LdMMach(Reg),
-	// lds.l @Rm+,MACL
+	/// lds.l @Rm+,MACL
 	LdMMacl(Reg),
-	// lds.l @Rm+,PR
+	/// lds.l @Rm+,PR
 	LdsMPr(Reg),
-	// nop
+	/// nop
 	#[default]
 	Nop,
-	// rte
+	/// rte
 	Rte,
-	// sett
+	/// sett
 	SetT,
-	// sleep
+	/// sleep
 	Sleep,
-	// stc SR,Rn
+	/// stc SR,Rn
 	StSr(Reg),
-	// stc GBR,Rn
+	/// stc GBR,Rn
 	StGbr(Reg),
-	// stc VBR,Rn
+	/// stc VBR,Rn
 	StVbr(Reg),
-	// stc.l SR,@-Rn
+	/// stc.l SR,@-Rn
 	StMSr(Reg),
-	// stc.l GBR,@-Rn
+	/// stc.l GBR,@-Rn
 	StMGbr(Reg),
-	// stc.l VBR,@-Rn
+	/// stc.l VBR,@-Rn
 	StMVbr(Reg),
-	// sts MACH,Rn
+	/// sts MACH,Rn
 	StMach(Reg),
-	// sts MACL,Rn
+	/// sts MACL,Rn
 	StMacl(Reg),
-	// sts PR,Rn
+	/// sts PR,Rn
 	StPr(Reg),
-	// sts.l MACH,@-Rn
+	/// sts.l MACH,@-Rn
 	StMMach(Reg),
-	// sts.l MACL,@-Rn
+	/// sts.l MACL,@-Rn
 	StMMacl(Reg),
-	// sts.l PR,@-Rn
+	/// sts.l PR,@-Rn
 	StMPr(Reg),
-	// trapa #U
+	/// trapa #U
 	TrapA(u8),
 }
 
 impl Display for Asm {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		match self {
+			Self::Comment(msg)  => write!(f, "\t\t\t; {msg}"),
 			Self::Label(label)  => write!(f, "{label}:"),
 			Self::MovI(s,n)     => write!(f, "\tmovb   #{s},r{n}"),
 			Self::MovWI(u,n)    => write!(f, "\tmovw   ({u},pc),r{n}"),
@@ -504,4 +507,3 @@ impl Display for Asm {
 		}
 	}
 }
-
