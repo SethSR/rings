@@ -1,11 +1,14 @@
 
 use std::collections::HashMap;
-
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::tac::{Data as TacData, Location, TAC};
 use crate::parser::Type;
 
 mod ins;
+
+#[cfg(test)] mod interpreter;
+#[cfg(test)] mod tests;
+
 use ins::Reg;
 pub use ins::Asm;
 
@@ -19,24 +22,55 @@ fn build_constant(data: &mut Vec<Asm>, typ: Type, c: i64) {
 			data.push(Asm::ExtUB(R0, R0));
 		}
 		Type::S16 => {
-			data.push(Asm::MovI((c >> 8) as i8, R0));
-			data.push(Asm::ShLL8(R0));
-			data.push(Asm::OrI(c as u8));
+			if (i8::MAX as i64..u8::MAX as i64).contains(&c) {
+				data.push(Asm::MovI(c as i8, R0));
+				data.push(Asm::ExtUB(R0, R0));
+			} else if (i8::MIN as i64..i8::MAX as i64).contains(&c) {
+				data.push(Asm::MovI(c as i8, R0));
+			} else {
+				data.push(Asm::MovW_(c as i16, R0));
+			}
+			//data.push(Asm::MovI((c >> 8) as i8, R0));
+			//data.push(Asm::ShLL8(R0));
+			//data.push(Asm::OrI(c as u8));
 		}
 		Type::U16 => {
-			data.push(Asm::MovI((c >> 8) as i8, R0));
-			data.push(Asm::ShLL8(R0));
-			data.push(Asm::OrI(c as u8));
-			data.push(Asm::ExtUW(R0, R0));
+			if (0..u8::MAX as i64).contains(&c) {
+				data.push(Asm::MovI(c as i8, R0));
+				data.push(Asm::ExtUB(R0, R0));
+			} else {
+				data.push(Asm::MovW_(c as i16, R0));
+				data.push(Asm::ExtUW(R0, R0));
+			}
+			//data.push(Asm::MovI((c >> 8) as i8, R0));
+			//data.push(Asm::ShLL8(R0));
+			//data.push(Asm::OrI(c as u8));
+			//data.push(Asm::ExtUW(R0, R0));
 		}
 		Type::S32 | Type::U32 => {
-			data.push(Asm::MovI((c >> 24) as i8, R0));
-			data.push(Asm::ShLL8(R0));
-			data.push(Asm::OrI((c >> 16) as u8));
-			data.push(Asm::ShLL8(R0));
-			data.push(Asm::OrI((c >> 8) as u8));
-			data.push(Asm::ShLL8(R0));
-			data.push(Asm::OrI(c as u8));
+			if (i8::MAX as i64..u8::MAX as i64).contains(&c) {
+				data.push(Asm::MovI(c as i8, R0));
+				data.push(Asm::ExtUB(R0, R0));
+			} else if (i8::MIN as i64..i8::MAX as i64).contains(&c) {
+				data.push(Asm::MovI(c as i8, R0));
+			} else if (i16::MAX as i64..u16::MAX as i64).contains(&c) {
+				data.push(Asm::MovW_(c as i16, R0));
+				data.push(Asm::ExtUW(R0, R0));
+			} else if (i16::MIN as i64..i16::MAX as i64).contains(&c) {
+				data.push(Asm::MovW_(c as i16, R0));
+				if typ == Type::U32 {
+					data.push(Asm::ExtUW(R0, R0));
+				}
+			} else {
+				data.push(Asm::MovL_(c as i32, R0));
+			}
+			//data.push(Asm::MovI((c >> 24) as i8, R0));
+			//data.push(Asm::ShLL8(R0));
+			//data.push(Asm::OrI((c >> 16) as u8));
+			//data.push(Asm::ShLL8(R0));
+			//data.push(Asm::OrI((c >> 8) as u8));
+			//data.push(Asm::ShLL8(R0));
+			//data.push(Asm::OrI(c as u8));
 		}
 		_ => unreachable!("cannot build immediates from non-integer types"),
 	}
@@ -104,7 +138,7 @@ pub fn lower(
 				let label = format!("{proc_name}_{lbl}");
 				data.push(Asm::Comment(format!("Jump {label}")));
 
-				data.push(Asm::Bra(label));
+				data.push(Asm::Bra_(label));
 				data.push(Asm::Nop);
 			}
 
@@ -197,6 +231,10 @@ pub fn lower(
 					}
 
 					BinaryOp::Div | BinaryOp::Mod => {
+						// DIV/MOD is expensive, so shouldn't happen in a loop and may be a decent location for
+						// data-pool table generation.
+						data.push(Asm::Table);
+
 						// TODO - srenshaw - Finish setting up the division header.
 
 						if ltyp.is_signed_integer() {
@@ -237,30 +275,28 @@ pub fn lower(
 
 					BinaryOp::ShL => {
 						let loop_label = lbl_gen.next(proc_name);
-						let check_label = lbl_gen.next(proc_name);
-						data.push(Asm::Bra(check_label.clone()));
+						data.push(Asm::Bra(1));
+						data.push(Asm::Nop);
 						data.push(Asm::Label(loop_label.clone()));
 						if ltyp.is_signed_integer() {
 							data.push(Asm::ShAL(TL));
 						} else {
 							data.push(Asm::ShLL(TL));
 						}
-						data.push(Asm::Label(check_label));
 						data.push(Asm::DT(TR));
 						data.push(Asm::BF(loop_label));
 					}
 
 					BinaryOp::ShR => {
 						let loop_label = lbl_gen.next(proc_name);
-						let check_label = lbl_gen.next(proc_name);
-						data.push(Asm::Bra(check_label.clone()));
+						data.push(Asm::Bra(1));
+						data.push(Asm::Nop);
 						data.push(Asm::Label(loop_label.clone()));
 						if ltyp.is_signed_integer() {
 							data.push(Asm::ShAR(TL));
 						} else {
 							data.push(Asm::ShLR(TL));
 						}
-						data.push(Asm::Label(check_label));
 						data.push(Asm::DT(TR));
 						data.push(Asm::BF(loop_label));
 					}
@@ -284,7 +320,140 @@ pub fn lower(
 		}
 	}
 
-	data
+	let mut data_pool = DataPool::default();
+	let mut output = vec![];
+	let mut idx = 0;
+	let mut jump_asm = false;
+	for (asm_idx, asm) in data.into_iter().enumerate() {
+		match asm {
+			Asm::MovW_(s,_) => {
+				output.push(asm);
+				data_pool.insert_word(asm_idx, output.len() - 1, s as u16);
+				if data_pool.should_create_table(idx) {
+					idx += data_pool.create_table(&mut output, true);
+				}
+				idx += 1;
+			}
+			Asm::MovL_(s,_) => {
+				output.push(asm);
+				data_pool.insert_long(asm_idx, output.len() - 1, s as u32);
+				if data_pool.should_create_table(idx) {
+					idx += data_pool.create_table(&mut output, true);
+				}
+				idx += 1;
+			}
+			Asm::Bra(_) | Asm::BraF(_) | Asm::Jmp(_) | Asm::Rts => {
+				jump_asm = true;
+				idx += 1;
+			}
+			Asm::Table => {
+				idx += data_pool.create_table(&mut output, true);
+			}
+			Asm::Label(_) | Asm::Comment(_) => output.push(asm),
+			_ => {
+				output.push(asm);
+				if jump_asm {
+					jump_asm = false;
+					idx += data_pool.create_table(&mut output, false);
+				}
+				idx += 1;
+			}
+		}
+	}
+
+	// Empty the Data Pool
+	data_pool.create_table(&mut output, false);
+
+	output
+}
+
+#[derive(Debug, Default)]
+struct DataPool {
+	idx_to_words: HashMap<usize,(usize,usize)>,
+	idx_to_longs: HashMap<usize,(usize,usize)>,
+	words: Vec<u16>,
+	longs: Vec<u32>,
+}
+
+impl DataPool {
+	fn insert_word(&mut self, idx: usize, pos: usize, word: u16) {
+		let word_idx = if let Some(word_idx) = self.words.iter()
+				.position(|x| *x == word)
+		{
+			word_idx
+		} else {
+			self.words.push(word);
+			self.words.len() - 1
+		};
+		self.idx_to_words.insert(idx, (pos, word_idx));
+	}
+
+	fn insert_long(&mut self, idx: usize, pos: usize, long: u32) {
+		let long_idx = if let Some(long_idx) = self.longs.iter()
+				.position(|x| *x == long)
+		{
+			long_idx
+		} else {
+			self.longs.push(long);
+			self.longs.len() - 1
+		};
+		self.idx_to_longs.insert(idx, (pos, long_idx));
+	}
+
+	fn should_create_table(&self, idx: usize) -> bool {
+		let num_buffer_bytes = 4;
+		let words_too_far = self.idx_to_words.iter()
+				.any(|(i,_)| 255 + num_buffer_bytes + i < (idx + self.words.len()));
+		let word_pad = self.words.len() & 1;
+		let longs_too_far = self.idx_to_longs.iter()
+				.any(|(i,_)| 510 + num_buffer_bytes + i < (idx + self.words.len() + word_pad + self.longs.len()));
+		words_too_far || longs_too_far
+	}
+
+	/// Generates a Literal-Pool for the given instruction stream
+	///
+	/// - returns the count of new 16-bit words
+	fn create_table(&mut self, output: &mut Vec<Asm>, needs_branch: bool) -> usize {
+		let start = output.len();
+		let word_pad = self.words.len() & 1;
+
+		if needs_branch {
+		let total = self.words.len() + word_pad + self.longs.len() * 2;
+			output.push(Asm::Bra(total as i16));
+			output.push(Asm::Nop);
+		}
+
+		for (asm_idx, (pos, word_idx)) in self.idx_to_words.drain() {
+			if let Asm::MovW_(_,r) = output[pos] {
+				let offset = output.len() + word_idx - asm_idx;
+				output[pos] = Asm::MovWI(offset as u8, r);
+			} else {
+				eprintln!("non-MovWI")
+			}
+		}
+
+		for (asm_idx, (pos, long_idx)) in self.idx_to_longs.drain() {
+			if let Asm::MovL_(_,r) = output[pos] {
+				let offset = output.len() + self.words.len() + word_pad + long_idx - asm_idx;
+				output[pos] = Asm::MovLI((offset >> 1) as u8, r);
+			} else {
+				eprintln!("non-MovL")
+			}
+		}
+
+		for word in self.words.drain(..) {
+			output.push(Asm::Word(word));
+		}
+		if word_pad > 0 {
+			output.push(Asm::Nop);
+		}
+		for long in self.longs.drain(..) {
+			output.push(Asm::Word((long >> 16) as u16));
+			output.push(Asm::Word(long as u16));
+		}
+
+		output.len() - start
+	}
 }
 
 fn extend_register(data: &mut Vec<Asm>, reg: Reg, typ: Type) {

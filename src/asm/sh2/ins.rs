@@ -6,9 +6,23 @@ pub type Reg = u8;
 #[allow(dead_code)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum Asm {
+	/* Fake Instructions */
+	/// A raw word
+	Word(u16),
+	/// A data-pool table location
+	Table,
+
+	/// Fake Instruction `mov.w #SS,Rn`
+	MovW_(i16, Reg),
+	/// Fake Instruction `mov.l #SSSS,Rn`
+	MovL_(i32, Reg),
+	/// Fake Instruction `bra label`
+	Bra_(String),
+
 	Comment(String),
 
 	Label(String),
+
 	/* Data Transfer */
 
 	/* Move Immediate Data */
@@ -275,7 +289,7 @@ pub enum Asm {
 	/// -4096 to +4094 bytes. If the displacement is too short to reach the branch destination, this
 	/// instruction must be changed to the JMP instruction. Here, a MOV instruction must be used to
 	/// transfer the destination address to a register.
-	Bra(String),
+	Bra(i16),
 
 	/// braf Rm
 	BraF(Reg),
@@ -360,6 +374,11 @@ pub enum Asm {
 impl Display for Asm {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		match self {
+			Self::Word(s)       => write!(f, "\t.dw ${s:04X}"),
+			Self::Table          => write!(f, "; DAT-TAB"),
+			Self::MovW_(s,n)  => write!(f, "\t; movw #${s:04X},r{n}"),
+			Self::MovL_(s,n)  => write!(f, "\t; movl #${s:08X},r{n}"),
+			Self::Bra_(s) => write!(f, "\tbra    {s}"),
 			Self::Comment(msg)  => write!(f, "\t\t\t; {msg}"),
 			Self::Label(label)  => write!(f, "{label}:"),
 			Self::MovI(s,n)     => write!(f, "\tmovb   #{s},r{n}"),
@@ -466,7 +485,7 @@ impl Display for Asm {
 			Self::BFS(s)        => write!(f, "\tbfs    {s}"),
 			Self::BT(s)         => write!(f, "\tbt     {s}"),
 			Self::BTS(s)        => write!(f, "\tbts    {s}"),
-			Self::Bra(s)        => write!(f, "\tbra    {s}"),
+			Self::Bra(s)        => write!(f, "\tbra    ({s},PC)"),
 			Self::BraF(m)       => write!(f, "\tbraf   r{m}"),
 			Self::Bsr(s)        => write!(f, "\tbsr    {s}"),
 			Self::BsrF(m)       => write!(f, "\tbsrf   r{m}"),
