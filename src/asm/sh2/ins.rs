@@ -3,25 +3,57 @@ use std::fmt::{Display, Formatter, Result};
 
 pub type Reg = u8;
 
-#[allow(dead_code)]
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Asm {
-	/* Fake Instructions */
-	/// A raw word
-	Word(u16),
 	/// A data-pool table location
 	Table,
-
-	/// Fake Instruction `mov.w #SS,Rn`
-	MovW_(i16, Reg),
-	/// Fake Instruction `mov.l #SSSS,Rn`
-	MovL_(i32, Reg),
-	/// Fake Instruction `bra label`
-	Bra_(String),
 
 	Comment(String),
 
 	Label(String),
+
+	MovWI(i16, Reg),
+	MovLI(i32, Reg),
+
+	BF(String),
+	BFS(String),
+	BT(String),
+	BTS(String),
+	Bra(String),
+	Bsr(String),
+
+	Ins(Ins),
+}
+
+impl Display for Asm {
+	fn fmt(&self, f: &mut Formatter) -> Result {
+		match self {
+			Self::Table          => write!(f, "; DAT-TAB"),
+
+			Self::Comment(msg)  => write!(f, "\t\t; {msg}"),
+
+			Self::Label(label)  => write!(f, "{label}:"),
+
+			Self::MovWI(s,n)  => write!(f, "; movw #${s:04X},r{n}"),
+			Self::MovLI(s,n)  => write!(f, "; movl #${s:08X},r{n}"),
+
+			Self::BF(label) => write!(f, "; bf {label}"),
+			Self::BFS(label) => write!(f, "; bfs {label}"),
+			Self::BT(label) => write!(f, "; bt {label}"),
+			Self::BTS(label) => write!(f, "; bts {label}"),
+			Self::Bra(label) => write!(f, "; bra {label}"),
+			Self::Bsr(label) => write!(f, "; bsr {label}"),
+
+			Self::Ins(ins) => write!(f, "{ins}"),
+		}
+	}
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum Ins {
+	/* Fake Instructions */
+	/// A raw word
+	Word(u16),
 
 	/* Data Transfer */
 
@@ -265,16 +297,16 @@ pub enum Asm {
 	/// 8-bit displacement is sign-extended and doubled. Consequently, the relative interval from the
 	/// branch destination is -256 to +254 bytes. If the displacement is too short to reach the branch
 	/// destination, use BF with the BRA instruction or the like.
-	BF(String),
+	BF(i8),
 
 	/// bf/s label
-	BFS(String),
+	BFS(i8),
 
 	/// bt label
-	BT(String),
+	BT(i8),
 
 	/// bt/s label
-	BTS(String),
+	BTS(i8),
 
 	/// Instruction | Code   | State
 	/// ----------- | ------ | -----
@@ -294,7 +326,7 @@ pub enum Asm {
 	/// braf Rm
 	BraF(Reg),
 	/// bsr label
-	Bsr(String),
+	Bsr(i16),
 	/// bsrf Rm
 	BsrF(Reg),
 	/// jmp @Rm
@@ -333,7 +365,7 @@ pub enum Asm {
 	/// lds.l @Rm+,MACL
 	LdMMacl(Reg),
 	/// lds.l @Rm+,PR
-	LdsMPr(Reg),
+	LdMPr(Reg),
 	/// nop
 	#[default]
 	Nop,
@@ -371,16 +403,10 @@ pub enum Asm {
 	TrapA(u8),
 }
 
-impl Display for Asm {
+impl Display for Ins {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		match self {
 			Self::Word(s)       => write!(f, "\t.dw ${s:04X}"),
-			Self::Table          => write!(f, "; DAT-TAB"),
-			Self::MovW_(s,n)  => write!(f, "\t; movw #${s:04X},r{n}"),
-			Self::MovL_(s,n)  => write!(f, "\t; movl #${s:08X},r{n}"),
-			Self::Bra_(s) => write!(f, "\tbra    {s}"),
-			Self::Comment(msg)  => write!(f, "\t\t\t; {msg}"),
-			Self::Label(label)  => write!(f, "{label}:"),
 			Self::MovI(s,n)     => write!(f, "\tmovb   #{s},r{n}"),
 			Self::MovWI(u,n)    => write!(f, "\tmovw   ({u},pc),r{n}"),
 			Self::MovLI(u,n)    => write!(f, "\tmovl   ({u},pc),r{n}"),
@@ -481,13 +507,13 @@ impl Display for Asm {
 			Self::ShLR8(n)      => write!(f, "\tshlr8  r{n}"),
 			Self::ShLL16(n)     => write!(f, "\tshll16 r{n}"),
 			Self::ShLR16(n)     => write!(f, "\tshlr16 r{n}"),
-			Self::BF(s)         => write!(f, "\tbf     {s}"),
-			Self::BFS(s)        => write!(f, "\tbfs    {s}"),
-			Self::BT(s)         => write!(f, "\tbt     {s}"),
-			Self::BTS(s)        => write!(f, "\tbts    {s}"),
+			Self::BF(s)         => write!(f, "\tbf     ({s},PC)"),
+			Self::BFS(s)        => write!(f, "\tbfs    ({s},PC)"),
+			Self::BT(s)         => write!(f, "\tbt     ({s},PC)"),
+			Self::BTS(s)        => write!(f, "\tbts    ({s},PC)"),
 			Self::Bra(s)        => write!(f, "\tbra    ({s},PC)"),
 			Self::BraF(m)       => write!(f, "\tbraf   r{m}"),
-			Self::Bsr(s)        => write!(f, "\tbsr    {s}"),
+			Self::Bsr(s)        => write!(f, "\tbsr    ({s},PC)"),
 			Self::BsrF(m)       => write!(f, "\tbsrf   r{m}"),
 			Self::Jmp(m)        => write!(f, "\tjmp    (r{m})"),
 			Self::Jsr(m)        => write!(f, "\tjsr    (r{m})"),
@@ -505,7 +531,7 @@ impl Display for Asm {
 			Self::LdPr(m)       => write!(f, "\tlds    r{m},pr"),
 			Self::LdMMach(m)    => write!(f, "\tlds    (r{m})+,mach"),
 			Self::LdMMacl(m)    => write!(f, "\tlds    (r{m})+,macl"),
-			Self::LdsMPr(m)     => write!(f, "\tlds    (r{m})+,pr"),
+			Self::LdMPr(m)      => write!(f, "\tlds    (r{m})+,pr"),
 			Self::Nop           => write!(f, "\tnop"),
 			Self::Rte           => write!(f, "\trte"),
 			Self::SetT          => write!(f, "\tsett"),
