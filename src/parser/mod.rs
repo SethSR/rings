@@ -123,22 +123,36 @@ pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
 		tables: data.tables,
 		types: data.types,
 		procedures: data.procedures.into_iter()
-				.map(|(proc_id, proc_data)| (proc_id, Procedure {
-					target: proc_data.target,
-					params: proc_data.params,
-					ret_type: proc_data.ret_type,
-					body: proc_data.body.into_iter()
-							.map(|Ast { kind, location }| {
-								let tok_start = location.start;
-								let tok_end = location.end;
-								let src_start = token_source(input, lex_data, tok_start).start;
-								let src_end = token_source(input, lex_data, tok_end).end;
-								Ast { kind, location: (src_start..src_end).into() }
-							})
-							.collect(),
-				}))
+				.map(|(proc_id, proc_data)| (proc_id, convert_proc_idx_to_src(input, lex_data, proc_data)))
 				.collect(),
 	})
+}
+
+fn convert_proc_idx_to_src(
+	input: &InputData,
+	lex_data: &LexData,
+	proc_data: Procedure<TokenId>,
+) -> Procedure<SrcPos> {
+	Procedure {
+		target: proc_data.target,
+		params: proc_data.params,
+		ret_type: proc_data.ret_type,
+		body: proc_data.body.into_iter()
+				.map(|node| convert_ast_idx_to_src(input, lex_data, node))
+				.collect(),
+	}
+}
+
+fn convert_ast_idx_to_src(
+	input: &InputData,
+	lex_data: &LexData,
+	node: Ast<AstKind, TokenId>,
+) -> Ast<AstKind, SrcPos> {
+	let tok_start = node.location.start;
+	let tok_end = node.location.end;
+	let src_start = token_source(input, lex_data, tok_start).start;
+	let src_end = token_source(input, lex_data, tok_end).end;
+	Ast { kind: node.kind, location: (src_start..src_end).into() }
 }
 
 #[derive(Debug, Clone, Copy)]
