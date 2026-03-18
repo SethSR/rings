@@ -3,9 +3,9 @@ use crate::{input, layout, lexer, packing, parser, tac, type_checker};
 use crate::identifier::{Identifier, Map as IdentMap};
 
 use super::*;
-use super::interpreter::{M68kEmu, interpret};
+use super::interpreter::interpret;
 
-fn setup(source: &str) -> IdentMap<Vec<Asm>> {
+fn setup(source: &str) -> IdentMap<(Vec<Asm>, Vec<Block>)> {
 	let mut source_str = String::new();
 	source_str.push_str("region Stack[0] @ 0;");
 	source_str.push_str(source);
@@ -36,7 +36,7 @@ fn setup(source: &str) -> IdentMap<Vec<Asm>> {
 			.expect("missing stack address")
 			.span.start;
 
-	let mut out = IdentMap::<Vec<Asm>>::default();
+	let mut out = IdentMap::<(Vec<Asm>, Vec<Block>)>::default();
 
 	for (proc_id, tac) in tac_data {
 		let proc_name = lex_data.text(&input, &proc_id).to_owned();
@@ -51,8 +51,8 @@ fn set_stack_value() {
 	let data = setup("main {
 			let a: s8 = (2 + 3) * (3 - 1);
 		}");
-	let main_proc = &data[&"main".id()];
-	let emu = interpret(main_proc);
+	let proc = &data[&"main".id()];
+	let emu = interpret(&proc.0, &proc.1);
 	assert_eq!(emu.mem.len(), 1);
 	assert_eq!(emu.mem[&0], 10);
 }
@@ -69,8 +69,8 @@ fn branch() {
 				c += 1;
 			}
 		}");
-	let main_proc = &data[&"branch".id()];
-	let emu = interpret(main_proc);
+	let proc = &data[&"branch".id()];
+	let emu = interpret(&proc.0, &proc.1);
 	assert_eq!(emu.mem.len(), 2);
 	assert_eq!(emu.mem[&0], 7);
 	assert_eq!(emu.mem[&4], 8);
@@ -86,8 +86,8 @@ fn for_loop() {
 				c += b * 2;
 			}
 		}");
-	let main_proc = &data[&"for_loop".id()];
-	let emu = interpret(main_proc);
+	let proc = &data[&"for_loop".id()];
+	let emu = interpret(&proc.0, &proc.1);
 	assert_eq!(emu.mem.len(), 2);
 	assert_eq!(emu.mem[&0], 4);
 	assert_eq!(emu.mem[&4], 80);

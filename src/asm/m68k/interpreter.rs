@@ -1,20 +1,14 @@
 
 use std::collections::HashMap;
 
-use super::{Addr, Asm, Cond, Sz, EA};
+use super::{Addr, Asm, Block, Cond, Sz, EA};
 
-pub fn interpret(data: &[Asm]) -> M68kEmu {
+pub fn interpret(data: &[Asm], blocks: &[Block]) -> M68kEmu {
 	let mut emu = M68kEmu::default();
-	emu.labels.extend(data.iter()
-			.enumerate()
-			.filter_map(|(idx, asm)| match asm {
-				Asm::Label(label) => Some((label.to_owned(), idx)),
-				_ => None,
-			}));
+	emu.blocks = blocks.into();
 
 	loop {
 		let asm = &data[emu.pc];
-		print!("\t{asm}\t");
 		emu.pc += 1;
 		match asm {
 			Asm::Comment(_) => {}
@@ -25,7 +19,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let (res, c) = add(*sz, src, *dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(c, is_neg(*sz, res), res == 0, c, c);
-				print!("; {d} = {res}");
 			}
 			Asm::Add2(sz,d,ea) => {
 				let src = emu.d[*d as usize];
@@ -33,7 +26,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let (res, c) = add(*sz, src, *dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(c, is_neg(*sz, res), res == 0, c, c);
-				print!("; {ea} = {res}");
 			}
 			Asm::And1(sz,ea,d) => {
 				let src = emu.get_src(sz, ea, 0xBFF);
@@ -41,7 +33,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let res = and(*sz, src, *dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
-				print!("; {d} = {res}");
 			}
 			Asm::And2(sz,d,ea) => {
 				let src = emu.d[*d as usize];
@@ -49,7 +40,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let res = and(*sz, src, *dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
-				print!("; {ea} = {res}");
 			}
 			Asm::Asl(sz,s,d) => {
 				let src = emu.d[*s as usize] & 0x3F;
@@ -77,7 +67,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				};
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(x, is_neg(*sz, res), res == 0, v, src != 0 && dneg);
-				print!("; {d} = {res}");
 			}
 			Asm::Asr(sz,s,d) => {
 				let src = emu.d[*s as usize] & 0x3F;
@@ -91,21 +80,19 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				};
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(x, is_neg(*sz, res), res == 0, false, src != 0 && dneg);
-				print!("; {d} = {res}");
 			}
 			Asm::Bcc(cc,label) => {
 				if emu.get_cond(*cc) {
-					emu.pc = emu.labels[label];
+					emu.pc = emu.blocks[*label as usize].span.start;
 				}
 			}
 			Asm::Bra(label) => {
-				emu.pc = emu.labels[label];
+				emu.pc = emu.blocks[*label as usize].span.start;
 			}
 			Asm::Clr(sz,ea) => {
 				let dst = emu.get_dst(sz, ea, 0xBF8);
 				*dst = calc_result(*sz, 0, *dst);
 				emu.set_flags(emu.x, false, true, false, false);
-				print!("; {ea} = 0");
 			}
 			Asm::Cmp(sz,ea,d) => {
 				let src = emu.get_src(sz, ea, 0xFFF);
@@ -125,7 +112,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let res_mod = (*dst as i32) % (src as i16 as i32);
 				*dst = ((res_mod << 16) | res_div) as u32;
 				emu.set_flags(emu.x, is_neg(Sz::W, res_div as u32), res_div == 0, c, false);
-				print!("; {d} = {res_mod}:{res_div}");
 			}
 			Asm::DivU(ea,d) => {
 				let src = emu.get_src(&Sz::L, ea, 0xBFF);
@@ -134,7 +120,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let res_mod = *dst % (src as u16 as u32);
 				*dst = (res_mod << 16) | res_div;
 				emu.set_flags(emu.x, is_neg(Sz::W, res_div), res_div == 0, c, false);
-				print!("; {d} = {res_mod}:{res_div}");
 			}
 			Asm::Eor(sz,d,ea) => {
 				let src = emu.d[*d as usize];
@@ -146,7 +131,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				};
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
-				print!("; {ea} = {res}");
 			}
 			Asm::Ext(sz,d) => {
 				let dst = &mut emu.d[*d as usize];
@@ -163,7 +147,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				}
 				*dst = res;
 				emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
-				print!("; {d} = {res}");
 			}
 			Asm::Lsl(sz,s,d) => {
 				let src = emu.d[*s as usize] & 0x3F;
@@ -188,7 +171,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				*dst = calc_result(*sz, res, *dst);
 				let x = if src != 0 { bit } else { emu.x };
 				emu.set_flags(x, is_neg(Sz::L, res), res == 0, false, src != 0 && bit);
-				print!("; {d} = {res}");
 			}
 			Asm::Lsr(sz,s,d) => {
 				let src = emu.d[*s as usize] & 0x3F;
@@ -213,14 +195,12 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				*dst = calc_result(*sz, res, *dst);
 				let x = if src != 0 { bit } else { emu.x };
 				emu.set_flags(x, is_neg(Sz::L, res), res == 0, false, src != 0 && bit);
-				print!("; {d} = {res}");
 			}
 			Asm::Move(sz,eas,ead) => {
 				let src = emu.get_src(sz, eas, 0xFFF);
 				let dst = emu.get_dst(sz, ead, 0xFF8);
 				*dst = calc_result(*sz, src, *dst);
 				emu.set_flags(emu.x, is_neg(*sz, src), src == 0, false, false);
-				print!("; {ead} = {src}");
 			}
 			Asm::MulS(ea,d) => {
 				let src = emu.get_src(&Sz::W, ea, 0xBFF);
@@ -228,7 +208,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let res = (*dst as i16 as i32) * src as i16 as i32;
 				*dst = res as u32;
 				emu.set_flags(emu.x, is_neg(Sz::L, res as u32), res == 0, false, false);
-				print!("; {d} = {res}");
 			}
 			Asm::MulU(ea,d) => {
 				let src = emu.get_src(&Sz::W, ea, 0xBFF);
@@ -236,14 +215,12 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let res = (*dst as u16 as u32) * src as u16 as u32;
 				*dst = res;
 				emu.set_flags(emu.x, is_neg(Sz::L, res), res == 0, false, false);
-				print!("; {d} = {res}");
 			}
 			Asm::Neg(sz,ea) => {
 				let dst = emu.get_dst(sz, ea, 0xBF8);
 				let (res, c) = 0u32.overflowing_sub(*dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(res != 0, is_neg(*sz, res), res == 0, c, res != 0);
-				print!("; {ea} = {res}");
 			}
 			Asm::Not(sz,ea) => {
 				let dst = emu.get_dst(sz, ea, 0xBF8);
@@ -254,7 +231,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				};
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
-				print!("; {ea} = {res}");
 			}
 			Asm::Nop => {}
 			Asm::Or1(sz,ea,d) => {
@@ -263,7 +239,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let res = or(*sz, src, *dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
-				print!("; {d} = {res}");
 			}
 			Asm::Or2(sz,d,ea) => {
 				let src = emu.d[*d as usize];
@@ -271,17 +246,14 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let res = or(*sz, src, *dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(emu.x, is_neg(*sz, res), res == 0, false, false);
-				print!("; {ea} = {res}");
 			}
 			Asm::Rts => {
-				println!();
 				break
 			}
 			Asm::Scc(cc,ea) => {
 				let c = emu.get_cond(*cc);
 				let dst = emu.get_dst(&Sz::B, ea, 0xBF8);
 				*dst = calc_result(Sz::B, if c { 0xFF } else { 0x00 }, *dst);
-				print!("; {ea} = {dst}");
 			}
 			Asm::Sub1(sz,ea,d) => {
 				let src = emu.get_src(sz, ea, 0xFFF);
@@ -289,7 +261,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let (res, c) = sub(*sz, src, *dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(c, is_neg(*sz, res), res == 0, c, c);
-				print!("; {d} = {res}");
 			}
 			Asm::Sub2(sz,d,ea) => {
 				let src = emu.d[*d as usize];
@@ -297,14 +268,12 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				let (res,c) = sub(*sz, src, *dst);
 				*dst = calc_result(*sz, res, *dst);
 				emu.set_flags(c, is_neg(*sz, res), res == 0, c, c);
-				print!("; {ea} = {res}");
 			}
 			Asm::Swap(d) => {
 				let dst = &mut emu.d[*d as usize];
 				let res = (*dst << 16) | (*dst >> 16);
 				*dst = res;
 				emu.set_flags(emu.x, is_neg(Sz::L, res), res == 0, false, false);
-				print!("; {d} = {res}");
 			}
 			Asm::Trap(v) => todo!("Trap({v})"),
 			Asm::Tst(sz,ea) => {
@@ -312,7 +281,6 @@ pub fn interpret(data: &[Asm]) -> M68kEmu {
 				emu.set_flags(emu.x, is_neg(*sz, dst), dst == 0, false, false);
 			}
 		}
-		println!();
 	}
 
 	emu
@@ -389,7 +357,7 @@ pub struct M68kEmu {
 	v: bool,
 	c: bool,
 	pub mem: HashMap<u32, u32>,
-	labels: HashMap<String, usize>,
+	blocks: Vec<Block>,
 }
 
 impl M68kEmu {

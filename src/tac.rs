@@ -1,4 +1,6 @@
 
+use std::collections::HashMap;
+
 use crate::identifier::{IdentId, Map as IdentMap};
 use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
@@ -37,12 +39,16 @@ pub fn eval(
 
 		let mut data = Data::new(*proc_id, proc_data, prs_data);
 
+		let start_label = tac.label();
+		tac.start_block(start_label);
 		lower_node(
 			(typed_body.len() - 1).into(),
 			&mut tac,
 			&mut data,
 		)?;
-		data.next_label = tac.next_label;
+		data.instructions = tac.instructions;
+		data.blocks = tac.blocks;
+		data.curr_label = tac.curr_label;
 		data.next_reg = tac.next_reg;
 		out.insert(*proc_id, data);
 	}
@@ -74,7 +80,6 @@ pub enum TAC {
 	UnOp { op: UnaryOp, rhs: Location, dst: Location },
 
 	// Control Flow
-	Label(LabelId),
 	/// Jump unconditionally to LabelId
 	Jump(LabelId),
 	/// Jump to LabelId if VRegId != 0
@@ -90,11 +95,13 @@ pub enum TAC {
 #[derive(Debug)]
 struct TACData<'a> {
 	typed_body: &'a TypedList,
-	local_map: IdentMap<Location>,
 	prs_data: &'a PrsData<SrcPos>,
 	pak_data: &'a PakData,
 	loc_data: &'a IdentMap<u32>,
-	next_label: LabelId,
+	local_map: IdentMap<Location>,
+	instructions: Vec<TAC>,
+	blocks: HashMap<LabelId, BasicBlock>,
+	curr_label: LabelId,
 	next_reg: VRegId,
 }
 
@@ -111,14 +118,43 @@ impl<'a> TACData<'a> {
 			pak_data,
 			loc_data,
 			local_map: IdentMap::default(),
-			next_label: 0,
+			instructions: vec![],
+			blocks: HashMap::default(),
+			curr_label: 0,
 			next_reg: 0,
 		}
 	}
 
+	fn emit(&mut self, instr: TAC) {
+		self.instructions.push(instr);
+	}
+
+	fn start_block(&mut self, name: LabelId) {
+		let start = self.instructions.len();
+
+		if let Some(curr_block) = self.blocks.get_mut(&(self.curr_label - 1)) {
+			curr_block.span.end = start;
+			curr_block.next_blocks.push(name);
+		}
+
+		self.blocks.insert(name, BasicBlock {
+			span: (start..start).into(),
+			next_blocks: vec![],
+		});
+	}
+
+	fn end_block(&mut self, name: LabelId, next_blocks: &[LabelId]) {
+		let Some(block) = self.blocks.get_mut(&name) else {
+			panic!("missing block {name}");
+		};
+
+		block.span.end = self.instructions.len();
+		block.next_blocks.extend(next_blocks);
+	}
+
 	fn label(&mut self) -> LabelId {
-		self.next_label += 1;
-		self.next_label - 1
+		self.curr_label += 1;
+		self.curr_label - 1
 	}
 
 	fn reg(&mut self) -> VRegId {
@@ -128,12 +164,21 @@ impl<'a> TACData<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BasicBlock {
+	/// Range of the `Data::instructions` vector
+	pub span: super::Span<usize>,
+	/// Index into the `Data::blocks` vector
+	pub next_blocks: Vec<LabelId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Data {
 	pub name: IdentId,
 	pub target: Target,
 	pub locals: Vec<IdentId>,
 	pub instructions: Vec<TAC>,
-	pub next_label: LabelId,
+	pub blocks: HashMap<LabelId, BasicBlock>,
+	pub curr_label: LabelId,
 	pub next_reg: VRegId,
 }
 
@@ -150,13 +195,10 @@ impl Data {
 					.map(|(_,_,id,_)| *id)
 					.collect(),
 			instructions: vec![],
-			next_label: 0,
+			blocks: HashMap::default(),
+			curr_label: 0,
 			next_reg: 0,
 		}
-	}
-
-	fn emit(&mut self, instr: TAC) {
-		self.instructions.push(instr);
 	}
 }
 
@@ -173,7 +215,7 @@ fn get_location_reg(
 			Location::Stack(_, typ) => {
 				let vr = tac.reg();
 				let typ = typ.clone();
-				data.emit(TAC::Move {
+				tac.emit(TAC::Move {
 					src,
 					dst: Location::VReg(vr, typ),
 				});
@@ -213,7 +255,7 @@ fn lower_node(
 
 			let src = Location::Const(val, ast.typ);
 			let dst = Location::VReg(tac.reg(), ast.typ);
-			data.emit(TAC::Move { src, dst });
+			tac.emit(TAC::Move { src, dst });
 			Ok(Some(dst))
 		}
 
@@ -252,7 +294,7 @@ fn lower_node(
 			let (vr, typ) = get_location_reg(rhs, tac, data)?;
 
 			let src = Location::VReg(vr, typ);
-			data.emit(TAC::Move { src, dst });
+			tac.emit(TAC::Move { src, dst });
 
 			Ok(Some(Location::VReg(vr, ast.typ)))
 		}
@@ -266,7 +308,7 @@ fn lower_node(
 			};
 
 			let dst = Location::VReg(tac.reg(), ast.typ);
-			data.emit(TAC::BinOp { op, lhs, rhs, dst });
+			tac.emit(TAC::BinOp { op, lhs, rhs, dst });
 			Ok(Some(dst))
 		}
 
@@ -275,7 +317,7 @@ fn lower_node(
 				return Err(Error::missing_ast_node(data.name, rhs));
 			};
 			let dst = Location::VReg(tac.reg(), ast.typ);
-			data.emit(TAC::UnOp { op, rhs, dst });
+			tac.emit(TAC::UnOp { op, rhs, dst });
 			Ok(Some(dst))
 		}
 
@@ -283,7 +325,8 @@ fn lower_node(
 			let vr = maybe_expr
 					.and_then(|id| get_location_reg(id, tac, data).ok())
 					.map(|(vr,_)| vr);
-			data.emit(TAC::Return(vr));
+			tac.emit(TAC::Return(vr));
+			tac.end_block(tac.curr_label - 1, &[]);
 			Ok(vr.map(|vr| Location::VReg(vr, ast.typ)))
 		}
 
@@ -295,58 +338,66 @@ fn lower_node(
 		}
 
 		AstKind::If { cond, ref then_block, ref else_block } => {
+			let curr_label = tac.curr_label;
+			let else_label = tac.label();
 			let then_label = tac.label();
 			let end_label = tac.label();
 
 			// if cond goto then
 			let (cond_vr,_) = get_location_reg(cond, tac, data)?;
-			data.emit(TAC::JumpIf {
+			tac.emit(TAC::JumpIf {
 				lbl: then_label,
 				vr: cond_vr,
 			});
+			tac.end_block(curr_label - 1, &[else_label, then_label]);
 
 			// else block
+			tac.start_block(else_label);
 			for stmt_id in else_block {
 				lower_node(*stmt_id, tac, data)?;
 			}
-			data.emit(TAC::Jump(end_label));
+			tac.emit(TAC::Jump(end_label));
+			tac.end_block(else_label, &[end_label]);
 
 			// then block
-			data.emit(TAC::Label(then_label));
+			tac.start_block(then_label);
 			for stmt_id in then_block {
 				lower_node(*stmt_id, tac, data)?;
 			}
+			tac.end_block(then_label, &[end_label]);
 
 			// end
-			data.emit(TAC::Label(end_label));
+			tac.start_block(end_label);
 			Ok(None)
 		}
 
 		AstKind::While { cond, ref block } => {
-			let cond_label = tac.label();
+			let curr_label = tac.curr_label;
 			let loop_label = tac.label();
+			let cond_label = tac.label();
+			let end_label = tac.label();
 
 			// goto check
-			data.emit(TAC::Jump(cond_label));
-
-			// loop:
-			data.emit(TAC::Label(loop_label));
+			tac.emit(TAC::Jump(cond_label));
+			tac.end_block(curr_label - 1, &[cond_label]);
 
 			// body
+			tac.start_block(loop_label);
 			for stmt_id in block {
 				lower_node(*stmt_id, tac, data)?;
 			}
-
-			// check:
-			data.emit(TAC::Label(cond_label));
+			tac.end_block(loop_label, &[cond_label]);
 
 			// if cond goto loop
+			tac.start_block(cond_label);
 			let (vr, _) = get_location_reg(cond, tac, data)?;
-			data.emit(TAC::JumpIf {
+			tac.emit(TAC::JumpIf {
 				lbl: loop_label,
 				vr,
 			});
+			tac.end_block(cond_label, &[loop_label, end_label]);
 
+			tac.start_block(end_label);
 			Ok(None)
 		}
 
@@ -395,6 +446,7 @@ fn lower_node(
 					panic!()
 				};
 
+				let curr_label = tac.curr_label;
 				let start_label = tac.label();
 				let end_label = tac.label();
 
@@ -403,8 +455,10 @@ fn lower_node(
 					return Err(Error::missing_ast_node(data.name, start_id));
 				};
 
+				tac.end_block(curr_label - 1, &[start_label]);
+
 				// start:
-				data.emit(TAC::Label(start_label));
+				tac.start_block(start_label);
 
 				// if i >= end goto end
 				let Some(cmp_rhs) = lower_node(end_id, tac, data)? else {
@@ -413,13 +467,13 @@ fn lower_node(
 
 				let vr2 = tac.reg();
 				let cmp_dst = Location::VReg(vr2, Type::Bool);
-				data.emit(TAC::BinOp {
+				tac.emit(TAC::BinOp {
 					op: BinaryOp::CmpGE,
 					lhs: idx,
 					rhs: cmp_rhs,
 					dst: cmp_dst,
 				});
-				data.emit(TAC::JumpIf {
+				tac.emit(TAC::JumpIf {
 					lbl: end_label,
 					vr: vr2,
 				});
@@ -430,7 +484,7 @@ fn lower_node(
 				}
 
 				// i = i + 1
-				data.emit(TAC::BinOp {
+				tac.emit(TAC::BinOp {
 					op: BinaryOp::Add,
 					lhs: idx,
 					rhs: Location::Const(1, Type::S8),
@@ -438,10 +492,11 @@ fn lower_node(
 				});
 
 				// goto start
-				data.emit(TAC::Jump(start_label));
+				tac.emit(TAC::Jump(start_label));
+				tac.end_block(start_label, &[start_label, end_label]);
 
 				// end:
-				data.emit(TAC::Label(end_label));
+				tac.start_block(end_label);
 			}
 
 			// TODO - srenshaw - Handle table iteration, multiple variables, etc.
@@ -686,12 +741,15 @@ mod tests {
 			}
 			return b + c;
 		}");
+
 		let section = &section_db[&"a".id()];
 		assert_eq!(section.locals, [
 			"b".id(),
 			"c".id(),
 		]);
+
 		assert_eq!(section.instructions, [
+			// Label 0
 			// let b: s8 = 5;
 			TAC::Move {
 				src: Location::Const(5, Type::S8),
@@ -721,7 +779,8 @@ mod tests {
 				rhs: Location::VReg(2, Type::S8),
 				dst: Location::VReg(3, Type::S8),
 			},
-			TAC::JumpIf { lbl: 0, vr: 3 },
+			TAC::JumpIf { lbl: 2, vr: 3 },
+			// Label 1
 			// b = 1;
 			TAC::Move {
 				src: Location::Const(1, Type::S8),
@@ -731,8 +790,8 @@ mod tests {
 				src: Location::VReg(4, Type::S8),
 				dst: Location::Stack(0, Type::S8),
 			},
-			TAC::Jump(1),
-			TAC::Label(0),
+			TAC::Jump(3),
+			// Label 2
 			// c = 2;
 			TAC::Move {
 				src: Location::Const(2, Type::S8),
@@ -742,7 +801,7 @@ mod tests {
 				src: Location::VReg(5, Type::S8),
 				dst: Location::Stack(1, Type::S8),
 			},
-			TAC::Label(1),
+			// Label 3
 			// return b + c;
 			TAC::BinOp {
 				op: BinaryOp::Add,
@@ -752,6 +811,24 @@ mod tests {
 			},
 			TAC::Return(Some(6)),
 		]);
+
+		assert_eq!(section.blocks.get(&0), Some(&BasicBlock {
+			span: (0..7).into(),
+			next_blocks: vec![1, 2],
+		}));
+		assert_eq!(section.blocks.get(&1), Some(&BasicBlock {
+			span: (7..10).into(),
+			next_blocks: vec![3],
+		}));
+		assert_eq!(section.blocks.get(&2), Some(&BasicBlock {
+			span: (10..12).into(),
+			next_blocks: vec![3],
+		}));
+		assert_eq!(section.blocks.get(&3), Some(&BasicBlock {
+			span: (12..14).into(),
+			next_blocks: vec![],
+		}));
+		assert_eq!(section.blocks.get(&4), None);
 	}
 
 	#[test]
@@ -768,6 +845,7 @@ mod tests {
 			"b".id(),
 		]);
 		assert_eq!(section.instructions, [
+			// Label 0
 			TAC::Move {
 				src: Location::Const(5, Type::S8),
 				dst: Location::VReg(0, Type::S8),
@@ -776,8 +854,8 @@ mod tests {
 				src: Location::VReg(0, Type::S8),
 				dst: Location::Stack(0, Type::S8),
 			},
-			TAC::Jump(0),
-			TAC::Label(1),
+			TAC::Jump(2),
+			// Label 1
 			TAC::Move {
 				src: Location::Const(1, Type::S8),
 				dst: Location::VReg(1, Type::S8),
@@ -792,7 +870,7 @@ mod tests {
 				src: Location::VReg(2, Type::S8),
 				dst: Location::Stack(0, Type::S8),
 			},
-			TAC::Label(0),
+			// Label 2
 			TAC::Move {
 				src: Location::Const(0, Type::S8),
 				dst: Location::VReg(3, Type::S8),
@@ -804,8 +882,27 @@ mod tests {
 				dst: Location::VReg(4, Type::S8),
 			},
 			TAC::JumpIf { lbl: 1, vr: 4 },
+			// Label 3
 			TAC::Return(None),
 		]);
+
+		assert_eq!(section.blocks.get(&0), Some(&BasicBlock {
+			span: (0..3).into(),
+			next_blocks: vec![2],
+		}));
+		assert_eq!(section.blocks.get(&1), Some(&BasicBlock {
+			span: (3..6).into(),
+			next_blocks: vec![2],
+		}));
+		assert_eq!(section.blocks.get(&2), Some(&BasicBlock {
+			span: (6..9).into(),
+			next_blocks: vec![1, 3],
+		}));
+		assert_eq!(section.blocks.get(&3), Some(&BasicBlock {
+			span: (9..10).into(),
+			next_blocks: vec![],
+		}));
+		assert_eq!(section.blocks.get(&4), None);
 	}
 
 	#[test]
@@ -824,6 +921,7 @@ mod tests {
 			"i".id(),
 		]);
 		assert_eq!(section.instructions, [
+			// Label 0
 			TAC::Move {
 				src: Location::Const(4, Type::S8),
 				dst: Location::VReg(0, Type::S8),
@@ -840,12 +938,12 @@ mod tests {
 				src: Location::VReg(1, Type::S8),
 				dst: Location::Stack(1, Type::S8),
 			},
-			// Loop head
 			TAC::Move {
 				src: Location::Const(0, Type::U8),
 				dst: Location::VReg(2, Type::U8),
 			},
-			TAC::Label(0),
+			// Loop head
+			// Label 1
 			TAC::Move {
 				src: Location::Const(10, Type::U8),
 				dst: Location::VReg(3, Type::U8),
@@ -857,7 +955,7 @@ mod tests {
 				rhs: Location::VReg(3, Type::U8),
 				dst: Location::VReg(4, Type::Bool),
 			},
-			TAC::JumpIf { lbl: 1, vr: 4 },
+			TAC::JumpIf { lbl: 2, vr: 4 },
 			// Loop body
 			TAC::Move {
 				src: Location::Const(2, Type::S8),
@@ -886,11 +984,25 @@ mod tests {
 				rhs: Location::Const(1, Type::S8),
 				dst: Location::VReg(2, Type::U8),
 			},
-			TAC::Jump(0),
+			TAC::Jump(1),
 			// Loop end
-			TAC::Label(1),
+			// Label 2
 			TAC::Return(None),
 		]);
+
+		assert_eq!(section.blocks.get(&0), Some(&BasicBlock {
+			span: (0..5).into(),
+			next_blocks: vec![1],
+		}));
+		assert_eq!(section.blocks.get(&1), Some(&BasicBlock {
+			span: (5..14).into(),
+			next_blocks: vec![1, 2],
+		}));
+		assert_eq!(section.blocks.get(&2), Some(&BasicBlock {
+			span: (14..15).into(),
+			next_blocks: vec![],
+		}));
+		assert_eq!(section.blocks.get(&3), None);
 	}
 
 	#[test]
@@ -963,7 +1075,7 @@ mod tests {
 		let proc_tac = &tac_data[&"main".id()];
 		let tac_emu = interpret(proc_tac);
 		assert!(tac_emu.mem.is_empty());
-		assert_eq!(tac_emu.labels.len(), 2);
+		assert_eq!(tac_emu.labels.len(), 3);
 		assert_eq!(tac_emu.stack.len(), 2);
 		assert_eq!(tac_emu.stack[&1], 4 * 2 * 10);
 	}
@@ -1005,17 +1117,15 @@ mod tests {
 
 	fn interpret(data: &Data) -> TacEmu {
 		let mut tac_emu = TacEmu::default();
-		for (idx, tac) in data.instructions.iter().enumerate() {
-			if let TAC::Label(label) = tac {
-				tac_emu.labels.insert(*label, idx);
-			}
+		for (label, bb) in data.blocks.iter() {
+			tac_emu.labels.insert(*label, bb.span.start);
 		}
 
 		loop {
 			let tac = &data.instructions[tac_emu.pc];
 			tac_emu.pc += 1;
 			match tac {
-				TAC::Label(_) => {}
+				//TAC::Label(_) => {}
 				TAC::Return(with_value) => match with_value {
 					None => {
 						eprintln!("Return");

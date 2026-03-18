@@ -51,8 +51,8 @@ pub fn eval(
 
 #[derive(Debug)]
 pub enum Data {
-	M68k(Vec<m68k::Asm>),
-	SH2(Vec<sh2::Asm>),
+	M68k((Vec<m68k::Asm>, Vec<Block>)),
+	SH2((Vec<sh2::Asm>, Vec<Block>)),
 	//X86(Vec<x86_64::Asm>),
 	//Z80(Vec<z80::Asm>),
 }
@@ -61,12 +61,20 @@ impl Display for Data {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		let mut out = vec![];
 		match self {
-			Self::M68k(data) => out.extend(
-				data.iter().map(|asm| asm.to_string())
-			),
-			Self::SH2(data) => {
-				for asm in data {
-					out.push(asm.to_string());
+			Self::M68k((data, blocks)) => {
+				for (idx, block) in blocks.iter().enumerate() {
+					out.push(format!("_{idx}: ; -> {:?}", block.next_blocks));
+					for asm in &data[block.span.start..block.span.end] {
+						out.push(asm.to_string());
+					}
+				}
+			}
+			Self::SH2((data, blocks)) => {
+				for (idx, block) in blocks.iter().enumerate() {
+					out.push(format!("_{idx}: ; -> {:?}", block.next_blocks));
+					for asm in &data[block.span.start..block.span.end] {
+						out.push(asm.to_string());
+					}
 				}
 			}
 			//Self::X86(data) => {
@@ -79,6 +87,51 @@ impl Display for Data {
 			//),
 		}
 		write!(f, "{}", out.join("\n"))
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct Block {
+	span: Span<usize>,
+	next_blocks: Vec<LabelId>,
+}
+
+struct BasicToAsmConverter {
+	basic_blocks: HashMap<LabelId, crate::tac::BasicBlock>,
+	block_idx: LabelId,
+	block_start: usize,
+	asm_blocks: Vec<Block>,
+}
+impl BasicToAsmConverter {
+	fn new(basic_blocks: HashMap<LabelId, crate::tac::BasicBlock>) -> Self {
+		Self {
+			basic_blocks,
+			block_idx: 0,
+			block_start: 0,
+			asm_blocks: vec![],
+		}
+	}
+
+	fn check(&mut self, idx: usize, block_end: usize) {
+		if let Some(block) = self.basic_blocks.get(&self.block_idx) {
+			if idx == block.span.end {
+				self.asm_blocks.push(Block {
+					span: (self.block_start..block_end).into(),
+					next_blocks: block.next_blocks.clone(),
+				});
+				self.block_start = block_end;
+				self.block_idx += 1;
+			}
+		}
+	}
+
+	fn finish(&mut self, block_end: usize) {
+		if let Some(block) = self.basic_blocks.get(&self.block_idx) {
+			self.asm_blocks.push(Block {
+				span: (self.block_start..block_end).into(),
+				next_blocks: block.next_blocks.clone(),
+			});
+		}
 	}
 }
 

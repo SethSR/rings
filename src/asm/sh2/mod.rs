@@ -1,8 +1,11 @@
 
 use std::collections::HashMap;
+
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::tac::{Data as TacData, Location, TAC};
 use crate::parser::Type;
+
+use super::{BasicToAsmConverter, Block, LabelGenerator};
 
 mod ins;
 
@@ -91,13 +94,22 @@ pub fn lower(
 	tac_data: TacData,
 	stack_addr: u32,
 	ret_type: Type,
-) -> Vec<Asm> {
+) -> (Vec<Asm>, Vec<Block>) {
+	let TacData {
+		instructions,
+		blocks,
+		curr_label,
+		..
+	} = tac_data;
+
+	let mut block_converter = BasicToAsmConverter::new(blocks);
+
 	let registers = super::allocate(
 		&[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ],
-		&tac_data.instructions,
+		&instructions,
 	);
 
-	let mut lbl_gen = super::LabelGenerator(tac_data.next_label);
+	let mut lbl_gen = LabelGenerator(curr_label);
 
 	let mut data = vec![
 		Asm::Label(proc_name.to_owned()),
@@ -109,17 +121,15 @@ pub fn lower(
 		data.push(Asm::Mov(R0, SP));
 	}
 
-	for tac in &tac_data.instructions {
+	for (idx, tac) in instructions.iter().enumerate() {
+		block_converter.check(idx, data.len());
+
 		match tac {
 			TAC::Move { src, dst } => {
 				data.push(Asm::Comment(format!("Move {src:?} -> {dst:?}")));
 
 				move_src_to_target(&mut data, &registers, src, TL);
 				move_target_to_dst(&mut data, &registers, TL, dst);
-			}
-
-			TAC::Label(lbl) => {
-				data.push(Asm::Label(format!("{proc_name}_{lbl}")));
 			}
 
 			TAC::Return(with_value) => {
@@ -320,6 +330,8 @@ pub fn lower(
 		}
 	}
 
+	block_converter.finish(data.len());
+
 	let mut data_pool = DataPool::default();
 	let mut output = vec![];
 	let mut idx = 0;
@@ -364,7 +376,7 @@ pub fn lower(
 	// Empty the Data Pool
 	data_pool.create_table(&mut output, false);
 
-	output
+	(output, block_converter.asm_blocks)
 }
 
 #[derive(Debug, Default)]

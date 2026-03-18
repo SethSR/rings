@@ -5,6 +5,8 @@ use crate::operators::{BinaryOp, UnaryOp};
 use crate::parser::Type;
 use crate::tac::{Data as TacData, Location, TAC};
 
+use super::{BasicToAsmConverter, Block, LabelId};
+
 #[cfg(test)] mod interpreter;
 #[cfg(test)] mod tests;
 
@@ -27,10 +29,18 @@ const TL: Data = Data::D6;
 /// Right-hand side temporary register
 const TR: Data = Data::D7;
 
-pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
+pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> (Vec<Asm>, Vec<Block>) {
+	let TacData {
+		instructions,
+		blocks,
+		..
+	} = tac_data;
+
+	let mut block_converter = BasicToAsmConverter::new(blocks);
+
 	let registers = super::allocate(
 		&[ Data::D0, Data::D1, Data::D2, Data::D3, Data::D4, Data::D5 ],
-		&tac_data.instructions,
+		&instructions,
 	);
 
 	let mut data = vec![
@@ -42,7 +52,9 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 		data.push(Asm::Move(Sz::L, EA::Imm(stack_addr as i32), EA::Adr(VAR_SP)));
 	}
 
-	for tac in &tac_data.instructions {
+	for (idx, tac) in instructions.iter().enumerate() {
+		block_converter.check(idx, data.len());
+
 		match tac {
 			TAC::BinOp { op, lhs, rhs, dst } => {
 				data.push(Asm::Comment(format!("{lhs:?} {op} {rhs:?} -> {dst:?}")));
@@ -213,17 +225,17 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 				data.push(Asm::Move(sz, ea_src, ea_dst));
 			}
 
-			TAC::Label(id) => {
-				data.push(Asm::Label(format!("{proc_name}_{id}")));
-			}
+			//TAC::Label(id) => {
+			//	data.push(Asm::Label(format!("{proc_name}_{id}")));
+			//}
 
 			TAC::Jump(id) => {
-				data.push(Asm::Bra(format!("{proc_name}_{id}")));
+				data.push(Asm::Bra(*id));
 			}
 
 			TAC::JumpIf { lbl, vr } => {
 				data.push(Asm::Tst(Sz::L, EA::Dat(registers[vr])));
-				data.push(Asm::Bcc(Cond::NE, format!("{proc_name}_{lbl}")));
+				data.push(Asm::Bcc(Cond::NE, *lbl));
 			}
 
 			TAC::Return(with_value) => {
@@ -238,7 +250,9 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> Vec<Asm> {
 		}
 	}
 
-	data
+	block_converter.finish(data.len());
+
+	(data, block_converter.asm_blocks)
 }
 
 fn get_src_from_location(regs: &VRegMap, loc: &Location) -> (EA, Sz, bool) {
@@ -532,8 +546,8 @@ pub enum Asm {
 	And2(Sz,Data,EA),
 	Asl(Sz,Data,Data),
 	Asr(Sz,Data,Data),
-	Bcc(Cond,String),
-	Bra(String),
+	Bcc(Cond,LabelId),
+	Bra(LabelId),
 	Clr(Sz,EA),
 	Cmp(Sz,EA,Data),
 	CmpI(Sz,i32,EA),
