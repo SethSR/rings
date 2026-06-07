@@ -836,3 +836,4 @@ fn process_fields(cursor: &mut cursor::Cursor,
 
 	Ok(fields)
 }
+

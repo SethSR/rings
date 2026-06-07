@@ -83,7 +83,7 @@ impl Lexer {
 	fn next(&mut self, source: &str) -> Result<bool, Error> {
 		let start = self.pos;
 
-		let kind = match self.peek(source, 0) {
+		let kind = match self.peek(source) {
 			None => {
 				self.out.tok_list.push(Kind::Eof);
 				self.out.tok_pos.push(start);
@@ -92,7 +92,7 @@ impl Lexer {
 
 			Some(c) if c.is_alphabetic() || c == '_' => {
 				self.advance(source);
-				while let Some(c) = self.peek(source, 0) {
+				while let Some(c) = self.peek(source) {
 					if !c.is_alphanumeric() && c != '_' {
 						break;
 					}
@@ -158,10 +158,10 @@ impl Lexer {
 
 			Some('-') => {
 				self.advance(source);
-				if let Some(c) = self.peek(source, 0).filter(|c| c.is_numeric()) {
+				if let Some(c) = self.peek(source).filter(|c| c.is_numeric()) {
 					self.lex_number(source, self.pos, c, true)?
 				} else {
-					self.item(source, &[
+					self.select(source, &[
 						('=', Kind::DashEq),
 						('>', Kind::Arrow),
 					], Kind::Dash)
@@ -170,7 +170,7 @@ impl Lexer {
 
 			Some(':') => {
 				self.advance(source);
-				self.item(source, &[
+				self.select(source, &[
 					(':', Kind::Colon2),
 					('=', Kind::ColonEq),
 				], Kind::Colon)
@@ -178,7 +178,7 @@ impl Lexer {
 
 			Some('<') => {
 				self.advance(source);
-				self.item(source, &[
+				self.select(source, &[
 					('<', Kind::LArr2),
 					('=', Kind::LArrEq),
 				], Kind::LArr)
@@ -186,7 +186,7 @@ impl Lexer {
 
 			Some('>') => {
 				self.advance(source);
-				self.item(source, &[
+				self.select(source, &[
 					('>', Kind::RArr2),
 					('=', Kind::RArrEq),
 				], Kind::RArr)
@@ -194,55 +194,55 @@ impl Lexer {
 
 			Some('^') => {
 				self.advance(source);
-				self.item(source, &[
-					('^', Kind::Carrot2),
-					('=', Kind::CarrotEq),
-				], Kind::Carrot)
+				self.select(source, &[
+					('^', Kind::Caret2),
+					('=', Kind::CaretEq),
+				], Kind::Caret)
 			}
 
 			Some('+') => {
 				self.advance(source);
-				self.item(source, &[('=', Kind::PlusEq)], Kind::Plus)
+				if self.expect(source, '=') { Kind::PlusEq } else { Kind::Plus }
 			}
 
 			Some('*') => {
 				self.advance(source);
-				self.item(source, &[('=', Kind::StarEq)], Kind::Star)
+				if self.expect(source, '=') { Kind::StarEq } else { Kind::Star }
 			}
 
 			Some('/') => {
 				self.advance(source);
-				self.item(source, &[('=', Kind::SlashEq)], Kind::Slash)
+				if self.expect(source, '=') { Kind::SlashEq } else { Kind::Slash }
 			}
 
 			Some('%') => {
 				self.advance(source);
-				self.item(source, &[('=', Kind::PercentEq)], Kind::Percent)
+				if self.expect(source, '=') { Kind::PercentEq } else { Kind::Percent }
 			}
 
 			Some('=') => {
 				self.advance(source);
-				self.item(source, &[('=', Kind::Eq2)], Kind::Eq)
+				if self.expect(source, '=') { Kind::Eq2 } else { Kind::Eq }
 			}
 
 			Some('!') => {
 				self.advance(source);
-				self.item(source, &[('=', Kind::BangEq)], Kind::Bang)
+				if self.expect(source, '=') { Kind::BangEq } else { Kind::Bang }
 			}
 
 			Some('.') => {
 				self.advance(source);
-				self.item(source, &[('.', Kind::Dot2)], Kind::Dot)
+				if self.expect(source, '.') { Kind::Dot2 } else { Kind::Dot }
 			}
 
 			Some('&') => {
 				self.advance(source);
-				self.item(source, &[('&', Kind::Amp2)], Kind::Amp)
+				if self.expect(source, '&') { Kind::Amp2 } else { Kind::Amp }
 			}
 
 			Some('|') => {
 				self.advance(source);
-				self.item(source, &[('|', Kind::Bar2)], Kind::Bar)
+				if self.expect(source, '|') { Kind::Bar2 } else { Kind::Bar }
 			}
 
 			Some('(') => { self.advance(source); Kind::OParen }
@@ -274,7 +274,7 @@ impl Lexer {
 
 	fn lex_number(&mut self,
 		source: &str,
-		mut start: usize,
+		start: usize,
 		c: char,
 		is_negative: bool,
 	) -> Result<Kind, Error> {
@@ -284,7 +284,7 @@ impl Lexer {
 		enum NumType { Bin, Hex, Dec }
 
 		let num_type = if c == '0' {
-			match self.peek(source, 0) {
+			match self.peek(source) {
 				Some('b') => NumType::Bin,
 				Some('x') => NumType::Hex,
 				_ => NumType::Dec,
@@ -293,12 +293,14 @@ impl Lexer {
 			NumType::Dec
 		};
 
-		if num_type != NumType::Dec {
-			self.advance(source);
-			start = self.pos;
-		}
+		let digits_start = if num_type != NumType::Dec {
+			self.advance(source); // skip 'b' or 'x'
+			self.pos
+		} else {
+			start
+		};
 
-		while let Some(c) = self.peek(source, 0) {
+		while let Some(c) = self.peek(source) {
 			let valid = match num_type {
 				NumType::Bin => ['0', '1', '_'].contains(&c),
 				NumType::Hex => c.is_ascii_hexdigit() || c == '_',
@@ -308,20 +310,23 @@ impl Lexer {
 			self.advance(source);
 		}
 		let mut is_fractional = false;
-		if self.peek(source, 0) == Some('.') && self.peek(source, 1) != Some('.') {
-
-			is_fractional = true;
-			self.advance(source);
-			while let Some(c) = self.peek(source, 0) {
-				if !c.is_numeric() && c != '_' {
-					break;
-				}
+		match self.peek2(source) {
+			(Some('.'), Some('.')) => {} // This is a Range, not a decimal
+			(Some('.'), _) => {
+				is_fractional = true;
 				self.advance(source);
+				while let Some(c) = self.peek(source) {
+					if !c.is_numeric() && c != '_' {
+						break;
+					}
+					self.advance(source);
+				}
 			}
+			_ => {} // End of number
 		}
 
-		let text = &source[start..self.pos];
-		let tok_src = (start..self.pos).into();
+		let text = &source[digits_start..self.pos];
+		let tok_src = (digits_start..self.pos).into();
 		if is_fractional {
 			match num_type {
 				NumType::Bin => Err(Error::new(tok_src,
@@ -349,17 +354,14 @@ impl Lexer {
 
 	fn skip_whitespace_and_comments(&mut self, source: &str) {
 		loop {
-			match self.peek(source, 0) {
-				Some(c) if c.is_whitespace() => {
+			match self.peek2(source) {
+				(Some(c), _) if c.is_whitespace() => {
 					self.advance(source);
 				}
-				Some('-') if self.peek(source, 1) == Some('-') => {
+				(Some('-'), Some('-')) => {
 					self.advance(source);
 					self.advance(source);
-					while let Some(c) = self.peek(source, 0) {
-						if c == '\n' {
-							break;
-						}
+					while let Some(c) = self.peek(source) && c != '\n' {
 						self.advance(source);
 					}
 				}
@@ -368,28 +370,30 @@ impl Lexer {
 		}
 	}
 
-	fn item(&mut self,
+	fn select(&mut self,
 		source: &str,
 		pairs: &[(char, Kind)],
-		end: Kind,
+		default_kind: Kind,
 	) -> Kind {
 		for &(ch, kind) in pairs {
 			if self.expect(source, ch) {
 				return kind;
 			}
 		}
-		end
+		default_kind
 	}
 
-	fn peek(&self,
-		source: &str,
-		offset: usize,
-	) -> Option<char> {
-		source[self.pos..].chars().nth(offset)
+	fn peek(&self, source: &str) -> Option<char> {
+		source[self.pos..].chars().next()
+	}
+
+	fn peek2(&self, source: &str) -> (Option<char>, Option<char>) {
+		let mut chars = source[self.pos..].chars();
+		(chars.next(), chars.next())
 	}
 
 	fn expect(&mut self, source: &str, ch: char) -> bool {
-		if self.peek(source, 0) == Some(ch) {
+		if self.peek(source) == Some(ch) {
 			self.advance(source);
 			true
 		} else {
@@ -398,7 +402,7 @@ impl Lexer {
 	}
 
 	fn advance(&mut self, source: &str) {
-		if let Some(c) = self.peek(source, 0) {
+		if let Some(c) = self.peek(source) {
 			self.pos += c.len_utf8();
 		}
 	}
@@ -441,7 +445,7 @@ mod can_lex {
 			Kind::Integer(2),
 			Kind::Star,
 			Kind::Integer(1024),
-			Kind::Carrot,
+			Kind::Caret,
 			Kind::Integer(3),
 			Kind::CBracket,
 			Kind::At,

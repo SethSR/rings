@@ -100,8 +100,8 @@ impl<'a> Cursor<'a> {
 			TokenKind::BangEq  => { self.advance(); Ok(BinaryOp::CmpNE) }
 			TokenKind::Bar     => { self.advance(); Ok(BinaryOp::BinOr) }
 			TokenKind::Bar2    => { self.advance(); Ok(BinaryOp::LogOr) }
-			TokenKind::Carrot  => { self.advance(); Ok(BinaryOp::BinXor) }
-			TokenKind::Carrot2 => { self.advance(); Ok(BinaryOp::LogXor) }
+			TokenKind::Caret   => { self.advance(); Ok(BinaryOp::BinXor) }
+			TokenKind::Caret2  => { self.advance(); Ok(BinaryOp::LogXor) }
 			TokenKind::Dash    => { self.advance(); Ok(BinaryOp::Sub) }
 			TokenKind::Eq2     => { self.advance(); Ok(BinaryOp::CmpEQ) }
 			TokenKind::LArr    => { self.advance(); Ok(BinaryOp::CmpLT) }
