@@ -41,7 +41,6 @@ fn calc_offset(location: u16, size: u16) -> u16 {
 
 fn calc_size(typ: &Type, rec_sizes: &IdentMap<RecordPacking>) -> Option<u8> {
 	match typ {
-		Type::Unknown | Type::Int | Type::Dec => None,
 		Type::Bool | Type::S8 | Type:: U8 => Some(1),
 		Type::S16 | Type::U16 => Some(2),
 		Type::S32 | Type::U32 => Some(4),
@@ -49,6 +48,9 @@ fn calc_size(typ: &Type, rec_sizes: &IdentMap<RecordPacking>) -> Option<u8> {
 				.map(|layout| layout.sizes.iter().sum()),
 		Type::Table(_) => panic!("table types not allowed in compound types"),
 		Type::Void => panic!("void types not allowed in compound types"),
+		Type::Int | Type::Dec |
+		Type::Unresolved |
+		Type::Unknown => panic!("all types should be resolved past the type-checker"),
 	}
 }
 

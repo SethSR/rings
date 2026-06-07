@@ -27,7 +27,7 @@ table players_dead[4] {
 }
 
 main {
-	enemy_id : u8 = 0;
+	let enemy_id : u8 = 0;
 	-- loop-begin
 	enemy_id += 1;
 	-- loop-end

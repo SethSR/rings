@@ -3,9 +3,10 @@ use crate::identifier::IdentId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
-	Unknown,
+	Unresolved,
 	Int,
 	Dec,
+	Unknown,
 
 	Bool,
 	Record(IdentId),

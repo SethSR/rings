@@ -269,11 +269,9 @@ fn type_text(
 		}
 		#[cfg(feature="table")]
 		Type::Table(ident_id) => {
-			text(
-				&self.source, &self.identifiers,
-				ident_id,
-			).to_string()
+			lex_data.text(input, ident_id).to_string()
 		}
 		_ => format!("{ring_type:?}"),
 	}
 }
+
