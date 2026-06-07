@@ -375,8 +375,8 @@ fn process_placement(
 ) -> Result<MemoryPlacement, Error> {
 	let mut cursor = Cursor::from_start(lex_data, start_placement);
 	match cursor.current() {
-		TokenKind::In => process_in(&mut cursor, &data, end_token),
-		TokenKind::At => process_at(&mut cursor, &data, end_token)
+		TokenKind::In => process_in(&mut cursor, data, end_token),
+		TokenKind::At => process_at(&mut cursor, data, end_token)
 		.map_err(|e| match e {
 			Error::ExpectedToken { found, ..} => {
 				Error::ExpectedToken {
@@ -425,9 +425,13 @@ fn process_in(cursor: &mut Cursor,
 	end_token: TokenKind,
 ) -> Result<MemoryPlacement, Error> {
 	cursor.expect(TokenKind::In)?;
+	let location = cursor.index();
 	let ident = cursor.expect_identifier("region name")?;
 	if !data.regions.contains_key(&ident) {
-		return Err(cursor.expected_token("known region name"));
+		return Err(Error::UndefinedType {
+			location,
+			ident_id: ident,
+		});
 	}
 
 	if cursor.current() != end_token {
