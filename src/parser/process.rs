@@ -21,11 +21,22 @@ pub enum MemoryPlacement {
 	Region(IdentId),
 }
 
-pub fn process_tasks(lex_data: &LexData,
+fn error_duplication(name_id: IdentId, locations: &IdentMap<TokenId>) -> Error {
+	let location = locations[&name_id];
+	Error::DuplicateDeclaration { name_id, location }
+}
+
+fn error_recursion(name_id: IdentId, locations: &IdentMap<TokenId>) -> Error {
+	let location = locations[&name_id];
+	Error::RecursiveType { name_id, location }
+}
+
+pub fn process_tasks(
+	lex_data: &LexData,
+	locations: &IdentMap<TokenId>,
 	mut queue: VecDeque<Task>,
 ) -> Result<Data<TokenId>, Error> {
 	let mut data = Data::default();
-	let mut locations = IdentMap::default();
 
 	let mut failed_tasks = IdentSet::default();
 	let mut consecutive_failures = 0;
@@ -37,10 +48,7 @@ pub fn process_tasks(lex_data: &LexData,
 				match evaluate_expr(&mut cursor, &data, TokenKind::Semicolon) {
 					Ok(value) => {
 						if data.values.insert(ident, value).is_some() {
-							return Err(Error::DuplicateDeclaration {
-								location: locations[&ident],
-								name_id: ident,
-							});
+							return Err(error_duplication(ident, &locations));
 						}
 						data.kinds.insert(ident, Kind::Value);
 						failed_tasks.remove(&ident);
@@ -61,10 +69,7 @@ pub fn process_tasks(lex_data: &LexData,
 				match process_region(lex_data, &data, parse_type) {
 					Ok((start, end)) => {
 						if data.regions.insert(ident, Region::new(start, end)).is_some() {
-							return Err(Error::DuplicateDeclaration {
-								location: locations[&ident],
-								name_id: ident,
-							});
+							return Err(error_duplication(ident, locations));
 						}
 						data.kinds.insert(ident, Kind::Region);
 						failed_tasks.remove(&ident);
@@ -81,16 +86,11 @@ pub fn process_tasks(lex_data: &LexData,
 				}
 			}
 
-			Task::Record { ident, location, start_placement, start_fields } => {
-				locations.insert(ident, location);
-
+			Task::Record { ident, start_placement, start_fields } => {
 				match process_record(lex_data, &data, start_placement, start_fields) {
 					Ok((placement, fields)) => {
 						if data.records.insert(ident, Record { placement, fields }).is_some() {
-							return Err(Error::DuplicateDeclaration {
-								location: locations[&ident],
-								name_id: ident,
-							});
+							return Err(error_duplication(ident, locations));
 						}
 						data.kinds.insert(ident, Kind::Record);
 						failed_tasks.remove(&ident);
@@ -111,10 +111,7 @@ pub fn process_tasks(lex_data: &LexData,
 				match process_table(lex_data, &data, start_placement, start_rows, start_fields) {
 					Ok(table) => {
 						if data.tables.insert(ident, table).is_some() {
-							return Err(Error::DuplicateDeclaration {
-								location: locations[&ident],
-								name_id: ident,
-							});
+							return Err(error_duplication(ident, locations));
 						}
 						data.kinds.insert(ident, Kind::Table);
 						failed_tasks.remove(&ident);
@@ -135,10 +132,7 @@ pub fn process_tasks(lex_data: &LexData,
 				match process_proc(lex_data, &mut data, ident, target, start) {
 					Ok(proc) => {
 						if data.procedures.insert(ident, proc).is_some() {
-							return Err(Error::DuplicateDeclaration {
-								location: locations[&ident],
-								name_id: ident,
-							});
+							return Err(error_duplication(ident, locations));
 						}
 						data.kinds.insert(ident, Kind::Procedure);
 						failed_tasks.remove(&ident);
@@ -158,7 +152,7 @@ pub fn process_tasks(lex_data: &LexData,
 	}
 
 	for (name,_) in &data.records {
-		check_recursion(name, name, &data.records, &locations, &mut vec![])?;
+		check_recursion(name, name, &data.records, locations, &mut vec![])?;
 	}
 
 	Ok(data)
@@ -207,10 +201,7 @@ fn check_recursion(
 		for field in &record.fields {
 			if let Type::Record(name) = &field.1 {
 				if name == root {
-					return Err(Error::RecursiveType {
-						location: locations[name],
-						name_id: *root,
-					});
+					return Err(error_recursion(*root, locations));
 				}
 				check_recursion(root, name, records, locations, visited)?;
 			}

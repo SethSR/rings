@@ -21,7 +21,6 @@ pub enum Task {
 	},
 	Record {
 		ident: IdentId,
-		location: TokenId,
 		start_placement: Option<TokenId>,
 		start_fields: TokenId,
 	},

@@ -1,7 +1,7 @@
 
 use std::collections::VecDeque;
 
-use crate::identifier::{IdentId, Identifier};
+use crate::identifier::{IdentId, Identifier, Map as IdentMap};
 use crate::lexer::Data as LexData;
 use crate::token::{Id as TokenId, Kind as TokenKind};
 use crate::Target;
@@ -11,8 +11,9 @@ use super::error::Error;
 use super::task::{RegionParseType, Task};
 
 pub fn scan_tasks(lex_data: &LexData,
-) -> Result<VecDeque<Task>, Error> {
+) -> Result<(VecDeque<Task>, IdentMap<TokenId>), Error> {
 	let mut tasks = vec![];
+	let mut locations = IdentMap::default();
 
 	let mut cursor = Cursor::new(lex_data);
 	while cursor.current() != TokenKind::Eof {
@@ -20,47 +21,47 @@ pub fn scan_tasks(lex_data: &LexData,
 		cursor.advance();
 		match token {
 			TokenKind::Value => {
-				tasks.push(scan_value_task(&mut cursor)?);
+				tasks.push(scan_value_task(&mut cursor, &mut locations)?);
 			}
 
 			TokenKind::Region => {
-				tasks.push(scan_region_task(&mut cursor)?);
+				tasks.push(scan_region_task(&mut cursor, &mut locations)?);
 			}
 
 			TokenKind::Record => {
-				tasks.push(scan_record_task(&mut cursor)?);
+				tasks.push(scan_record_task(&mut cursor, &mut locations)?);
 			}
 
 			TokenKind::Table => {
-				tasks.push(scan_table_task(&mut cursor)?);
+				tasks.push(scan_table_task(&mut cursor, &mut locations)?);
 			}
 
 			TokenKind::Main => {
-				tasks.push(scan_proc(&mut cursor, "main".id(), None)?);
+				tasks.push(scan_proc(&mut cursor, &mut locations, "main".id(), None)?);
 			}
 
 			TokenKind::Sub => {
-				tasks.push(scan_proc(&mut cursor, "sub".id(), None)?);
+				tasks.push(scan_proc(&mut cursor, &mut locations, "sub".id(), None)?);
 			}
 
 			TokenKind::Proc => {
-				tasks.push(scan_named_proc(&mut cursor, None)?);
+				tasks.push(scan_named_proc(&mut cursor, &mut locations, None)?);
 			}
 
 			TokenKind::M68k => {
-				tasks.push(scan_target_proc(&mut cursor, Some(Target::M68k))?);
+				tasks.push(scan_target_proc(&mut cursor, &mut locations, Some(Target::M68k))?);
 			}
 
 			TokenKind::SH2 => {
-				tasks.push(scan_target_proc(&mut cursor, Some(Target::SH2))?);
+				tasks.push(scan_target_proc(&mut cursor, &mut locations, Some(Target::SH2))?);
 			}
 
 			TokenKind::X64 => {
-				tasks.push(scan_target_proc(&mut cursor, Some(Target::X86_64))?);
+				tasks.push(scan_target_proc(&mut cursor, &mut locations, Some(Target::X86_64))?);
 			}
 
 			TokenKind::Z80 => {
-				tasks.push(scan_target_proc(&mut cursor, Some(Target::Z80))?);
+				tasks.push(scan_target_proc(&mut cursor, &mut locations, Some(Target::Z80))?);
 			}
 			_ => {
 				return Err(cursor.expected_token("top-level statement"))
@@ -68,23 +69,30 @@ pub fn scan_tasks(lex_data: &LexData,
 		}
 	}
 
-	Ok(tasks.into_iter().collect())
+	Ok((tasks.into_iter().collect(), locations))
 }
 
-fn scan_value_task(cursor: &mut Cursor,
+fn scan_value_task(
+	cursor: &mut Cursor,
+	locations: &mut IdentMap<TokenId>,
 ) -> Result<Task, Error> {
+	let loc = cursor.index();
 	let ident = cursor.expect_identifier("value name")?;
 	cursor.expect(TokenKind::Eq)?;
 	let start = skip_until(cursor, &[TokenKind::Semicolon])?;
 	cursor.expect(TokenKind::Semicolon)?;
+	locations.insert(ident, loc);
 	Ok(Task::Value { ident, start })
 }
 
 /// Matches REGION syntax:
 /// - `region <ident>[<expr>..<expr>];`
 /// - `region <ident>[<expr>] @ <expr>;`
-fn scan_region_task(cursor: &mut Cursor,
+fn scan_region_task(
+	cursor: &mut Cursor,
+	locations: &mut IdentMap<TokenId>,
 ) -> Result<Task, Error> {
+	let loc = cursor.index();
 	let ident = cursor.expect_identifier("region name")?;
 	cursor.expect(TokenKind::OBracket)?;
 	let first = skip_until(cursor, &[TokenKind::Dot2, TokenKind::CBracket])?;
@@ -99,6 +107,7 @@ fn scan_region_task(cursor: &mut Cursor,
 		RegionParseType::Location { size: first, address }
 	};
 	cursor.expect(TokenKind::Semicolon)?;
+	locations.insert(ident, loc);
 	Ok(Task::Region { ident, parse_type })
 }
 
@@ -106,9 +115,11 @@ fn scan_region_task(cursor: &mut Cursor,
 /// - `record <ident> @ <expr> {...}`
 /// - `record <ident> in <region> {...}`
 /// - `record <ident> {...}`
-fn scan_record_task(cursor: &mut Cursor,
+fn scan_record_task(
+	cursor: &mut Cursor,
+	locations: &mut IdentMap<TokenId>,
 ) -> Result<Task, Error> {
-	let location = cursor.index();
+	let loc = cursor.index();
 	let ident = cursor.expect_identifier("record name")?;
 
 	let start_placement = scan_placement(cursor)?;
@@ -117,15 +128,19 @@ fn scan_record_task(cursor: &mut Cursor,
 	let start_fields = skip_until(cursor, &[TokenKind::CBrace])?;
 	cursor.expect(TokenKind::CBrace)?;
 
-	Ok(Task::Record { ident, location, start_placement, start_fields })
+	locations.insert(ident, loc);
+	Ok(Task::Record { ident, start_placement, start_fields })
 }
 
 /// Matches Table syntax
 /// - `table <ident>[<rows>] @ <expr> {...}`
 /// - `table <ident>[<rows>] in <region> {...}`
 /// - `table <ident>[<rows>] {...}`
-fn scan_table_task(cursor: &mut Cursor,
+fn scan_table_task(
+	cursor: &mut Cursor,
+	locations: &mut IdentMap<TokenId>,
 ) -> Result<Task, Error> {
+	let loc = cursor.index();
 	let ident = cursor.expect_identifier("table name")?;
 
 	cursor.expect(TokenKind::OBracket)?;
@@ -138,6 +153,7 @@ fn scan_table_task(cursor: &mut Cursor,
 	let start_fields = skip_until(cursor, &[TokenKind::CBrace])?;
 	cursor.expect(TokenKind::CBrace)?;
 
+	locations.insert(ident, loc);
 	Ok(Task::Table { ident, start_rows, start_placement, start_fields })
 }
 
@@ -174,43 +190,50 @@ fn skip_brace_block(cursor: &mut Cursor) -> Result<(), Error> {
 /// Matches initial procedures:
 /// - `main {...}`
 /// - `sub {...}`
-fn scan_proc(cursor: &mut Cursor,
+fn scan_proc(
+	cursor: &mut Cursor,
+	locations: &mut IdentMap<TokenId>,
 	ident: IdentId,
 	target: Option<Target>,
 ) -> Result<Task, Error> {
 	let start = cursor.index();
 	skip_brace_block(cursor)?;
+	locations.insert(ident, start);
 	Ok(Task::Proc { ident, target, start })
 }
 
 /// Matches named procedures:
 /// - `proc <ident>(...) <return> {...}`
-fn scan_named_proc(cursor: &mut Cursor,
+fn scan_named_proc(
+	cursor: &mut Cursor,
+	locations: &mut IdentMap<TokenId>,
 	target: Option<Target>,
 ) -> Result<Task, Error> {
 	let name_id = cursor.expect_identifier("procedure name")?;
-	scan_proc(cursor, name_id, target)
+	scan_proc(cursor, locations, name_id, target)
 }
 
 /// Matches target specific procedures:
 /// - `<target> proc <ident>(...) <return> {...}`
 /// - `<target> main {...}`
 /// - `<target> sub {...}`
-fn scan_target_proc(cursor: &mut Cursor,
+fn scan_target_proc(
+	cursor: &mut Cursor,
+	locations: &mut IdentMap<TokenId>,
 	target: Option<Target>,
 ) -> Result<Task, Error> {
 	match cursor.current() {
 		TokenKind::Main => {
 			cursor.advance();
-			scan_proc(cursor, "main".id(), target)
+			scan_proc(cursor, locations, "main".id(), target)
 		}
 		TokenKind::Sub => {
 			cursor.advance();
-			scan_proc(cursor, "sub".id(), target)
+			scan_proc(cursor, locations, "sub".id(), target)
 		}
 		_ => {
 			cursor.expect(TokenKind::Proc)?;
-			scan_named_proc(cursor, target)
+			scan_named_proc(cursor, locations, target)
 		}
 	}
 }

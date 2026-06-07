@@ -93,14 +93,14 @@ impl<T: Debug> Debug for Data<T> {
 
 pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
 ) -> Result<Data<SrcPos>, Error> {
-	let tasks = scan::scan_tasks(lex_data)
+	let (tasks, locations) = scan::scan_tasks(lex_data)
 		.map_err(|e| e.into_comp_error(input, lex_data))
 		.map_err(|e| e.with_kind(ErrKind::Parser))?;
 	if should_print {
 		eprintln!("{tasks:?}");
 	}
 
-	let data = process::process_tasks(lex_data, tasks)
+	let data = process::process_tasks(lex_data, &locations, tasks)
 		.map_err(|e| e.into_comp_error(input, lex_data))
 		.map_err(|e| e.with_kind(ErrKind::Parser))?;
 	if should_print {
