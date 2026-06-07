@@ -12,7 +12,7 @@ use super::task::{RegionParseType, Task};
 
 pub fn scan_tasks(lex_data: &LexData,
 ) -> Result<(VecDeque<Task>, IdentMap<TokenId>), Error> {
-	let mut tasks = vec![];
+	let mut tasks = VecDeque::default();
 	let mut locations = IdentMap::default();
 
 	let mut cursor = Cursor::new(lex_data);
@@ -21,47 +21,47 @@ pub fn scan_tasks(lex_data: &LexData,
 		cursor.advance();
 		match token {
 			TokenKind::Value => {
-				tasks.push(scan_value_task(&mut cursor, &mut locations)?);
+				tasks.push_back(scan_value_task(&mut cursor, &mut locations)?);
 			}
 
 			TokenKind::Region => {
-				tasks.push(scan_region_task(&mut cursor, &mut locations)?);
+				tasks.push_back(scan_region_task(&mut cursor, &mut locations)?);
 			}
 
 			TokenKind::Record => {
-				tasks.push(scan_record_task(&mut cursor, &mut locations)?);
+				tasks.push_back(scan_record_task(&mut cursor, &mut locations)?);
 			}
 
 			TokenKind::Table => {
-				tasks.push(scan_table_task(&mut cursor, &mut locations)?);
+				tasks.push_back(scan_table_task(&mut cursor, &mut locations)?);
 			}
 
 			TokenKind::Main => {
-				tasks.push(scan_proc(&mut cursor, &mut locations, "main".id(), None)?);
+				tasks.push_back(scan_proc(&mut cursor, &mut locations, "main".id(), None)?);
 			}
 
 			TokenKind::Sub => {
-				tasks.push(scan_proc(&mut cursor, &mut locations, "sub".id(), None)?);
+				tasks.push_back(scan_proc(&mut cursor, &mut locations, "sub".id(), None)?);
 			}
 
 			TokenKind::Proc => {
-				tasks.push(scan_named_proc(&mut cursor, &mut locations, None)?);
+				tasks.push_back(scan_named_proc(&mut cursor, &mut locations, None)?);
 			}
 
 			TokenKind::M68k => {
-				tasks.push(scan_target_proc(&mut cursor, &mut locations, Some(Target::M68k))?);
+				tasks.push_back(scan_target_proc(&mut cursor, &mut locations, Some(Target::M68k))?);
 			}
 
 			TokenKind::SH2 => {
-				tasks.push(scan_target_proc(&mut cursor, &mut locations, Some(Target::SH2))?);
+				tasks.push_back(scan_target_proc(&mut cursor, &mut locations, Some(Target::SH2))?);
 			}
 
 			TokenKind::X64 => {
-				tasks.push(scan_target_proc(&mut cursor, &mut locations, Some(Target::X86_64))?);
+				tasks.push_back(scan_target_proc(&mut cursor, &mut locations, Some(Target::X86_64))?);
 			}
 
 			TokenKind::Z80 => {
-				tasks.push(scan_target_proc(&mut cursor, &mut locations, Some(Target::Z80))?);
+				tasks.push_back(scan_target_proc(&mut cursor, &mut locations, Some(Target::Z80))?);
 			}
 			_ => {
 				return Err(cursor.expected_token("top-level statement"))
@@ -69,7 +69,7 @@ pub fn scan_tasks(lex_data: &LexData,
 		}
 	}
 
-	Ok((tasks.into_iter().collect(), locations))
+	Ok((tasks, locations))
 }
 
 fn scan_value_task(
