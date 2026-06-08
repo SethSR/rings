@@ -38,13 +38,13 @@ pub fn scan_tasks(lex_data: &LexData,
 			}
 
 			TokenKind::Main => {
-				tasks.push_back(scan_proc(&mut cursor, "main".id(), None)?);
-				locations.insert("main".id(), loc);
+				tasks.push_back(scan_proc(&mut cursor, "main".id(), None)
+					.inspect(|_| { locations.insert("main".id(), loc); })?);
 			}
 
 			TokenKind::Sub => {
-				tasks.push_back(scan_proc(&mut cursor, "sub".id(), None)?);
-				locations.insert("sub".id(), loc);
+				tasks.push_back(scan_proc(&mut cursor, "sub".id(), None)
+					.inspect(|_| { locations.insert("sub".id(), loc); })?);
 			}
 
 			TokenKind::Proc => {
@@ -171,6 +171,9 @@ fn scan_placement(cursor: &mut Cursor,
 	}
 }
 
+/// Skips a brace-enclosed block of code: `{ ... }`.
+///
+/// `cursor` will be pointing at the token immediately after the Close-Brace.
 fn skip_brace_block(cursor: &mut Cursor) -> Result<(), Error> {
 	skip_until(cursor, &[TokenKind::OBrace])?;
 	cursor.expect(TokenKind::OBrace)?;
@@ -180,7 +183,7 @@ fn skip_brace_block(cursor: &mut Cursor) -> Result<(), Error> {
 			TokenKind::OBrace => 1,
 			TokenKind::CBrace => -1,
 			TokenKind::Eof => {
-				return Err(cursor.expected_token("end of procedure").into());
+				return Err(cursor.expected_token("end of procedure"));
 			}
 			_ => 0,
 		};

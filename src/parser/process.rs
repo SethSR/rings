@@ -61,7 +61,7 @@ pub fn process_tasks(
 						)?;
 						queue.push_back(task);
 					}
-					Err(e) => return Err(e.into()),
+					Err(e) => return Err(e),
 				}
 			}
 
@@ -240,7 +240,7 @@ fn process_region(
 				(_,Ok(Value::Decimal(_))) => {
 					Err(Error::DecimalAddressValue { location: end })
 				}
-				(Err(e),_) | (_,Err(e)) => Err(e.into()),
+				(Err(e),_) | (_,Err(e)) => Err(e),
 			}
 		}
 
@@ -270,7 +270,7 @@ fn process_region(
 				(_,Ok(Value::Decimal(_))) => {
 					Err(Error::DecimalAddressValue { location: address })
 				}
-				(Err(e),_) | (_,Err(e)) => Err(e.into()),
+				(Err(e),_) | (_,Err(e)) => Err(e),
 			}
 		}
 	}
@@ -395,7 +395,7 @@ fn process_placement(
 			}
 			e => e,
 		}),
-		_ => Err(cursor.expected_token("placement specifier").into()),
+		_ => Err(cursor.expected_token("placement specifier")),
 	}
 }
 
@@ -441,7 +441,7 @@ fn process_in(cursor: &mut Cursor,
 	}
 
 	if cursor.current() != end_token {
-		return Err(cursor.expected_token(format!("'{end_token:?}' after region name")).into());
+		return Err(cursor.expected_token(format!("'{end_token:?}' after region name")));
 	}
 
 	Ok(MemoryPlacement::Region(ident))
