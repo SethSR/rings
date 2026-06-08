@@ -15,7 +15,7 @@ fn setup(source: &str) -> IdentMap<(Vec<Asm>, Vec<Block>)> {
 	let lex_data = lexer::eval(&input.source)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-	let prs_data = parser::eval(&input, &lex_data, false)
+	let prs_data = parser::eval(&input, &lex_data)
 			.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
 	let typ_data = type_checker::eval(&input, &lex_data, &prs_data)

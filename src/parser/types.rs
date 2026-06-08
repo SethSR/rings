@@ -46,7 +46,13 @@ pub struct TypeMap {
 
 impl TypeMap {
 	pub fn insert(&mut self, proc_id: IdentId, scope_depth: u16, id: IdentId, typ: Type) {
-		self.data.push((proc_id, scope_depth, id, typ));
+		let new_entry = (proc_id, scope_depth, id, typ);
+		for old_entry in &self.data {
+			if old_entry == &new_entry {
+				return;
+			}
+		}
+		self.data.push(new_entry);
 	}
 
 	pub fn get(&self, proc_id: IdentId, scope_depth: u16, id: IdentId) -> Option<Type> {

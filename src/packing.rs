@@ -130,7 +130,7 @@ mod tests {
 		let lex_data = crate::lexer::eval(source)
 				.map_err(|e| e.display(&in_data))
 				.unwrap_or_else(|e| panic!("{e}"));
-		let prs_data = crate::parser::eval(&in_data, &lex_data, true)
+		let prs_data = crate::parser::eval(&in_data, &lex_data)
 				.map_err(|e| e.display(&in_data))
 				.unwrap_or_else(|e| panic!("{e}"));
 		super::eval(&prs_data)

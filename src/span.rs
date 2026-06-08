@@ -1,5 +1,5 @@
 
-use std::fmt::{Debug, Formatter, Result};
+use std::fmt::{Debug, Display, Formatter, Result};
 use std::ops::Range;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -23,6 +23,24 @@ impl<T: Copy> Span<T> {
 impl<T: Debug> Debug for Span<T> {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		write!(f, "Span({:?},{:?})", self.start, self.end)
+	}
+}
+
+impl Display for Span<u8> {
+	fn fmt(&self, f: &mut Formatter) -> Result {
+		write!(f, "0x{:02X}..=0x{:02X}", self.start, self.end)
+	}
+}
+
+impl Display for Span<u16> {
+	fn fmt(&self, f: &mut Formatter) -> Result {
+		write!(f, "0x{:04X}..=0x{:04X}", self.start, self.end)
+	}
+}
+
+impl Display for Span<u32> {
+	fn fmt(&self, f: &mut Formatter) -> Result {
+		write!(f, "0x{:08X}..=0x{:08X}", self.start, self.end)
 	}
 }
 

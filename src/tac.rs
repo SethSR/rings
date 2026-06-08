@@ -56,12 +56,23 @@ pub fn eval(
 	Ok(out)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Location {
 	Const(i64, Type),
 	VReg(VRegId, Type),
 	Stack(usize, Type),
 	Addr(u32, Type),
+}
+
+impl std::fmt::Debug for Location {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			Self::Const(val, ty) => write!(f, "Const(${val:X}, {ty:?})"),
+			Self::VReg(reg, ty) => write!(f, "VReg({reg}, {ty:?})"),
+			Self::Stack(val, ty) => write!(f, "Stack({val}, {ty:?})"),
+			Self::Addr(val, ty) => write!(f, "Addr(${val:08X}, {ty:?})"),
+		}
+	}
 }
 
 /// Three Address Code
@@ -92,7 +103,6 @@ pub enum TAC {
 	Return(Option<VRegId>),
 }
 
-#[derive(Debug)]
 struct TACData<'a> {
 	typed_body: &'a TypedList,
 	prs_data: &'a PrsData<SrcPos>,
@@ -670,7 +680,7 @@ mod tests {
 		let lex_data = lexer::eval(&input.source)
 				.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
-		let prs_data = parser::eval(&input, &lex_data, false)
+		let prs_data = parser::eval(&input, &lex_data)
 				.unwrap_or_else(|e| panic!("{}", e.display(&input)));
 
 		let typ_data = type_checker::eval(&input, &lex_data, &prs_data)

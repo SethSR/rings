@@ -37,7 +37,7 @@ pub struct Table {
 	pub fields: Vec<(IdentId, Type)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Procedure<T> {
 	pub target: Option<Target>,
 	pub params: Vec<(IdentId, Type)>,

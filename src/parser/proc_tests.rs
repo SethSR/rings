@@ -11,7 +11,7 @@ fn setup(source: &str) -> Result<Data<SrcPos>, String> {
 	let lex_data = crate::lexer::eval(&input.source)
 		.map_err(|e| e.display(&input))?;
 
-	eval(&input, &lex_data, false)
+	eval(&input, &lex_data)
 		.map_err(|e| e.display(&input))
 }
 

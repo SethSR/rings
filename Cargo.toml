@@ -8,6 +8,8 @@ index_vec = "0.1.4"
 interavl = "0.5.0"
 
 [features]
+debug_print=[]
+task_debug_print=[]
 record=[]
 procedures=[]
 table=[]

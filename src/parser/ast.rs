@@ -5,6 +5,8 @@ use index_vec::define_index_type;
 use index_vec::IndexVec;
 
 use crate::identifier::IdentId;
+use crate::input::Data as InputData;
+use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::Span;
 
@@ -13,11 +15,11 @@ pub type AstList<K,T> = IndexVec<AstId, Ast<K,T>>;
 define_index_type! {
 	pub struct AstId = usize;
 	DEFAULT = AstId::from_raw_unchecked(0);
-	DEBUG_FORMAT = "ast::Id({})";
+	DEBUG_FORMAT = "AST<{}>";
 	DISPLAY_FORMAT = "{}";
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Kind {
 	Int(i64),
 	Dec(f64),
@@ -47,6 +49,103 @@ pub enum Kind {
 	Mark { region_id: IdentId, mark_id: IdentId },
 	Free { region_id: IdentId, mark_id: Option<IdentId> },
 	Use { region_id: IdentId, ident: IdentId },
+}
+
+impl Kind {
+	pub fn as_text(&self, input: &InputData, lex_data: &LexData) -> String {
+		match self {
+			Self::Int(val) => format!("Int({val})"),
+			Self::Dec(val) => format!("Dec({val})"),
+			Self::Ident(ident_id) => {
+				format!("Ident({})", lex_data.text(input, ident_id))
+			}
+			Self::Assign { lhs, rhs } => {
+				format!("Assign({lhs:?} := {rhs:?})")
+			}
+			Self::BinOp { op, lhs, rhs } => {
+				format!("Binary-Op({lhs:?} {op} {rhs:?})")
+			}
+			Self::UnOp { op, rhs } => {
+				format!("Unary-Op({op} {rhs:?})")
+			}
+			Self::Return(ast_id) => match ast_id {
+				Some(ast_id) => format!("Return({ast_id:?})"),
+				None => "Return(-)".to_string(),
+			}
+			Self::ScopeBegin => format!("Scope-Begin"),
+			Self::ScopeEnd => format!("Scope-End"),
+			Self::Block(block) => format!("Block({block:?})"),
+			Self::If { cond, then_block, else_block } => {
+				format!("If({cond:?} {then_block:?} {else_block:?})")
+			}
+			Self::While { cond, block } => {
+				format!("While({cond:?} {block:?})")
+			}
+
+			Self::For { indexes, table, range_start, range_end, block } => {
+				let table_str = match (table, range_start, range_end) {
+					(Some(table_id), Some(start), Some(end)) => {
+						format!("{}[{start:?}..{end:?}]", lex_data.text(input, table_id))
+					}
+					(Some(table_id), Some(start), None) => {
+						format!("{}[{start:?}..]", lex_data.text(input, table_id))
+					}
+					(Some(table_id), None, Some(end)) => {
+						format!("{}[..{end:?}]", lex_data.text(input, table_id))
+					}
+					(Some(table_id), None, None) => {
+						format!("{}[..]", lex_data.text(input, table_id))
+					}
+					(None, Some(start), Some(end)) => {
+						format!("[{start:?}..{end:?}]")
+					}
+					(None, Some(start), None) => {
+						format!("[{start:?}..]")
+					}
+					(None, None, Some(end)) => {
+						format!("[..{end:?}]")
+					}
+					(None, None, None) => {
+						"[..]".to_string()
+					}
+				};
+				format!("For(select {indexes:?} from {table_str} with {block:?})")
+			}
+
+			Self::Call { proc_id, block } => {
+				format!("Call({} : {block:?})", lex_data.text(input, proc_id))
+			}
+			Self::Access { base_id, path } => {
+				let mut access_str = lex_data.text(input, base_id).to_string();
+				for segment in path {
+					match segment {
+						PathSegment::Field(field_id) => {
+							access_str.push_str(&format!(".{}", lex_data.text(input, field_id)));
+						}
+						PathSegment::Index(ast_id, ident_id) => {
+							access_str.push_str(&format!("[{ast_id:?}].{}", lex_data.text(input, ident_id)));
+						}
+					}
+				}
+				format!("Access({access_str})")
+			}
+			Self::Mark { region_id, mark_id } => format!("Mark({} += {})",
+				lex_data.text(input, region_id),
+				lex_data.text(input, mark_id),
+			),
+			Self::Free { region_id, mark_id } => match mark_id {
+				Some(mark_id) => format!("Free({} -= {})",
+					lex_data.text(input, region_id),
+					lex_data.text(input, mark_id),
+				),
+				None => format!("Free({})", lex_data.text(input, region_id)),
+			}
+			Self::Use { region_id, ident } => format!("Use({} <- {})",
+				lex_data.text(input, region_id),
+				lex_data.text(input, ident),
+			),
+		}
+	}
 }
 
 impl Display for Kind {

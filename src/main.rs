@@ -47,50 +47,64 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	//println!("{input}");
 
 	let lex_data = lexer::eval(&input.source)
-			.map_err(|e| e.display(&input))?;
+		.map_err(|e| e.display(&input))?;
 	lex_data.print(&input, false);
 
-	let prs_data = parser::eval(&input, &lex_data, false)
-			.map_err(|e| e.display(&input))?;
-	println!("{prs_data:?}\n");
+	let prs_data = parser::eval(&input, &lex_data)
+		.map_err(|e| e.display(&input))?;
+
+	#[cfg(feature="debug_print")]
+	prs_data.print_debug(&input, &lex_data);
 
 	let typ_data = type_checker::eval(&input, &lex_data, &prs_data)
-			.map_err(|e| e.display(&input))?;
-	println!("Procedures: {typ_data:?}");
+		.map_err(|e| e.display(&input))?;
+	println!("== Typed Data ==");
+	println!();
+
 	for (proc_id, list) in &typ_data {
-		println!("  {}:", lex_data.text(&input, proc_id));
-		for ast in list {
-			println!("    {ast:?}");
+		println!("{}:", lex_data.text(&input, proc_id));
+		for (idx, ast) in list.iter().enumerate() {
+			// TODO - srenshaw - This should show the AST node location as well, but that requires
+			// source-file positions.
+			println!("  [{idx:3}] {}", ast.kind.as_text(&input, &lex_data));
 		}
 	}
 	println!();
 
+	println!("== Packing ==");
+	println!();
 	let pak_data = packing::eval(&prs_data);
-	println!("Packing:");
+	println!("Records:");
 	for (rec_id, record) in &pak_data.records {
 		println!("  {}: {record:?}", lex_data.text(&input, rec_id));
 	}
+	println!("Tables:");
 	for (tab_id, table) in &pak_data.tables {
 		println!("  {}: {table:?}", lex_data.text(&input, tab_id));
 	}
+	println!();
 
-	println!("Layout:");
+	println!("== Region Runtime Start Offset ==");
+	println!();
 	let lay_data = layout::eval(&prs_data, &pak_data)
-			.map_err(|e| e.display(&input, &lex_data))?;
+		.map_err(|e| e.display(&input, &lex_data))?;
 	for (reg_id, offset) in &lay_data {
-		println!("  {}: {offset}", lex_data.text(&input, &reg_id));
+		println!("  {}: 0x{offset:X}", lex_data.text(&input, &reg_id));
 	}
+	println!();
 
+	println!("== TAC ==");
+	println!();
 	let tac_data = tac::eval(&prs_data, &typ_data, &pak_data, &lay_data)
-			.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
-			.map_err(|e| e.display(&input))?;
-	println!("TAC:");
+		.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
+		.map_err(|e| e.display(&input))?;
 	for (proc_id, list) in &tac_data {
 		println!("  {}:", lex_data.text(&input, proc_id));
 		for tac in &list.instructions {
 			println!("    {tac:?}");
 		}
 	}
+	println!();
 
 	/*
 	let dom_data = dom::eval(&tac_data);
@@ -98,15 +112,17 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	*/
 
 	use identifier::Identifier;
+	println!("== ASM ==");
+	println!();
 	let stack_addr = prs_data.regions.get(&"Stack".id())
-			.or(prs_data.regions.get(&"DataStack".id()))
-			.expect("missing stack address")
-			.span.start;
+		.or(prs_data.regions.get(&"DataStack".id()))
+		.expect("missing stack address")
+		.span.start;
 	let asm_db = asm::eval(&input, &lex_data, &prs_data, tac_data, stack_addr);
-	println!("ASM:");
 	for (_, data) in &asm_db {
 		println!("{data}");
 	}
+	println!();
 
 	/*
 	output(&input.source_file, asm_db);

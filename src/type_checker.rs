@@ -14,7 +14,7 @@ use crate::{token_source, Span, SrcPos};
 
 pub type TypedList = IndexVec<AstId, TypedAst>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TypedAst {
 	pub kind: AstKind,
 	pub typ: Type,
@@ -587,9 +587,19 @@ fn check_proc(
 			}
 
 			AstKind::Access { base_id, ref path } => {
+				use crate::parser::Kind as PKind;
+
 				let mut curr_id = base_id;
-				let mut access_type = prs_data.types.get(proc_id, scope_depth, curr_id)
-					.ok_or_else(|| Error::no_type(ast))?;
+				let mut access_type = match prs_data.kinds.get(&curr_id) {
+					Some(PKind::Value) => Type::Unresolved,
+					Some(PKind::Procedure) => todo!("ERROR: Cannot read/write Procedures types."),
+					Some(PKind::Record) => Type::Record(curr_id),
+					Some(PKind::Region) => todo!("ERROR: Cannot read/write Region types."),
+					Some(PKind::Table) => Type::Table(curr_id),
+					None => prs_data.types
+						.get(proc_id, scope_depth, curr_id)
+						.ok_or_else(|| Error::no_type(ast))?,
+				};
 
 				for segment in path {
 					match segment {
@@ -978,7 +988,7 @@ fn setup(source: &str) -> Result<IdentMap<TypedList>, error::Error> {
 
 	let lex_data = crate::lexer::eval(&input.source)?;
 
-	let prs_data = crate::parser::eval(&input, &lex_data, true)?;
+	let prs_data = crate::parser::eval(&input, &lex_data)?;
 
 	let chk_data = crate::type_checker::eval(&input, &lex_data, &prs_data)?;
 

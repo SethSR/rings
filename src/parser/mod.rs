@@ -1,5 +1,5 @@
 
-use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::fmt::Debug;
 
 use crate::error::{Error, Kind as ErrKind};
 use crate::identifier::{IdentId, Map as IdentMap};
@@ -56,56 +56,116 @@ pub struct Data<T> {
 	pub types: TypeMap,
 }
 
-impl<T: Debug> Debug for Data<T> {
-	fn fmt(&self, f: &mut Formatter) -> FmtResult {
-		writeln!(f, "Data {{")?;
-		writeln!(f, "kinds:\n{}", self.kinds.iter()
-				.map(|a| format!("  {a:?}"))
-				.collect::<Vec<_>>()
-				.join("\n"))?;
-		writeln!(f, "values: \n{}", self.values.iter()
-				.map(|a| format!("  {a:?}"))
-				.collect::<Vec<_>>()
-				.join("\n"))?;
-		writeln!(f, "regions: \n{}", self.regions.iter()
-				.map(|(id, region)| format!("  {id:?}: 0x{:08X}..0x{:08X}", region.span.start, region.span.end))
-				.collect::<Vec<_>>()
-				.join("\n"))?;
-		writeln!(f, "records: \n{}", self.records.iter()
-				.map(|(id, record)| format!("  {id:?}: {:?} {:?}", record.placement, record.fields))
-				.collect::<Vec<_>>()
-				.join("\n"))?;
-		writeln!(f, "tables: \n{}", self.tables.iter()
-				.map(|a| format!("  {a:?}"))
-				.collect::<Vec<_>>()
-				.join("\n"))?;
-		writeln!(f, "procedures: \n{}", self.procedures.iter()
-				.map(|(id, proc)| format!("  {id:?}: {:?} {:?} -> {:?}", proc.target, proc.params, proc.ret_type))
-				.collect::<Vec<_>>()
-				.join("\n"))?;
-		writeln!(f, "types: \n{}", self.types.iter()
-				.map(|(proc_id, depth, id, typ)| format!("  ({proc_id:?}, {depth}, {id:?}) -> {typ:?}"))
-				.collect::<Vec<_>>()
-				.join("\n"))?;
-		writeln!(f, "}}")
+impl<T: Debug> Data<T> {
+	#[cfg(feature="debug_print")]
+	pub fn print_debug(&self, input: &InputData, lex_data: &LexData) {
+		use data::{Record, Region};
+
+		println!("== Parser ==");
+		println!();
+
+		let kind_str = self.kinds.iter()
+			.map(|(id, kind)| {
+				format!("  {}: {kind:?}", lex_data.text(input, id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Kinds:\n{kind_str}");
+
+		let value_str = self.values.iter()
+			.map(|(id, value)| {
+				format!("  {}: {value:?}", lex_data.text(input, id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Values:\n{value_str}");
+
+		let region_str = self.regions.iter()
+			.map(|(id, Region { span })| {
+				format!("  {}: {span}", lex_data.text(input, id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Regions:\n{region_str}");
+
+		let record_str = self.records.iter()
+			.map(|(id, Record { placement, fields })| {
+				let placement_str = placement.map(|p| p.as_text(input, lex_data))
+					.unwrap_or_default();
+
+				let field_str = fields.iter()
+					.map(|(fid, ftype)| {
+						format!("    {}: {ftype:?}", lex_data.text(input, fid))
+					})
+					.collect::<Vec<_>>()
+					.join("\n");
+
+				format!("  {}: {placement_str}\n{field_str}", lex_data.text(input, id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Records:\n{record_str}");
+
+		let table_str = self.tables.iter()
+			.map(|(id, Table { row_count, placement, fields })| {
+				let placement_str = placement.map(|p| p.as_text(input, lex_data))
+					.unwrap_or_default();
+
+				let field_str = fields.iter()
+					.map(|(fid, ftype)| {
+						format!("    {}: {ftype:?}", lex_data.text(input, fid))
+					})
+					.collect::<Vec<_>>()
+					.join("\n");
+
+				format!("  {}[{row_count}]: {placement_str}\n{field_str}", lex_data.text(input, id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Tables:\n{table_str}");
+
+		let proc_str = self.procedures.iter()
+			.map(|(id, Procedure { target, params, ret_type, ..})| {
+				let param_str = params.iter()
+					.map(|(pid, ptype)| {
+						format!("    {}: {ptype:?}", lex_data.text(input, pid))
+					})
+					.collect::<Vec<_>>()
+					.join("\n");
+				let tgt_str = target.map(|tgt| format!("{tgt:?}"))
+					.unwrap_or_default();
+				format!("  {} [{tgt_str}]({param_str}) -> {ret_type:?}", lex_data.text(input, id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Procedures:\n{proc_str}");
+
+		let type_str = self.types.iter()
+			.map(|(proc_id, depth, id, typ)| {
+				format!("  ({}, {depth}, {}) -> {typ:?}",
+					lex_data.text(input, proc_id),
+					lex_data.text(input, id),
+				)
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Types:\n{type_str}");
+
+		println!();
 	}
 }
 
-pub fn eval(input: &InputData, lex_data: &LexData, should_print: bool,
-) -> Result<Data<SrcPos>, Error> {
+pub fn eval(input: &InputData, lex_data: &LexData) -> Result<Data<SrcPos>, Error> {
 	let (tasks, locations) = scan::scan_tasks(lex_data)
 		.map_err(|e| e.into_comp_error(input, lex_data))
 		.map_err(|e| e.with_kind(ErrKind::Parser))?;
-	if should_print {
-		eprintln!("{tasks:?}");
-	}
+
+	#[cfg(feature="task_debug_print")]
+	eprintln!("{tasks:?}");
 
 	let data = process::process_tasks(lex_data, &locations, tasks)
 		.map_err(|e| e.into_comp_error(input, lex_data))
 		.map_err(|e| e.with_kind(ErrKind::Parser))?;
-	if should_print {
-		eprintln!("{data:?}");
-	}
 
 	Ok(Data {
 		kinds: data.kinds,

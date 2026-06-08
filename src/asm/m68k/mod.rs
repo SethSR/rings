@@ -382,7 +382,7 @@ fn output_cmp(
 	let (ea_rhs, rsz, is_rneg) = get_src_from_location(&registers, rhs);
 	let (ea_dst, dsz, is_signed) = get_dst_from_location(&registers, dst);
 
-	let cc = if is_signed { signed_cc } else { unsigned_cc };
+	let cc = if is_lneg || is_rneg { signed_cc } else { unsigned_cc };
 	let sz = lsz.max(rsz).max(dsz);
 
 	data.push(Asm::Move(lsz, ea_lhs, EA::Dat(TL)));
@@ -500,7 +500,7 @@ impl Display for EA {
 			Self::Idx(d,a,x) => write!(f, "{d}({a},{x})"),
 			Self::AbW(a) => write!(f, "(#${a:04X})"),
 			Self::AbL(a) => write!(f, "(#${a:08X})"),
-			Self::Imm(a) => write!(f, "#{a}"),
+			Self::Imm(a) => write!(f, "#${a:X}"),
 		}
 	}
 }
