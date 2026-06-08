@@ -11,6 +11,8 @@ pub enum Error {
 	RecursiveType { location: TokenId, name_id: IdentId },
 	DuplicateDeclaration { location: TokenId, name_id: IdentId },
 	CircularDependency { location: TokenId, name_id: IdentId, ident_id: IdentId },
+	ValueOutOfRange { location: TokenId, value: i64, max: i64 },
+	DecimalAddressValue { location: TokenId },
 }
 
 impl Error {
@@ -60,6 +62,17 @@ impl Error {
 					lex_data.text(input, &name_id));
 				crate::error::Error::new(span, message)
 			}
+			Self::ValueOutOfRange { location, value, max } => {
+				let span = token_source(input, lex_data, location);
+				let message = format!("Calculated value (0x{value:X}) is beyond max value (0x{max:X})");
+				crate::error::Error::new(span, message)
+			}
+			Self::DecimalAddressValue { location } => {
+				let span = token_source(input, lex_data, location);
+				let message = "Decimal values cannot be used in address specifiers".to_string();
+				crate::error::Error::new(span, message)
+			}
 		}
 	}
 }
+

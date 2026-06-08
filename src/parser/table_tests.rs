@@ -146,7 +146,7 @@ fn missing_address_placement() {
 }
 
 #[test]
-#[should_panic="out of range"]
+#[should_panic="beyond max value"]
 fn negative_capacity() {
 	setup("table users[-10] @ {}")
 			.unwrap_or_else(|e| panic!("{e}"));

@@ -54,14 +54,14 @@ pub fn process_tasks(
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
-					Err(Error::UndefinedType { location, ident_id }) => {
+					Err(super::error::Error::UndefinedType { ident_id, location }) => {
 						consecutive_failures = check_task_failure(
 							&queue, &mut failed_tasks, consecutive_failures,
 							location, ident, ident_id,
 						)?;
 						queue.push_back(task);
 					}
-					Err(e) => return Err(e),
+					Err(e) => return Err(e.into()),
 				}
 			}
 
@@ -75,7 +75,7 @@ pub fn process_tasks(
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
-					Err(Error::UndefinedType { location, ident_id }) => {
+					Err(Error::UndefinedType { ident_id, location }) => {
 						consecutive_failures = check_task_failure(
 							&queue, &mut failed_tasks, consecutive_failures,
 							location, ident, ident_id,
@@ -96,7 +96,7 @@ pub fn process_tasks(
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
-					Err(Error::UndefinedType { location, ident_id }) => {
+					Err(Error::UndefinedType { ident_id, location }) => {
 						consecutive_failures = check_task_failure(
 							&queue, &mut failed_tasks, consecutive_failures,
 							location, ident, ident_id,
@@ -117,7 +117,7 @@ pub fn process_tasks(
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
-					Err(Error::UndefinedType { location, ident_id }) => {
+					Err(Error::UndefinedType { ident_id, location }) => {
 						consecutive_failures = check_task_failure(
 							&queue, &mut failed_tasks, consecutive_failures,
 							location, ident, ident_id,
@@ -138,7 +138,7 @@ pub fn process_tasks(
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
 					}
-					Err(Error::UndefinedType { location, ident_id }) => {
+					Err(Error::UndefinedType { ident_id, location }) => {
 						consecutive_failures = check_task_failure(
 							&queue, &mut failed_tasks, consecutive_failures,
 							location, ident, ident_id,
@@ -171,8 +171,8 @@ fn check_task_failure(
 
 		if failure_count > queue.len() {
 			Err(Error::CircularDependency {
-				location,
 				name_id: task_ident,
+				location,
 				ident_id: item_id,
 			})
 		} else {
@@ -227,17 +227,20 @@ fn process_region(
 			match (result_start, result_end) {
 				(Ok(Value::Integer(region_start)), Ok(Value::Integer(region_end))) => {
 					if !(0..=u32::MAX as i64).contains(&region_start) {
-						panic!("region start ({region_start}) out of range")
+						return Err(Error::ValueOutOfRange { location: start, value: region_start, max: u32::MAX as i64 });
 					}
 					if !(0..=u32::MAX as i64).contains(&region_end) {
-						panic!("region end ({region_end}) out of range")
+						return Err(Error::ValueOutOfRange { location: end, value: region_end, max: u32::MAX as i64 });
 					}
 					Ok((region_start as u32, region_end as u32))
 				}
-				(Ok(Value::Decimal(_)),_) | (_,Ok(Value::Decimal(_))) => {
-					panic!("decimal values not allowed in region declarations")
+				(Ok(Value::Decimal(_)),_) => {
+					Err(Error::DecimalAddressValue { location: start })
 				}
-				(Err(e),_) | (_,Err(e)) => Err(e),
+				(_,Ok(Value::Decimal(_))) => {
+					Err(Error::DecimalAddressValue { location: end })
+				}
+				(Err(e),_) | (_,Err(e)) => Err(e.into()),
 			}
 		}
 
@@ -250,18 +253,24 @@ fn process_region(
 
 			match (result_size, result_addr) {
 				(Ok(Value::Integer(region_size)), Ok(Value::Integer(region_addr))) => {
+					if !(0..=u32::MAX as i64).contains(&region_size) {
+						return Err(Error::ValueOutOfRange { location: size, value: region_size, max: u32::MAX as i64 });
+					}
 					if !(0..=u32::MAX as i64).contains(&region_addr) {
-						panic!("region address ({region_addr}) out of range")
+						return Err(Error::ValueOutOfRange { location: address, value: region_addr, max: u32::MAX as i64 });
 					}
 					if !(0..=u32::MAX as i64).contains(&(region_addr + region_size)) {
-						panic!("region end ({}) out of range", region_addr + region_size)
+						return Err(Error::ValueOutOfRange { location: size, value: (region_addr + region_size), max: u32::MAX as i64 });
 					}
 					Ok((region_addr as u32, (region_addr + region_size) as u32))
 				}
-				(Ok(Value::Decimal(_)),_) | (_,Ok(Value::Decimal(_))) => {
-					panic!("decimal values not allowed in region declarations")
+				(Ok(Value::Decimal(_)),_) => {
+					Err(Error::DecimalAddressValue { location: size })
 				}
-				(Err(e),_) | (_,Err(e)) => Err(e),
+				(_,Ok(Value::Decimal(_))) => {
+					Err(Error::DecimalAddressValue { location: address })
+				}
+				(Err(e),_) | (_,Err(e)) => Err(e.into()),
 			}
 		}
 	}
@@ -293,10 +302,10 @@ fn process_table(
 	let row_count = evaluate_expr(&mut cursor_rows, data, TokenKind::CBracket)
 			.map_err(|_| cursor_rows.expected_token("capacity expression"))?;
 	let Value::Integer(row_count) = row_count else {
-		panic!("decimal values not allowed in table row count declarations")
+		return Err(Error::DecimalAddressValue { location: start_rows });
 	};
 	if !(0..=u16::MAX as i64).contains(&row_count) {
-		panic!("table row count ({row_count}) out of range")
+		return Err(Error::ValueOutOfRange { location: start_rows, value: row_count, max: u16::MAX as i64 });
 	}
 
 	let placement = start_placement
@@ -386,7 +395,7 @@ fn process_placement(
 			}
 			e => e,
 		}),
-		_ => Err(cursor.expected_token("placement specifier")),
+		_ => Err(cursor.expected_token("placement specifier").into()),
 	}
 }
 
@@ -399,21 +408,18 @@ fn process_at(cursor: &mut Cursor,
 	end_token: TokenKind,
 ) -> Result<MemoryPlacement, Error> {
 	cursor.expect(TokenKind::At)?;
-	evaluate_expr(cursor, data, end_token)
-			.and_then(|value| {
-				match value {
-					Value::Integer(address) => {
-						if !(0..=u32::MAX as i64).contains(&address) {
-							panic!("address ({address}) out of range")
-						}
+	let location = cursor.index();
+	let address_value = evaluate_expr(cursor, data, end_token)?;
+	match address_value {
+		Value::Integer(address) => {
+			if !(0..=u32::MAX as i64).contains(&address) {
+				return Err(Error::ValueOutOfRange { value: address, location, max: u32::MAX as i64 });
+			}
 
-						Ok(MemoryPlacement::Address(address as u32))
-					}
-					Value::Decimal(_) => {
-						panic!("decimal values cannot be used in address specifiers")
-					}
-				}
-			})
+			Ok(MemoryPlacement::Address(address as u32))
+		}
+		Value::Decimal(_) => Err(Error::DecimalAddressValue { location }),
+	}
 }
 
 /// Matches IN syntax:
@@ -435,7 +441,7 @@ fn process_in(cursor: &mut Cursor,
 	}
 
 	if cursor.current() != end_token {
-		return Err(cursor.expected_token(format!("'{end_token:?}' after region name")));
+		return Err(cursor.expected_token(format!("'{end_token:?}' after region name")).into());
 	}
 
 	Ok(MemoryPlacement::Region(ident))

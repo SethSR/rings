@@ -18,6 +18,7 @@ pub fn scan_tasks(lex_data: &LexData,
 	let mut cursor = Cursor::new(lex_data);
 	while cursor.current() != TokenKind::Eof {
 		let token = cursor.current();
+		let loc = cursor.index();
 		cursor.advance();
 		match token {
 			TokenKind::Value => {
@@ -37,11 +38,13 @@ pub fn scan_tasks(lex_data: &LexData,
 			}
 
 			TokenKind::Main => {
-				tasks.push_back(scan_proc(&mut cursor, &mut locations, "main".id(), None)?);
+				tasks.push_back(scan_proc(&mut cursor, "main".id(), None)?);
+				locations.insert("main".id(), loc);
 			}
 
 			TokenKind::Sub => {
-				tasks.push_back(scan_proc(&mut cursor, &mut locations, "sub".id(), None)?);
+				tasks.push_back(scan_proc(&mut cursor, "sub".id(), None)?);
+				locations.insert("sub".id(), loc);
 			}
 
 			TokenKind::Proc => {
@@ -172,7 +175,7 @@ fn skip_brace_block(cursor: &mut Cursor) -> Result<(), Error> {
 	skip_until(cursor, &[TokenKind::OBrace])?;
 	cursor.expect(TokenKind::OBrace)?;
 	let mut brace_count = 1;
-	while brace_count > 0 && cursor.current() != TokenKind::Eof {
+	while brace_count > 0 {
 		brace_count += match cursor.current() {
 			TokenKind::OBrace => 1,
 			TokenKind::CBrace => -1,
@@ -192,13 +195,11 @@ fn skip_brace_block(cursor: &mut Cursor) -> Result<(), Error> {
 /// - `sub {...}`
 fn scan_proc(
 	cursor: &mut Cursor,
-	locations: &mut IdentMap<TokenId>,
 	ident: IdentId,
 	target: Option<Target>,
 ) -> Result<Task, Error> {
 	let start = cursor.index();
 	skip_brace_block(cursor)?;
-	locations.insert(ident, start);
 	Ok(Task::Proc { ident, target, start })
 }
 
@@ -209,8 +210,12 @@ fn scan_named_proc(
 	locations: &mut IdentMap<TokenId>,
 	target: Option<Target>,
 ) -> Result<Task, Error> {
+	let loc = cursor.index();
 	let name_id = cursor.expect_identifier("procedure name")?;
-	scan_proc(cursor, locations, name_id, target)
+	let start = cursor.index();
+	skip_brace_block(cursor)?;
+	locations.insert(name_id, loc);
+	Ok(Task::Proc { ident: name_id, target, start })
 }
 
 /// Matches target specific procedures:
@@ -224,12 +229,16 @@ fn scan_target_proc(
 ) -> Result<Task, Error> {
 	match cursor.current() {
 		TokenKind::Main => {
+			let loc = cursor.index();
 			cursor.advance();
-			scan_proc(cursor, locations, "main".id(), target)
+			scan_proc(cursor, "main".id(), target)
+				.inspect(|_| { locations.insert("main".id(), loc); })
 		}
 		TokenKind::Sub => {
+			let loc = cursor.index();
 			cursor.advance();
-			scan_proc(cursor, locations, "sub".id(), target)
+			scan_proc(cursor, "sub".id(), target)
+				.inspect(|_| { locations.insert("sub".id(), loc); })
 		}
 		_ => {
 			cursor.expect(TokenKind::Proc)?;
