@@ -66,7 +66,7 @@ impl<T: Debug> Data<T> {
 
 		let kind_str = self.kinds.iter()
 			.map(|(id, kind)| {
-				format!("  {}: {kind:?}", lex_data.text(input, id))
+				format!("  {:<16}: {kind:?}", lex_data.text(input, id))
 			})
 			.collect::<Vec<_>>()
 			.join("\n");
@@ -74,7 +74,7 @@ impl<T: Debug> Data<T> {
 
 		let value_str = self.values.iter()
 			.map(|(id, value)| {
-				format!("  {}: {value:?}", lex_data.text(input, id))
+				format!("  {:<16}: {value:?}", lex_data.text(input, id))
 			})
 			.collect::<Vec<_>>()
 			.join("\n");
@@ -82,7 +82,7 @@ impl<T: Debug> Data<T> {
 
 		let region_str = self.regions.iter()
 			.map(|(id, Region { span })| {
-				format!("  {}: {span}", lex_data.text(input, id))
+				format!("  {:<16}: {span}", lex_data.text(input, id))
 			})
 			.collect::<Vec<_>>()
 			.join("\n");

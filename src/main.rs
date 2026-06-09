@@ -75,8 +75,16 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	println!();
 	let pak_data = packing::eval(&prs_data);
 	println!("Records:");
-	for (rec_id, record) in &pak_data.records {
-		println!("  {}: {record:?}", lex_data.text(&input, rec_id));
+	for (rec_id, pack) in &pak_data.records {
+		let record = &prs_data.records[rec_id];
+		println!("  {} ({} bytes):", lex_data.text(&input, rec_id), pack.size);
+
+		let field_iter = record.fields.iter()
+			.zip(pack.sizes.iter())
+			.zip(pack.offsets.iter());
+		for (((fid,_), size), offset) in field_iter {
+			println!("    {:<16}: offset {offset}, size {size}", lex_data.text(&input, fid));
+		}
 	}
 	println!("Tables:");
 	for (tab_id, table) in &pak_data.tables {
