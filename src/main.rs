@@ -1,10 +1,4 @@
 
-use std::{env, fs};
-//use std::collections::HashMap;
-//use std::fs::File;
-//use std::path::PathBuf;
-//use std::process::{Command, Stdio};
-
 mod asm;
 //mod dom;
 mod error;
@@ -15,7 +9,6 @@ mod layout;
 mod lexer;
 mod operators;
 mod parser;
-mod types;
 mod span;
 mod tac;
 mod token;
@@ -24,12 +17,12 @@ mod type_checker;
 use span::Span;
 
 fn main() {
-	let mut args = env::args();
+	let mut args = std::env::args();
 	args.next();
 
 	let file_path = args.next()
 		.expect("expected source file");
-	let source = fs::read_to_string(&file_path)
+	let source = std::fs::read_to_string(&file_path)
 		.expect("unable to read source file");
 
 	if let Err(error) = compile(file_path, &source) {
@@ -44,32 +37,38 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	println!();
 
 	let input = input::eval(file_path, source.into());
-	//println!("{input}");
 
 	let lex_data = lexer::eval(&input.source)
 		.map_err(|e| e.display(&input))?;
+	#[cfg(feature="debug_lexer")]
 	lex_data.print(&input, false);
 
 	let prs_data = parser::eval(&input, &lex_data)
 		.map_err(|e| e.display(&input))?;
 
-	#[cfg(feature="debug_print")]
+	#[cfg(feature="debug_lexer")]
+	#[cfg(feature="debug_parser")]
 	prs_data.print_debug(&input, &lex_data);
 
 	let typ_data = type_checker::eval(&input, &lex_data, &prs_data)
 		.map_err(|e| e.display(&input))?;
-	println!("== Typed Data ==");
-	println!();
 
-	for (proc_id, list) in &typ_data {
-		println!("{}:", lex_data.text(&input, proc_id));
-		for (idx, ast) in list.iter().enumerate() {
-			// TODO - srenshaw - This should show the AST node location as well, but that requires
-			// source-file positions.
-			println!("  [{idx:3}] {}", ast.kind.as_text(&input, &lex_data));
+	#[cfg(feature="debug_lexer")]
+	#[cfg(feature="debug_parser")]
+	#[cfg(feature="debug_type_checker")]
+	{
+		println!("== Typed Data ==");
+		println!();
+		for (proc_id, list) in &typ_data {
+			println!("{}:", lex_data.text(&input, proc_id));
+			for (idx, ast) in list.iter().enumerate() {
+				// TODO - srenshaw - This should show the AST node location as well, but that requires
+				// source-file positions.
+				println!("  [{idx:3}] {}", ast.kind.as_text(&input, &lex_data));
+			}
 		}
+		println!();
 	}
-	println!();
 
 	println!("== Packing ==");
 	println!();
@@ -280,22 +279,5 @@ fn token_source(
 	let kind = lex_data.tok_list[token_id];
 	let start = lex_data.tok_pos[token_id];
 	Span::new(start, start + kind.size(&input, &lex_data))
-}
-
-fn type_text(
-	input: &input::Data,
-	lex_data: &lexer::Data,
-	ring_type: &types::Type,
-) -> String {
-	match ring_type {
-		types::Type::Record(ident_id) => {
-			lex_data.text(input, ident_id).to_string()
-		}
-		#[cfg(feature="table")]
-		Type::Table(ident_id) => {
-			lex_data.text(input, ident_id).to_string()
-		}
-		_ => format!("{ring_type:?}"),
-	}
 }
 

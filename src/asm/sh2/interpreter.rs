@@ -1028,7 +1028,7 @@ impl Sh2Emu {
 						self.mem.insert(self.r[15], self.get_sr());
 						self.r[15] -= 4;
 						self.mem.insert(self.r[15], self.pc as u32 - 2);
-						self.pc = (self.mem[&(self.vbr + imm << 2)] + 4) as usize;
+						self.pc = (self.mem[&(self.vbr + (imm << 2))] + 4) as usize;
 					}
 
 					Ins::Tst(m,n) => {

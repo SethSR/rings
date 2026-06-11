@@ -57,7 +57,7 @@ pub struct Data<T> {
 }
 
 impl<T: Debug> Data<T> {
-	#[cfg(feature="debug_print")]
+	#[cfg(feature="debug_parser")]
 	pub fn print_debug(&self, input: &InputData, lex_data: &LexData) {
 		use data::{Record, Region};
 

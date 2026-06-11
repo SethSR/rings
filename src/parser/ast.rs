@@ -19,7 +19,7 @@ define_index_type! {
 	DISPLAY_FORMAT = "{}";
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Kind {
 	Int(i64),
 	Dec(f64),

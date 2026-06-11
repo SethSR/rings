@@ -2,7 +2,6 @@
 use std::collections::VecDeque;
 
 use crate::identifier::Map as IdentMap;
-use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 
 use super::ast::{Ast, AstId, AstList, Kind as AstKind};
@@ -23,7 +22,11 @@ pub enum MemoryPlacement {
 }
 
 impl MemoryPlacement {
-	pub fn as_text(&self, input: &InputData, lex_data: &LexData) -> String {
+	#[cfg(feature="debug_parser")]
+	pub fn as_text(&self,
+		input: &crate::input::Data,
+		lex_data: &LexData,
+	) -> String {
 		match self {
 			Self::Address(addr) => format!("Address({addr})"),
 			Self::Region(id) => format!("Region({})", lex_data.text(input, id)),
