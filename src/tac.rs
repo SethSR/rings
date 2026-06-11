@@ -200,7 +200,8 @@ impl Data {
 	) -> Self {
 		Self {
 			name: proc_id,
-			target: proc_data.target.unwrap_or(Target::SH2),
+			target: proc_data.target.unwrap_or(Target::X86_64),
+			// target: proc_data.target.unwrap_or(Target::SH2),
 			locals: prs_data.types.iter()
 					.map(|(_,_,id,_)| *id)
 					.collect(),

@@ -12,7 +12,7 @@ use crate::{Span, SrcPos, Target};
 
 mod m68k;
 mod sh2;
-//mod x86_64;
+mod x86_64;
 //mod z80;
 
 pub fn eval(
@@ -31,7 +31,7 @@ pub fn eval(
 		let data = match section.target {
 			Target::M68k => Data::M68k(m68k::lower(&proc_name, section, stack_addr)),
 			Target::SH2 => Data::SH2(sh2::lower(&proc_name, section, stack_addr, ret_type)),
-			//Target::X86_64 => Data::X86(x86_64::lower(&proc_name, section)),
+			Target::X86_64 => Data::X86(x86_64::lower(&proc_name, section, stack_addr)),
 			//Target::Z80 => Data::Z80(z80::lower(&proc_name, section, ret_type)),
 			_ => unreachable!(),
 		};
@@ -53,7 +53,7 @@ pub fn eval(
 pub enum Data {
 	M68k((Vec<m68k::Asm>, Vec<Block>)),
 	SH2((Vec<sh2::Asm>, Vec<Block>)),
-	//X86(Vec<x86_64::Asm>),
+	X86((Vec<x86_64::Asm>, Vec<Block>)),
 	//Z80(Vec<z80::Asm>),
 }
 
@@ -77,11 +77,14 @@ impl Display for Data {
 					}
 				}
 			}
-			//Self::X86(data) => {
-				//for asm in data {
-					//out.push(asm.to_string());
-				//}
-			//}
+			Self::X86((data, blocks)) => {
+				for (idx, block) in blocks.iter().enumerate() {
+					out.push(format!("_{idx}: ; -> {:?}", block.next_blocks));
+					for asm in &data[block.span.start..block.span.end] {
+						out.push(asm.to_string());
+					}
+				}
+			}
 			//Self::Z80(data) => out.extend(
 				//data.iter().map(|asm| asm.to_string())
 			//),
