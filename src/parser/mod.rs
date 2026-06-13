@@ -7,7 +7,6 @@ use crate::input::Data as InputData;
 use crate::lexer::Data as LexData;
 use crate::token::{Id as TokenId, Kind as TokenKind};
 use crate::{SrcPos, Target};
-use crate::token_source;
 
 mod ast;
 mod cursor;
@@ -160,7 +159,7 @@ pub fn eval(input: &InputData, lex_data: &LexData) -> Result<Data<SrcPos>, Error
 		.map_err(|e| e.into_comp_error(input, lex_data))
 		.map_err(|e| e.with_kind(ErrKind::Parser))?;
 
-	#[cfg(feature="task_debug_print")]
+	#[cfg(feature="debug_tasks")]
 	eprintln!("{tasks:?}");
 
 	let data = process::process_tasks(lex_data, &locations, tasks)
@@ -202,8 +201,8 @@ fn convert_ast_idx_to_src(
 ) -> Ast<AstKind, SrcPos> {
 	let tok_start = node.location.start;
 	let tok_end = node.location.end;
-	let src_start = token_source(input, lex_data, tok_start).start;
-	let src_end = token_source(input, lex_data, tok_end).end;
+	let src_start = lex_data.token_source(input, tok_start).start;
+	let src_end = lex_data.token_source(input, tok_end).end;
 	Ast { kind: node.kind, location: (src_start..src_end).into() }
 }
 

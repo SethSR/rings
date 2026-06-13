@@ -32,6 +32,14 @@ fn main() {
 
 type SrcPos = usize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Target {
+	M68k,
+	SH2,
+	X86_64,
+	Z80,
+}
+
 pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	println!("=== Rings Compiler ===");
 	println!();
@@ -40,21 +48,19 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 
 	let lex_data = lexer::eval(&input.source)
 		.map_err(|e| e.display(&input))?;
+
 	#[cfg(feature="debug_lexer")]
 	lex_data.print(&input, false);
 
 	let prs_data = parser::eval(&input, &lex_data)
 		.map_err(|e| e.display(&input))?;
 
-	#[cfg(feature="debug_lexer")]
 	#[cfg(feature="debug_parser")]
 	prs_data.print_debug(&input, &lex_data);
 
 	let typ_data = type_checker::eval(&input, &lex_data, &prs_data)
 		.map_err(|e| e.display(&input))?;
 
-	#[cfg(feature="debug_lexer")]
-	#[cfg(feature="debug_parser")]
 	#[cfg(feature="debug_type_checker")]
 	{
 		println!("== Typed Data ==");
@@ -70,48 +76,60 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		println!();
 	}
 
-	println!("== Packing ==");
-	println!();
 	let pak_data = packing::eval(&prs_data);
-	println!("Records:");
-	for (rec_id, pack) in &pak_data.records {
-		let record = &prs_data.records[rec_id];
-		println!("  {} ({} bytes):", lex_data.text(&input, rec_id), pack.size);
 
-		let field_iter = record.fields.iter()
-			.zip(pack.sizes.iter())
-			.zip(pack.offsets.iter());
-		for (((fid,_), size), offset) in field_iter {
-			println!("    {:<16}: offset {offset}, size {size}", lex_data.text(&input, fid));
+	#[cfg(feature="debug_packer")]
+	{
+		println!("== Packing ==");
+		println!();
+		println!("Records:");
+		for (rec_id, pack) in &pak_data.records {
+			let record = &prs_data.records[rec_id];
+			println!("  {} ({} bytes):", lex_data.text(&input, rec_id), pack.size);
+
+			let field_iter = record.fields.iter()
+				.zip(pack.sizes.iter())
+				.zip(pack.offsets.iter());
+			for (((fid,_), size), offset) in field_iter {
+				println!("    {:<16}: offset {offset}, size {size}", lex_data.text(&input, fid));
+			}
 		}
+		println!("Tables:");
+		for (tab_id, table) in &pak_data.tables {
+			println!("  {}: {table:?}", lex_data.text(&input, tab_id));
+		}
+		println!();
 	}
-	println!("Tables:");
-	for (tab_id, table) in &pak_data.tables {
-		println!("  {}: {table:?}", lex_data.text(&input, tab_id));
-	}
-	println!();
 
-	println!("== Region Runtime Start Offset ==");
-	println!();
 	let lay_data = layout::eval(&prs_data, &pak_data)
 		.map_err(|e| e.display(&input, &lex_data))?;
-	for (reg_id, offset) in &lay_data {
-		println!("  {}: 0x{offset:X}", lex_data.text(&input, &reg_id));
-	}
-	println!();
 
-	println!("== TAC ==");
-	println!();
+	#[cfg(feature="debug_layout")]
+	{
+		println!("== Region Runtime Start Offset ==");
+		println!();
+		for (reg_id, offset) in &lay_data {
+			println!("  {}: 0x{offset:X}", lex_data.text(&input, &reg_id));
+		}
+		println!();
+	}
+
 	let tac_data = tac::eval(&prs_data, &typ_data, &pak_data, &lay_data)
 		.map_err(|e| e.into_comp_error(&input, &lex_data, &prs_data.procedures))
 		.map_err(|e| e.display(&input))?;
-	for (proc_id, list) in &tac_data {
-		println!("  {}:", lex_data.text(&input, proc_id));
-		for tac in &list.instructions {
-			println!("    {tac:?}");
+
+	#[cfg(feature="debug_tac")]
+	{
+		println!("== TAC ==");
+		println!();
+		for (proc_id, list) in &tac_data {
+			println!("  {}:", lex_data.text(&input, proc_id));
+			for tac in &list.instructions {
+				println!("    {tac:?}");
+			}
 		}
+		println!();
 	}
-	println!();
 
 	/*
 	let dom_data = dom::eval(&tac_data);
@@ -119,31 +137,27 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 	*/
 
 	use identifier::Identifier;
-	println!("== ASM ==");
-	println!();
 	let stack_addr = prs_data.regions.get(&"Stack".id())
 		.or(prs_data.regions.get(&"DataStack".id()))
 		.expect("missing stack address")
 		.span.start;
 	let asm_db = asm::eval(&input, &lex_data, &prs_data, tac_data, stack_addr);
-	for (_, data) in &asm_db {
-		println!("{data}");
+
+	#[cfg(feature="debug_asm")]
+	{
+		println!("== ASM ==");
+		println!();
+		for (_, data) in &asm_db {
+			println!("{data}");
+		}
+		println!();
 	}
-	println!();
 
 	/*
 	output(&input.source_file, asm_db);
 	*/
 
 	Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Target {
-	M68k,
-	SH2,
-	X86_64,
-	Z80,
 }
 
 // TODO - srenshaw - We need to validate 'targets' for their respective consoles.
@@ -246,38 +260,4 @@ fn output(source_file: &str, asm_db: identifier::Map<asm::Data>) {
 	}
 }
 */
-
-fn fmt_size(size: usize) -> String {
-	let mut buffer = [size,0,0,0];
-	for idx in 0..3 {
-		if buffer[idx] > 1023 {
-			buffer[idx + 1] = buffer[idx] / 1024;
-			buffer[idx] %= 1024;
-		}
-	}
-	if buffer[3] > 0 {
-		return format!("\x1b[31m{size}B\x1b[0m");
-	}
-	let mut out = String::with_capacity(20);
-	if buffer[2] > 0 {
-		out.push_str(&format!("{} MB", buffer[2]));
-	}
-	if buffer[1] > 0 {
-		out.push_str(&format!(" {} KB", buffer[1]));
-	}
-	if buffer[0] > 0 {
-		out.push_str(&format!(" {} B", buffer[0]));
-	}
-	out.trim_start().to_string()
-}
-
-fn token_source(
-	input: &input::Data,
-	lex_data: &lexer::Data,
-	token_id: token::Id,
-) -> Span<SrcPos> {
-	let kind = lex_data.tok_list[token_id];
-	let start = lex_data.tok_pos[token_id];
-	Span::new(start, start + kind.size(&input, &lex_data))
-}
 

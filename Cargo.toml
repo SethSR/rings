@@ -9,8 +9,13 @@ interavl = "0.5.0"
 
 [features]
 debug_lexer=[]
+debug_tasks=[]
 debug_parser=[]
 debug_type_checker=[]
+debug_packer=[]
+debug_layout=[]
+debug_tac=[]
+debug_asm=[]
 
 record=[]
 procedures=[]

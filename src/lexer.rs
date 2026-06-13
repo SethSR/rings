@@ -3,7 +3,7 @@ use std::collections::hash_map::Entry;
 
 use crate::error::{Error, Kind as ErrorKind};
 use crate::identifier::{Identifier, Map as IdentMap};
-use crate::token::{Kind, KindList, PosList};
+use crate::token::{Kind, KindList, PosList, Id as TokenId};
 use crate::{identifier, input, Span, SrcPos};
 
 pub fn eval(source: &str) -> Result<Data, Error> {
@@ -36,13 +36,23 @@ impl Data {
 		let Span { start, end } = self.identifiers[ident_id];
 		&input.source[start..end]
 	}
-	
+
 	pub fn location(&self,
 		ident_id: &identifier::IdentId,
 	) -> Span<SrcPos> {
 		self.identifiers[ident_id]
 	}
 
+	pub fn token_source(&self,
+		input: &input::Data,
+		token_id: TokenId,
+	) -> Span<SrcPos> {
+		let kind = self.tok_list[token_id];
+		let start = self.tok_pos[token_id];
+		Span::new(start, start + kind.size(&input, self))
+	}
+
+	#[cfg(feature="debug_lexer")]
 	pub fn print(&self, input: &input::Data, with_tokens: bool) {
 		if with_tokens {
 			print!("Tokens:\n ");

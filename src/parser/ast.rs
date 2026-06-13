@@ -52,6 +52,7 @@ pub enum Kind {
 }
 
 impl Kind {
+	#[cfg(feature="debug_parser")]
 	pub fn as_text(&self, input: &InputData, lex_data: &LexData) -> String {
 		match self {
 			Self::Int(val) => format!("Int({val})"),

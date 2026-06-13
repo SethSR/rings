@@ -10,7 +10,7 @@ use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::parser::{Ast, AstId, AstKind, Data as PrsData, PathSegment, Type, Value};
 use crate::token::Id as TokenId;
-use crate::{token_source, Span, SrcPos};
+use crate::{Span, SrcPos};
 
 pub type TypedList = IndexVec<AstId, TypedAst>;
 
@@ -257,7 +257,7 @@ fn check_for_main(
 		return Ok(());
 	}
 
-	let tok_src = token_source(input, lex_data, TokenId::default());
+	let tok_src = lex_data.token_source(input, TokenId::default());
 	let message = "missing 'main' procedure";
 	Err(error::Error::new(tok_src, message))
 }
@@ -273,7 +273,7 @@ fn check_stack_regions(
 		token_id: TokenId,
 		message: &str,
 	) -> error::Error {
-		let tok_src = token_source(input, lex_data, token_id);
+		let tok_src = lex_data.token_source(input, token_id);
 		error::Error::new(tok_src, message)
 	}
 
