@@ -70,6 +70,7 @@ impl Error {
 		});
 	}
 
+	#[cfg(feature="notes")]
 	pub fn with_note_at(
 		mut self,
 		location: Span<usize>,
