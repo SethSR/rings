@@ -2,159 +2,166 @@
 use crate::identifier::Identifier;
 use crate::parser::TableMap;
 
-use super::{MemoryPlacement, Type};
+use super::*;
 
-fn setup(source: &str) -> Result<TableMap, String> {
+fn setup(source: &str) -> Result<(TableMap, IdentMap<u32>, IdentMap<IdentId>), String> {
 	let input = crate::input::eval(file!().into(), source.into());
 	let lex_data = crate::lexer::eval(source)
-			.map_err(|e| e.display(&input))?;
+		.map_err(|e| e.display(&input))?;
 	super::eval(&input, &lex_data)
-			.map_err(|e| e.display(&input))
-			.map(|data| data.tables)
+		.map_err(|e| e.display(&input))
+		.map(|data| (data.tables, data.table_address, data.table_regions))
 }
 
 #[test]
 fn minimal() {
-	let tables = setup("table users[10] {}")
+	let (tables, addresses, regions) = setup("table users[10] {}")
 			.unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
 	let table = tables.get(&"users".id())
-			.expect("missing users table");
+		.expect("missing users table");
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, []);
+	assert!(!addresses.contains_key(&"users".id()));
+	assert!(!regions.contains_key(&"users".id()));
 }
 
 #[test]
 fn single_field() {
-	let tables = setup("
+	let (tables, addresses, regions) = setup("
 		table users[10] { id: s32 }
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
 	let table = tables.get(&"users".id())
-			.expect("missing users table");
+		.expect("missing users table");
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, [
 		("id".id(), Type::S32),
 	]);
+	assert!(!addresses.contains_key(&"users".id()));
+	assert!(!regions.contains_key(&"users".id()));
 }
 
 #[test]
 fn multiple_fields() {
-	let tables = setup("
+	let (tables, addresses, regions) = setup("
 		table users[100] { id: u32, name: u16, age: u8 }
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
 	let table = tables.get(&"users".id())
-			.expect("missing users table");
+		.expect("missing users table");
 	assert_eq!(table.row_count, 100);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, [
 		("id".id(), Type::U32),
 		("name".id(), Type::U16),
 		("age".id(), Type::U8),
 	]);
+	assert!(!addresses.contains_key(&"users".id()));
+	assert!(!regions.contains_key(&"users".id()));
 }
 
 #[test]
 fn trailing_comma() {
-	let tables = setup("
+	let (tables, addresses, regions) = setup("
 		table users[80] { id: u32, name: u16, }
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
 	let table = tables.get(&"users".id())
-			.expect("missing users table");
+		.expect("missing users table");
 	assert_eq!(table.row_count, 80);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, [
 		("id".id(), Type::U32),
 		("name".id(), Type::U16),
 	]);
+	assert!(!addresses.contains_key(&"users".id()));
+	assert!(!regions.contains_key(&"users".id()));
 }
 
 #[test]
 fn with_placement() {
-	let tables = setup("
+	let (tables, addresses, regions) = setup("
 		region memory[0] @ 0x00;
 		table users[10] in memory { id: u32 }
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
 	let table = tables.get(&"users".id())
-			.expect("missing users table");
+		.expect("missing users table");
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.placement, Some(MemoryPlacement::Region("memory".id())));
 	assert_eq!(table.fields, [
 		("id".id(), Type::U32),
 	]);
+	assert!(!addresses.contains_key(&"users".id()));
+	assert_eq!(regions.get(&"users".id()), Some(&"memory".id()));
 }
 
 #[test]
 fn with_placement_expression() {
-	let tables = setup("
+	let (tables, addresses, regions) = setup("
 		value base = 0x1000;
 		table users[10] @ base + 35 * 4 {}
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
 	let table = tables.get(&"users".id())
-			.expect("missing users table");
+		.expect("missing users table");
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.placement, Some(MemoryPlacement::Address(0x108C)));
 	assert_eq!(table.fields, []);
+	assert_eq!(addresses.get(&"users".id()), Some(&0x108C));
+	assert!(!regions.contains_key(&"users".id()));
 }
 
 #[test]
 fn with_row_count_expression() {
-	let tables = setup("
+	let (tables, addresses, regions) = setup("
 		value count = 25;
 		table users[count + 18] {}
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
 	let table = tables.get(&"users".id())
-			.expect("missing users table");
+		.expect("missing users table");
 	assert_eq!(table.row_count, 43);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, []);
+	assert!(!addresses.contains_key(&"users".id()));
+	assert!(!regions.contains_key(&"users".id()));
 }
 
 #[test]
 #[should_panic="Expected table name"]
 fn missing_name() {
 	setup("table [10] {}")
-			.unwrap_or_else(|e| panic!("{e}"));
+		.unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
 #[should_panic="Expected capacity expression"]
 fn missing_capacity() {
 	setup("table users[] {}")
-			.unwrap_or_else(|e| panic!("{e}"));
+		.unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
 #[should_panic="Expected region name"]
 fn missing_region_placement() {
 	setup("table users[10] in {}")
-			.unwrap_or_else(|e| panic!("{e}"));
+		.unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
 #[should_panic="Expected address expression"]
 fn missing_address_placement() {
 	setup("table users[10] @ {}")
-			.unwrap_or_else(|e| panic!("{e}"));
+		.unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
 #[should_panic="beyond max value"]
 fn negative_capacity() {
 	setup("table users[-10] @ {}")
-			.unwrap_or_else(|e| panic!("{e}"));
+		.unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
 fn unicode_identifiers() {
-	let tables = setup("
+	let (tables, addresses, regions) = setup("
 		table 用户[10] { 名字: s32 }
 	").unwrap_or_else(|e| panic!("{e}"));
 	assert_eq!(tables.len(), 1);
@@ -163,4 +170,7 @@ fn unicode_identifiers() {
 	assert_eq!(table.fields, [
 		("名字".id(), Type::S32),
 	]);
+	assert!(!addresses.contains_key(&"users".id()));
+	assert!(!regions.contains_key(&"users".id()));
 }
+

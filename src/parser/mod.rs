@@ -31,7 +31,6 @@ pub use ast::{Ast, AstId, Kind as AstKind, PathSegment};
 pub use data::{Procedure, Table, Value};
 pub use data::{ProcMap, RecordMap, RegionMap, TableMap, ValueMap};
 pub use types::{Type, TypeMap};
-pub use process::MemoryPlacement;
 
 /// The constructs recognized by the language
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +49,11 @@ pub struct Data<T> {
 	pub values: ValueMap,
 	pub regions: RegionMap,
 	pub records: RecordMap,
+	pub record_regions: IdentMap<IdentId>,
+	pub record_address: IdentMap<u32>,
 	pub tables: TableMap,
+	pub table_regions: IdentMap<IdentId>,
+	pub table_address: IdentMap<u32>,
 	pub procedures: ProcMap<T>,
 	pub types: TypeMap,
 }
@@ -88,10 +91,7 @@ impl<T: Debug> Data<T> {
 		println!("Regions:\n{region_str}");
 
 		let record_str = self.records.iter()
-			.map(|(id, Record { placement, fields })| {
-				let placement_str = placement.map(|p| p.as_text(input, lex_data))
-					.unwrap_or_default();
-
+			.map(|(id, Record { fields })| {
 				let field_str = fields.iter()
 					.map(|(fid, ftype)| {
 						format!("    {}: {ftype:?}", lex_data.text(input, fid))
@@ -99,17 +99,30 @@ impl<T: Debug> Data<T> {
 					.collect::<Vec<_>>()
 					.join("\n");
 
-				format!("  {}: {placement_str}\n{field_str}", lex_data.text(input, id))
+				format!("  {}:\n{field_str}", lex_data.text(input, id))
 			})
 			.collect::<Vec<_>>()
 			.join("\n");
 		println!("Records:\n{record_str}");
 
-		let table_str = self.tables.iter()
-			.map(|(id, Table { row_count, placement, fields })| {
-				let placement_str = placement.map(|p| p.as_text(input, lex_data))
-					.unwrap_or_default();
+		let record_region_str = self.record_regions.iter()
+			.map(|(id, region_id)| {
+				format!("  {:<16}: {}", lex_data.text(input, id), lex_data.text(input, region_id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Records in Regions:\n{record_region_str}");
 
+		let record_address_str = self.record_address.iter()
+			.map(|(id, addr)| {
+				format!("  {:<16}: {addr:08X}", lex_data.text(input, id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Records at Address:\n{record_address_str}");
+
+		let table_str = self.tables.iter()
+			.map(|(id, Table { row_count, fields })| {
 				let field_str = fields.iter()
 					.map(|(fid, ftype)| {
 						format!("    {}: {ftype:?}", lex_data.text(input, fid))
@@ -117,11 +130,27 @@ impl<T: Debug> Data<T> {
 					.collect::<Vec<_>>()
 					.join("\n");
 
-				format!("  {}[{row_count}]: {placement_str}\n{field_str}", lex_data.text(input, id))
+				format!("  {}[{row_count}]: {field_str}", lex_data.text(input, id))
 			})
 			.collect::<Vec<_>>()
 			.join("\n");
 		println!("Tables:\n{table_str}");
+
+		let table_region_str = self.table_regions.iter()
+			.map(|(id, region_id)| {
+				format!("  {:<16}: {}", lex_data.text(input, id), lex_data.text(input, region_id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Tables in Regions:\n{table_region_str}");
+
+		let table_address_str = self.table_address.iter()
+			.map(|(id, addr)| {
+				format!("  {:<16}: {addr:08X}", lex_data.text(input, id))
+			})
+			.collect::<Vec<_>>()
+			.join("\n");
+		println!("Tables at Address:\n{table_address_str}");
 
 		let proc_str = self.procedures.iter()
 			.map(|(id, Procedure { target, params, ret_type, ..})| {
@@ -171,7 +200,11 @@ pub fn eval(input: &InputData, lex_data: &LexData) -> Result<Data<SrcPos>, Error
 		values: data.values,
 		regions: data.regions,
 		records: data.records,
+		record_regions: data.record_regions,
+		record_address: data.record_address,
 		tables: data.tables,
+		table_regions: data.table_regions,
+		table_address: data.table_address,
 		types: data.types,
 		procedures: data.procedures.into_iter()
 				.map(|(proc_id, proc_data)| (proc_id, convert_proc_idx_to_src(input, lex_data, proc_data)))

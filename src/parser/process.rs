@@ -44,6 +44,14 @@ fn error_recursion(name_id: IdentId, locations: &IdentMap<TokenId>) -> Error {
 	Error::RecursiveType { name_id, location }
 }
 
+fn check_u16(value: i64) -> Option<u16> {
+	if (0..=u16::MAX as i64).contains(&value) {
+		Some(value as u16)
+	} else {
+		None
+	}
+}
+
 pub fn process_tasks(
 	lex_data: &LexData,
 	locations: &IdentMap<TokenId>,
@@ -102,9 +110,24 @@ pub fn process_tasks(
 			Task::Record { ident, start_placement, start_fields } => {
 				match process_record(lex_data, &data, start_placement, start_fields) {
 					Ok((placement, fields)) => {
-						if data.records.insert(ident, Record { placement, fields }).is_some() {
+						if data.records.insert(ident, Record { fields }).is_some() {
 							return Err(error_duplication(ident, locations));
 						}
+
+						match placement {
+							Some(MemoryPlacement::Address(addr)) => {
+								if data.record_address.insert(ident, addr).is_some() {
+									return Err(error_duplication(ident, locations));
+								}
+							}
+							Some(MemoryPlacement::Region(region_id)) => {
+								if data.record_regions.insert(ident, region_id).is_some() {
+									return Err(error_duplication(ident, locations));
+								}
+							}
+							None => {} // No static placement
+						}
+
 						data.kinds.insert(ident, Kind::Record);
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
@@ -122,10 +145,25 @@ pub fn process_tasks(
 
 			Task::Table { ident, start_rows, start_placement, start_fields } => {
 				match process_table(lex_data, &data, start_placement, start_rows, start_fields) {
-					Ok(table) => {
-						if data.tables.insert(ident, table).is_some() {
+					Ok((placement, row_count, fields)) => {
+						if data.tables.insert(ident, Table { row_count, fields }).is_some() {
 							return Err(error_duplication(ident, locations));
 						}
+
+						match placement {
+							Some(MemoryPlacement::Address(addr)) => {
+								if data.table_address.insert(ident, addr).is_some() {
+									return Err(error_duplication(ident, locations));
+								}
+							}
+							Some(MemoryPlacement::Region(region_id)) => {
+								if data.table_regions.insert(ident, region_id).is_some() {
+									return Err(error_duplication(ident, locations));
+								}
+							}
+							None => {} // No static placement
+						}
+
 						data.kinds.insert(ident, Kind::Table);
 						failed_tasks.remove(&ident);
 						consecutive_failures = 0;
@@ -310,16 +348,16 @@ fn process_table(
 	start_placement: Option<TokenId>,
 	start_rows: TokenId,
 	start_fields: TokenId,
-) -> Result<Table, Error> {
+) -> Result<(Option<MemoryPlacement>, u16, Vec<(IdentId, Type)>), Error> {
 	let mut cursor_rows = Cursor::from_start(lex_data, start_rows);
 	let row_count = evaluate_expr(&mut cursor_rows, data, TokenKind::CBracket)
 			.map_err(|_| cursor_rows.expected_token("capacity expression"))?;
 	let Value::Integer(row_count) = row_count else {
 		return Err(Error::DecimalAddressValue { location: start_rows });
 	};
-	if !(0..=u16::MAX as i64).contains(&row_count) {
+	let Some(row_count) = check_u16(row_count) else {
 		return Err(Error::ValueOutOfRange { location: start_rows, value: row_count, max: u16::MAX as i64 });
-	}
+	};
 
 	let placement = start_placement
 			.map(|start| process_placement(lex_data, data, start, TokenKind::OBrace))
@@ -328,7 +366,7 @@ fn process_table(
 	let mut cursor_fields = Cursor::from_start(lex_data, start_fields);
 	let fields = process_fields(&mut cursor_fields, data, TokenKind::CBrace)?;
 
-	Ok(Table { placement, row_count: row_count as u16, fields })
+	Ok((placement, row_count, fields))
 }
 
 fn process_proc(

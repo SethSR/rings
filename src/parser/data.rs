@@ -5,7 +5,7 @@ use crate::parser::ast::{AstList, Kind};
 use crate::identifier::{IdentId, Map as IdentMap};
 use crate::{Span, Target};
 
-use super::{MemoryPlacement, Type};
+use super::Type;
 
 pub type ValueMap = IdentMap<Value>;
 pub type RegionMap = IdentMap<Region>;
@@ -22,7 +22,6 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
 	pub fields: Vec<(IdentId, Type)>,
-	pub placement: Option<MemoryPlacement>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +32,6 @@ pub struct Region {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
 	pub row_count: u16,
-	pub placement: Option<MemoryPlacement>,
 	pub fields: Vec<(IdentId, Type)>,
 }
 

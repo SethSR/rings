@@ -443,8 +443,9 @@ fn empty_table() {
 	let table = data.tables.get(&"a".id())
 			.expect("missing table 'a'");
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, []);
+	assert!(!data.table_address.contains_key(&"a".id()));
+	assert!(!data.table_regions.contains_key(&"a".id()));
 }
 
 #[test]
@@ -454,10 +455,11 @@ fn table_with_one_field() {
 	assert_eq!(data.tables.len(), 1);
 	let table = &data.tables[&"a".id()];
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, [
 		("b".id(), Type::U32),
 	]);
+	assert!(!data.table_address.contains_key(&"a".id()));
+	assert!(!data.table_regions.contains_key(&"a".id()));
 }
 
 #[test]
@@ -467,11 +469,12 @@ fn table_with_multiple_field() {
 	assert_eq!(data.tables.len(), 1);
 	let table = &data.tables[&"a".id()];
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, [
 		("b".id(), Type::U32),
 		("c".id(), Type::S16),
 	]);
+	assert!(!data.table_address.contains_key(&"a".id()));
+	assert!(!data.table_regions.contains_key(&"a".id()));
 }
 
 #[test]
@@ -484,10 +487,13 @@ fn table_with_user_defined_field() {
 	assert_eq!(data.tables.len(), 1);
 	let table = &data.tables[&"b".id()];
 	assert_eq!(table.row_count, 10);
-	assert_eq!(table.placement, None);
 	assert_eq!(table.fields, [
 		("b1".id(), Type::Record("a".id())),
 	]);
+	assert!(!data.record_address.contains_key(&"a".id()));
+	assert!(!data.record_regions.contains_key(&"a".id()));
+	assert!(!data.table_address.contains_key(&"b".id()));
+	assert!(!data.table_regions.contains_key(&"b".id()));
 }
 
 #[test]
