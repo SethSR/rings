@@ -153,9 +153,11 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 		println!();
 	}
 
-	/*
 	output(&input.source_file, asm_db);
-	*/
+	println!("output: {}", std::path::PathBuf::from(input.source_file)
+		.with_extension("target.asm")
+		.display()
+	);
 
 	Ok(())
 }
@@ -168,8 +170,12 @@ pub fn compile(file_path: String, source: &str) -> Result<(), String> {
 
 // TODO - srenshaw - Need to add Table location calculations.
 
-/*
 fn output(source_file: &str, asm_db: identifier::Map<asm::Data>) {
+	use std::collections::HashMap;
+	use std::path::PathBuf;
+	use std::fs::File;
+	use std::process::{Command, Stdio};
+
 	let mut out_path = PathBuf::from(source_file);
 	out_path.set_extension("");
 
@@ -179,7 +185,7 @@ fn output(source_file: &str, asm_db: identifier::Map<asm::Data>) {
 			asm::Data::M68k(_) => out_data.entry(Target::M68k),
 			asm::Data::SH2(_) => out_data.entry(Target::SH2),
 			asm::Data::X86(_) => out_data.entry(Target::X86_64),
-			asm::Data::Z80(_) => out_data.entry(Target::Z80),
+			// asm::Data::Z80(_) => out_data.entry(Target::Z80),
 		};
 		target_entry.or_default().push(asm_data);
 	}
@@ -196,68 +202,74 @@ fn output(source_file: &str, asm_db: identifier::Map<asm::Data>) {
 
 		let out_path = out_path.with_added_extension("asm");
 		let out_file = File::create(&out_path)
-				.expect("unable to create output file");
+			.expect("unable to create output file");
 
 		if target == Target::SH2 {
 			writeln!(&out_file, "include 'sh2.inc'")
-					.expect("unable to write to sh2 file");
+				.expect("unable to write to sh2 file");
 		}
 
 		for out in data {
 			writeln!(&out_file, "{out}")
-					.expect("unable to write to output file");
+				.expect("unable to write to output file");
 		}
 
 		let output = match target {
 			Target::M68k => {
 				Command::new("./vasmm68k_std")
-						.arg(&out_path)
-						.arg("-o")
-						.arg(out_path.with_extension("o"))
-						.output()
+					.arg(&out_path)
+					.arg("-o")
+					.arg(out_path.with_extension("o"))
+					.output()
 			}
 			Target::SH2 => {
 				Command::new("./fasmg")
-						.arg(&out_path)
-						.arg(out_path.with_extension("bin"))
-						.output()
+					.arg(&out_path)
+					.arg(out_path.with_extension("bin"))
+					.output()
 			}
 			Target::X86_64 => {
 				let output = Command::new("./vasmx86_std")
-						.arg("-m64")
-						.arg("-Felf")
-						.arg(&out_path)
-						.arg("-o")
-						.arg(out_path.with_extension("o"))
-						.stdin(Stdio::piped())
-						.output();
+					.arg("-m64")
+					.arg("-Felf")
+					.arg(&out_path)
+					.arg("-o")
+					.arg(out_path.with_extension("o"))
+					.stdin(Stdio::piped())
+					.output();
 				match output {
 					Err(e) => panic!("{e}"),
 					Ok(out) if out.status.success() => {
 						Command::new("ld")
-								.arg(out_path.with_extension("o"))
-								.arg("-o")
-								.arg(out_path.with_extension(""))
-								.output()
+							.arg(out_path.with_extension("o"))
+							.arg("-o")
+							.arg(out_path.with_extension(""))
+							.output()
 					}
 					Ok(out) => panic!("{out:?}"),
 				}
 			}
 			Target::Z80 => {
 				Command::new("./vasmz80_std")
-						.arg(&out_path)
-						.arg("-o")
-						.arg(out_path.with_extension("o"))
-						.output()
+					.arg(&out_path)
+					.arg("-o")
+					.arg(out_path.with_extension("o"))
+					.output()
 			}
 		};
 
 		match output {
-			Err(e) => eprintln!("{e}"),
+			Err(e) => eprintln!("ERROR: {e}"),
 			Ok(out) if out.status.success() => {}
-			Ok(out) => eprintln!("{:?}", out.stderr),
+			Ok(out) => {
+				let stdout_str = String::from_utf8(out.stdout)
+					.expect("unable to convert from external stdout command");
+				eprintln!("{stdout_str}");
+				let stderr_str = String::from_utf8(out.stderr)
+					.expect("unable to convert from external stderr command");
+				eprintln!("{stderr_str}");
+			}
 		}
 	}
 }
-*/
 
