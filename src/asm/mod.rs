@@ -288,3 +288,4 @@ impl<Reg: Copy> Allocator<Reg> {
 		0xDEAD_BEEF
 	}
 }
+

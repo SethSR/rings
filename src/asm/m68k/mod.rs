@@ -488,6 +488,7 @@ pub enum EA {
 	/// - #<xxx>
 	Imm(i32),
 }
+
 impl Display for EA {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		match self {
@@ -498,8 +499,8 @@ impl Display for EA {
 			Self::Pre(a) => write!(f, "-({a})"),
 			Self::Dsp(d,a) => write!(f, "{d}({a})"),
 			Self::Idx(d,a,x) => write!(f, "{d}({a},{x})"),
-			Self::AbW(a) => write!(f, "(#${a:04X})"),
-			Self::AbL(a) => write!(f, "(#${a:08X})"),
+			Self::AbW(a) => write!(f, "(${a:04X})"),
+			Self::AbL(a) => write!(f, "(${a:08X})"),
 			Self::Imm(a) => write!(f, "#${a:X}"),
 		}
 	}
@@ -619,3 +620,4 @@ impl Display for Asm {
 		}
 	}
 }
+

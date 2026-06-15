@@ -65,7 +65,7 @@ fn store_from_rax(loc: &Location, next_reg: u32, data: &mut Vec<Asm>) {
 	}
 }
 
-pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> (Vec<Asm>, Vec<Block>) {
+pub fn lower(proc_name: &str, tac_data: TacData, _stack_addr: u32) -> (Vec<Asm>, Vec<Block>) {
 	let TacData {
 		instructions,
 		blocks,
@@ -240,7 +240,6 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> (Vec<Asm>, 
 						data.push(Asm::Xor(Reg::Rbx, Reg::Rax));
 						store_from_rax(dst, next_reg, &mut data);
 					}
-					_ => todo!("{op}"),
 				}
 			}
 
@@ -267,7 +266,10 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> (Vec<Asm>, 
 			#[cfg(feature="call")]
 			TAC::Call { name, args, dst } => {
 				// System V AMD64 ABI: first 6 integer args go in RDI, RSI, RDX, RCX, R8, R9
-				let arg_regs = [Reg::Rdi, Reg::Rsi, Reg::Rdx, Reg::Rcx];
+				let arg_regs = [
+					// Reg::Rdi, Reg::Rsi,
+					Reg::Rdx, Reg::Rcx,
+				];
 				for (i, arg) in args.iter().enumerate() {
 					load_to(Reg::Rax, arg, next_reg, &mut data);
 
@@ -280,7 +282,7 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> (Vec<Asm>, 
 
 				// TODO - srenshaw - This name is incorrect. We'll probably want to resolve the procedure
 				// `name` in the TAC resolution stage.
-				data.push(Asm::Call(format!("{name:?}")));
+				// data.push(Asm::Call(format!("{name:?}")));
 
 				if let Some(dst_vr) = dst {
 					// Return value goes in RAX
@@ -313,8 +315,8 @@ pub enum Reg {
 	Rbx,
 	Rcx,
 	Rdx,
-	Rdi,
-	Rsi,
+	// Rdi,
+	// Rsi,
 	Rbp,
 	Rsp,
 }
@@ -326,8 +328,8 @@ impl Display for Reg {
 			Self::Rbx => write!(f, "rbx"),
 			Self::Rcx => write!(f, "rcx"),
 			Self::Rdx => write!(f, "rdx"),
-			Self::Rdi => write!(f, "rdi"),
-			Self::Rsi => write!(f, "rsi"),
+			// Self::Rdi => write!(f, "rdi"),
+			// Self::Rsi => write!(f, "rsi"),
 			Self::Rbp => write!(f, "rbp"),
 			Self::Rsp => write!(f, "rsp"),
 		}
@@ -348,9 +350,9 @@ pub enum Asm {
 	MovI(u32,Reg),
 	Cmp(Reg,Reg),
 	CmpI(u32,Reg),
-	Pop(Reg),
+	// Pop(Reg),
 	Push(Reg),
-	PushI(i32),
+	// PushI(i32),
 	ShL(Reg),
 	ShR(Reg),
 	Not(Reg),
@@ -368,12 +370,12 @@ pub enum Asm {
 	SetGT(Reg),
 	SetNZ(Reg),
 	Jmp(String),
-	JE(String),
+	// JE(String),
 	JNE(String),
-	Call(String),
+	// Call(String),
 	Cdq,
 	Ret,
-	SysCall,
+	// SysCall,
 }
 
 impl Display for Asm {
@@ -390,9 +392,9 @@ impl Display for Asm {
 			Self::MovI(imm32,rd) => write!(f, "\tmov ${imm32},%{rd}"),
 			Self::Cmp(rs,rd) => write!(f, "\tcmp %{rs},{rd}"),
 			Self::CmpI(imm32,reg) => write!(f, "\tcmp ${imm32},%{reg}"),
-			Self::Pop(rs) => write!(f, "\tpop %{rs}"),
+			// Self::Pop(rs) => write!(f, "\tpop %{rs}"),
 			Self::Push(rd) => write!(f, "\tpush %{rd}"),
-			Self::PushI(imm32) => write!(f, "\tpush ${imm32}"),
+			// Self::PushI(imm32) => write!(f, "\tpush ${imm32}"),
 			Self::ShL(rd) => write!(f, "\tshl %cl,%{rd}"),
 			Self::ShR(rd) => write!(f, "\tshr %cl,%{rd}"),
 			Self::Not(rd) => write!(f, "\tnot %{rd}"),
@@ -410,12 +412,13 @@ impl Display for Asm {
 			Self::SetGT(rd) => write!(f, "\tsetg %{rd}"),
 			Self::SetNZ(rd) => write!(f, "\tsetnz %{rd}"),
 			Self::Jmp(target) => write!(f, "\tjmp {target}"),
-			Self::JE(target) => write!(f, "\tje {target}"),
+			// Self::JE(target) => write!(f, "\tje {target}"),
 			Self::JNE(target) => write!(f, "\tjne {target}"),
-			Self::Call(target) => write!(f, "\tcall {target}"),
+			// Self::Call(target) => write!(f, "\tcall {target}"),
 			Self::Cdq => write!(f, "\tcdq"),
 			Self::Ret => write!(f, "\tret"),
-			Self::SysCall => write!(f, "\tsyscall"),
+			// Self::SysCall => write!(f, "\tsyscall"),
 		}
 	}
 }
+
