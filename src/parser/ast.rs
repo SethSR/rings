@@ -5,10 +5,11 @@ use index_vec::define_index_type;
 use index_vec::IndexVec;
 
 use crate::identifier::IdentId;
-use crate::input::Data as InputData;
-use crate::lexer::Data as LexData;
 use crate::operators::{BinaryOp, UnaryOp};
 use crate::Span;
+
+#[cfg(feature="debug_parser")] use crate::input::Data as InputData;
+#[cfg(feature="debug_parser")] use crate::lexer::Data as LexData;
 
 pub type AstList<K,T> = IndexVec<AstId, Ast<K,T>>;
 
@@ -382,13 +383,5 @@ impl<T> PartialEq<Kind> for Ast<Kind, T> {
 pub enum PathSegment {
 	Field(IdentId),
 	Index(AstId, IdentId),
-}
-
-#[cfg(feature="optimize")]
-#[derive(Debug, Default)]
-pub struct Graph {
-	node_kinds: Vec<Kind>,
-	use_defs: Vec<Vec<Id>>,
-	def_uses: Vec<Vec<Id>>,
 }
 
