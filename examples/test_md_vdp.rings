@@ -1,9 +1,7 @@
 
 region Stack[0..100];
 
-region VdpCtrlLoc[24] @ 0xC00000;
-
-record VdpRegs in VdpCtrlLoc {
+record VdpRegs @ 0xC0_0000 {
 	data: s32,
 	ctrl: s32,
 	hv_counter: s32,
