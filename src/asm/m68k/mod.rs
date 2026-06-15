@@ -41,7 +41,8 @@ pub fn lower(proc_name: &str, tac_data: TacData, stack_addr: u32) -> (Vec<Asm>, 
 	let registers = super::allocate(
 		&[ Data::D0, Data::D1, Data::D2, Data::D3, Data::D4, Data::D5 ],
 		&instructions,
-	);
+		stack_addr,
+	).0;
 
 	let mut data = vec![
 		Asm::Label(proc_name.to_string()),

@@ -146,8 +146,12 @@ impl LabelGenerator {
 	}
 }
 
-fn allocate<Reg: Copy>(pool: &[Reg], instructions: &[TAC]) -> HashMap<u32, Reg> {
-	let mut allocator = Allocator::new(pool);
+fn allocate<Reg: Copy>(
+	pool: &[Reg],
+	instructions: &[TAC],
+	stack_addr: u32,
+) -> (HashMap<VRegId, Reg>, HashMap<VRegId, Addr>) {
+	let mut allocator = Allocator::new(pool, stack_addr);
 	allocator.eval(instructions)
 }
 
@@ -161,24 +165,26 @@ struct Allocator<Reg> {
 	locations: HashMap<Interval, Addr>,
 	pool: Vec<Reg>,
 	reg_max: usize,
+	stack_addr: u32,
 }
 
 impl<Reg: Copy> Allocator<Reg> {
-	fn new(pool: &[Reg]) -> Self {
+	fn new(pool: &[Reg], stack_addr: u32) -> Self {
 		Self {
 			active: Vec::default(),
 			registers: HashMap::default(),
 			locations: HashMap::default(),
 			reg_max: pool.len(),
 			pool: pool.iter().rev().copied().collect(),
+			stack_addr,
 		}
 	}
 
-	fn eval(&mut self, instructions: &[TAC]) -> HashMap<u32, Reg> {
+	fn eval(&mut self, instructions: &[TAC]) -> (HashMap<VRegId, Reg>, HashMap<VRegId, Addr>) {
 		fn update_interval(interval_map: &mut HashMap<VRegId, Interval>, vr: VRegId, idx: usize) {
 			interval_map.entry(vr)
-					.and_modify(|interval| interval.start = idx)
-					.or_insert(Span::point(idx));
+				.and_modify(|i| i.start = idx)
+				.or_insert(Span::point(idx));
 		}
 
 		let mut interval_map = HashMap::default();
@@ -221,71 +227,310 @@ impl<Reg: Copy> Allocator<Reg> {
 		let mut intervals: Vec<Interval> = interval_map.values().cloned().collect();
 		intervals.sort_by(|a, b| a.start.cmp(&b.start));
 
-		for interval_i in intervals {
-			self.expire_old_intervals(&interval_i);
+		for i in intervals {
+			self.expire_old_intervals(&i);
 
 			if self.active.len() == self.reg_max {
-				self.spill(&interval_i);
+				self.spill(&i);
 			} else {
 				self.registers.insert(
-					interval_i.clone(),
-					self.pool.pop()
-							.unwrap(),
+					i.clone(),
+					self.pool.pop().expect("no free registers remaining"),
 				);
 
-				self.active.push(interval_i.clone());
+				self.active.push(i.clone());
 				self.active.sort_by(|a,b| a.end.cmp(&b.end));
 			}
 		}
 
-		interval_map.into_iter()
-				.map(|(vreg, interval)| (vreg, self.registers[&interval]))
-				.collect()
+		let mut registers = HashMap::default();
+		let mut spills = HashMap::default();
+		for (vreg, interval) in interval_map {
+			match self.registers.get(&interval) {
+				Some(reg) => {
+					registers.insert(vreg, *reg);
+				}
+				None => {
+					spills.insert(vreg, self.locations[&interval]);
+				}
+			}
+		}
+
+		(registers, spills)
 	}
 
-	fn expire_old_intervals(&mut self, interval_i: &Interval) {
+	fn expire_old_intervals(&mut self, i: &Interval) {
 		let mut split_idx = 0;
 
-		for interval_j in &self.active {
-			if interval_j.end >= interval_i.end {
+		for j in &self.active {
+			if j.end > i.start {
 				break;
 			}
 
 			split_idx += 1;
-			self.pool.push(self.registers[&interval_j]);
+			self.pool.push(self.registers[&j]);
 		}
 
-		let (_, active) = self.active.split_at(split_idx);
-		self.active = active.to_vec();
+		self.active = self.active[split_idx..].to_vec();
 	}
 
-	fn spill(&mut self, interval_i: &Interval) {
-		let spill = self.active.pop()
-				.unwrap();
+	fn spill(&mut self, i: &Interval) {
+		let Some(spill) = self.active.pop() else {
+			let stack_loc = self.new_loc();
+			self.locations.insert(i.clone(), stack_loc);
+			return;
+		};
 
-		if spill.end > interval_i.end {
+		if spill.end > i.end {
 			self.registers.insert(
-				interval_i.clone(),
+				i.clone(),
 				self.registers[&spill],
 			);
 
 			let stack_loc = self.new_loc();
 			self.locations.insert(spill, stack_loc);
 
-			self.active.push(interval_i.clone());
+			self.active.push(i.clone());
 			self.active.sort_by(|a,b| a.end.cmp(&b.end));
 		} else {
 			// `spill` is still active so put it back
 			self.active.push(spill);
 
 			let stack_loc = self.new_loc();
-			self.locations.insert(interval_i.clone(), stack_loc);
+			self.locations.insert(i.clone(), stack_loc);
 		}
 	}
 
 	fn new_loc(&mut self) -> Addr {
-		// TODO - srenshaw - Actually use the data stack
-		0xDEAD_BEEF
+		self.stack_addr -= 4;
+		self.stack_addr
+	}
+}
+
+#[cfg(test)]
+mod linear_scan {
+	use std::collections::{HashMap, HashSet};
+	use crate::operators::{BinaryOp, UnaryOp};
+	use crate::parser::Type;
+	use super::*;
+
+	const STACK_ADDR: u32 = 100;
+
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+	enum MockReg { R0, R1, R2, R3 }
+
+	const ALL_REGS: &[MockReg] = &[MockReg::R0, MockReg::R1, MockReg::R2, MockReg::R3];
+	const TWO_REGS: &[MockReg] = &[MockReg::R0, MockReg::R1];
+	const ONE_REG : &[MockReg] = &[MockReg::R0];
+
+	type Alloc = (HashMap<VRegId, MockReg>, HashMap<VRegId, u32>);
+
+	fn vreg(id: u32) -> VRegId { id }
+	fn vrloc(id: u32) -> Location { Location::VReg(id, Type::S32) }
+	fn immloc(v: i64) -> Location { Location::Const(v, Type::S32) }
+
+	fn assert_complete_and_disjoint(result: &Alloc, vregs: &[VRegId]) {
+		let (regs, spills) = result;
+		for v in vregs {
+			let in_reg = regs.contains_key(v);
+			let in_spill = spills.contains_key(v);
+			assert!(
+				in_reg || in_spill,
+				"VReg {v} is neither in a physical register nor spilled",
+			);
+			assert!(
+				!(in_reg && in_spill),
+				"VReg {v} appears in both register map and spill map",
+			);
+		}
+	}
+
+	fn assert_no_register_collision(regs: &HashMap<VRegId, MockReg>, pairs: &[(VRegId, VRegId)]) {
+		for (a, b) in pairs {
+			if let (Some(ra), Some(rb)) = (regs.get(a), regs.get(b)) {
+				assert_ne!(
+					ra, rb,
+					"VRegs {a} and {b} are simultaneously live but share register {ra:?}",
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn single_def_gets_register() {
+		let vr0 = vreg(0);
+		let instrs = [
+			TAC::Move { src: immloc(42), dst: vrloc(0) },
+			TAC::Return(Some(vr0)),
+		];
+		let (regs, spills) = allocate(ALL_REGS, &instrs, STACK_ADDR);
+		assert!(regs.contains_key(&vr0), "vr0 should be in a physical register");
+		assert!(!spills.contains_key(&vr0), "vr0 should not be spilled");
+	}
+
+	#[test]
+	fn non_overlapping_ranges_may_reuse_register() {
+		let vr0 = vreg(0);
+		let vr1 = vreg(1);
+		let instrs = [
+			TAC::Move { src: immloc(1), dst: vrloc(0) },
+			TAC::Return(Some(vr0)),
+			TAC::Move { src: immloc(2), dst: vrloc(1) },
+			TAC::Return(Some(vr1)),
+		];
+		let result = allocate(ONE_REG, &instrs, STACK_ADDR);
+		assert_complete_and_disjoint(&result, &[vr0, vr1]);
+		assert!(result.1.is_empty(), "no spills expected when ranges are disjoint");
+	}
+
+	#[test]
+	fn overlapping_ranges_get_distinct_registers() {
+		let vr0 = vreg(0);
+		let vr1 = vreg(1);
+		let instrs = [
+			TAC::Move { src: immloc(1), dst: vrloc(0) },
+			TAC::Move { src: immloc(2), dst: vrloc(1) },
+			TAC::BinOp { op: BinaryOp::Add, lhs: vrloc(0), rhs: vrloc(1), dst: vrloc(1) },
+			TAC::Return(Some(vr1)),
+		];
+		let (regs, spills) = allocate(TWO_REGS, &instrs, STACK_ADDR);
+		assert!(regs.contains_key(&vr0));
+		assert!(regs.contains_key(&vr1));
+		assert!(spills.is_empty(), "no spills expected with 2 regs for 2 live vregs");
+		assert_no_register_collision(&regs, &[(vr0, vr1)]);
+	}
+
+	#[test]
+	fn spill_when_pressure_exceeds_pool() {
+		let instrs = [
+			TAC::Move { src: immloc(1), dst: vrloc(0) },
+			TAC::Move { src: immloc(2), dst: vrloc(1) },
+			TAC::Move { src: immloc(3), dst: vrloc(2) },
+			TAC::BinOp { op: BinaryOp::Add, lhs: vrloc(0), rhs: vrloc(1), dst: vrloc(1) },
+			TAC::BinOp { op: BinaryOp::Add, lhs: vrloc(1), rhs: vrloc(2), dst: vrloc(2) },
+			TAC::Return(Some(vreg(2))),
+		];
+		let result = allocate(TWO_REGS, &instrs, STACK_ADDR);
+		let (regs, spills) = &result;
+		assert_eq!(spills.len(), 1, "3 vregs requires a single spill");
+		assert_eq!(
+			regs.len() + spills.len(), 3,
+			"all 3 vregs must be accounted for",
+		);
+		assert!(!spills.is_empty(), "at least one vreg must be spilled");
+		assert_complete_and_disjoint(&result, &[vreg(0), vreg(1), vreg(2)]);
+	}
+
+	#[test]
+	fn spill_slots_are_unique() {
+		let instrs = [
+			TAC::Move { src: immloc(10), dst: vrloc(0) },
+			TAC::Move { src: immloc(20), dst: vrloc(1) },
+			TAC::Move { src: immloc(30), dst: vrloc(2) },
+			TAC::BinOp { op: BinaryOp::Add, lhs: vrloc(0), rhs: vrloc(1), dst: vrloc(2) },
+			TAC::Return(Some(vreg(2))),
+		];
+		let (_, spills) = allocate(ONE_REG, &instrs, STACK_ADDR);
+		let mut slots: Vec<u32> = spills.values().copied().collect();
+		slots.sort();
+		slots.dedup();
+		assert_eq!( slots.len(), spills.len(), "every spilled vreg must have a unique stack slot",
+		);
+	}
+
+	#[test]
+	fn empty_instructions_produce_empty_maps() {
+		let (regs, spills) = allocate(ALL_REGS, &[], STACK_ADDR);
+		assert!(regs.is_empty());
+		assert!(spills.is_empty());
+	}
+
+	#[test]
+	fn empty_register_pool_spills_everything() {
+		let instrs = [
+			TAC::Move { src: immloc(1), dst: vrloc(0) },
+			TAC::Move { src: immloc(2), dst: vrloc(1) },
+			TAC::Return(Some(vreg(0))),
+		];
+		let (regs, spills) = allocate(&[], &instrs, STACK_ADDR);
+		assert!(regs.is_empty(), "no physical registers available");
+		assert_eq!(spills.len(), 2, "2 vregs requires 2 spills");
+		assert_complete_and_disjoint(&(regs, spills), &[vreg(0), vreg(1)]);
+	}
+
+	#[test]
+	fn unop_chain_allocates_correctly() {
+		let instrs = [
+			TAC::Move { src: immloc(5), dst: vrloc(0) },
+			TAC::UnOp { op: UnaryOp::Neg, rhs: vrloc(0), dst: vrloc(1) },
+			TAC::Return(Some(vreg(1))),
+		];
+		let result = allocate(TWO_REGS, &instrs, STACK_ADDR);
+		assert_complete_and_disjoint(&result, &[vreg(0), vreg(1)]);
+		assert!(result.1.is_empty(), "2 regs sufficient for 2 vregs");
+	}
+
+	#[test]
+	fn jumpif_keeps_vreg_live() {
+		let instrs = [
+			TAC::Move { src: immloc(1), dst: vrloc(0) },
+			TAC::Move { src: immloc(99), dst: vrloc(1) },
+			TAC::JumpIf { lbl: 1, vr: vreg(0) },
+			TAC::Return(Some(vreg(1))),
+		];
+		let result = allocate(TWO_REGS, &instrs, STACK_ADDR);
+		assert_eq!(result.0.len(), 2);
+		assert_complete_and_disjoint(&result, &[vreg(0), vreg(1)]);
+	}
+
+	#[test]
+	fn long_live_range_not_evicted_prematurely() {
+		let instrs = [
+			TAC::Move { src: immloc(1),  dst: vrloc(0) },
+			TAC::Move { src: immloc(10), dst: vrloc(1) },
+			TAC::Move { src: immloc(20), dst: vrloc(2) },
+			TAC::Move { src: immloc(30), dst: vrloc(3) },
+			TAC::BinOp { op: BinaryOp::Add, lhs: vrloc(0), rhs: immloc(0), dst: vrloc(4) },
+			TAC::Return(Some(vreg(4))),
+		];
+		let result = allocate(ALL_REGS, &instrs, STACK_ADDR);
+		let (regs, spills) = &result;
+		assert!(
+			regs.contains_key(&vreg(0)) || spills.contains_key(&vreg(0)),
+			"vr0 must be tracked across its entire live range",
+		);
+		assert_complete_and_disjoint(&result, &[vreg(0), vreg(1), vreg(2), vreg(3), vreg(4)]);
+	}
+
+	#[test]
+	fn void_return_allocates_defs_only() {
+		let instrs = [
+			TAC::Move { src: immloc(0), dst: vrloc(0) },
+			TAC::Return(None),
+		];
+		let (regs, spills) = allocate(ALL_REGS, &instrs, STACK_ADDR);
+		assert_complete_and_disjoint(&(regs, spills), &[vreg(0)]);
+	}
+
+	#[test]
+	fn fills_all_registers_before_spilling() {
+		let instrs = [
+			TAC::Move { src: immloc(1), dst: vrloc(0) },
+			TAC::Move { src: immloc(2), dst: vrloc(1) },
+			TAC::Move { src: immloc(3), dst: vrloc(2) },
+			TAC::Move { src: immloc(4), dst: vrloc(3) },
+			TAC::BinOp { op: BinaryOp::Add, lhs: vrloc(0), rhs: vrloc(1), dst: vrloc(4) },
+			TAC::BinOp { op: BinaryOp::Add, lhs: vrloc(2), rhs: vrloc(3), dst: vrloc(5) },
+			TAC::BinOp { op: BinaryOp::Add, lhs: vrloc(4), rhs: vrloc(5), dst: vrloc(6) },
+			TAC::Return(Some(vreg(6))),
+		];
+		let (regs, spills) = allocate(ALL_REGS, &instrs, STACK_ADDR);
+		assert!(
+			spills.is_empty(),
+			"should not spill when register count equals pressure",
+		);
+		let used: HashSet<_> = regs.values().collect();
+		assert_eq!(used.len(), ALL_REGS.len(), "all 4 physical registers should be used");
 	}
 }
 

@@ -95,7 +95,8 @@ pub fn lower(
 	let registers = super::allocate(
 		&[ 1, 2, 3, 4, 5, 6, 7, 8, 9 ],
 		&instructions,
-	);
+		stack_addr,
+	).0;
 
 	let mut lbl_gen = LabelGenerator(curr_label);
 
