@@ -1,16 +1,16 @@
 
 # Feature Overview
-- Values: Typeless constants.
+- Values: Typeless constants. Similar to C define macros.
   - `value A = 0x4000;`
   - `value B = A + 24;`
-- Regions: Named memory regions for static and dynamic memory management.
+- Regions: Named memory regions for controlled memory management.
   - `region Base[0x0000..0x2000];`
   - `region VDP_Colors[1024] @ VDP_RAM + 0x80000;`
 - Records: Structured data.
-  - `record CtrlRegs @ VDP_Base + 64 { a: u32, b: s8, c: u16 }`
+  - `record CtrlRegs in VDP_Base + 64 { a: u32, b: s8, c: u16 }`
   - `record Vec2 { x: s32, y: s32 }`
 - Tables: Struct-of-Arrays style data.
-  - `table Events[128] @ GameData { id: u8, type: u8, data: EventData }`
+  - `table Events[128] in GameData { id: u8, type: u8, data: EventData }`
 - Procedures: "Functions, subroutines, etc."
 
 ## Basic Types
